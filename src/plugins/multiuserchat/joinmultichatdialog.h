@@ -6,7 +6,7 @@
 #include <interfaces/imultiuserchat.h>
 #include <interfaces/ixmppstreams.h>
 #include <utils/options.h>
-#include "ui_joinmultichatdialog.h"
+#include <ui_joinmultichatdialog.h>
 
 struct RoomParams
 {

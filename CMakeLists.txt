@@ -1,8 +1,86 @@
-cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 3.16)
 
-project(vacuum-im)
+option(VACUUM_OS2_CROSS_COMPILE
+	"Cross-compile Vacuum and its plugins for OS/2 using the Qt6 OS/2 toolchain"
+	OFF)
+set(VACUUM_OS2_TOOLCHAIN_FILE ""
+	CACHE FILEPATH "CMake toolchain file used by VACUUM_OS2_CROSS_COMPILE")
+if (VACUUM_OS2_CROSS_COMPILE AND NOT CMAKE_TOOLCHAIN_FILE)
+	if ("${VACUUM_OS2_TOOLCHAIN_FILE}" STREQUAL "")
+		set(_vacuum_default_os2_toolchain
+			"${CMAKE_SOURCE_DIR}/../qt6-base-os2/qt6-base-os2/cmake/qt6-os2.cmake")
+		if (EXISTS "${_vacuum_default_os2_toolchain}")
+			set(VACUUM_OS2_TOOLCHAIN_FILE "${_vacuum_default_os2_toolchain}"
+				CACHE FILEPATH "CMake toolchain file used by VACUUM_OS2_CROSS_COMPILE" FORCE)
+		endif()
+	endif()
+	if ("${VACUUM_OS2_TOOLCHAIN_FILE}" STREQUAL "")
+		message(FATAL_ERROR
+			"VACUUM_OS2_CROSS_COMPILE requires CMAKE_TOOLCHAIN_FILE or "
+			"VACUUM_OS2_TOOLCHAIN_FILE")
+	endif()
+	set(CMAKE_TOOLCHAIN_FILE "${VACUUM_OS2_TOOLCHAIN_FILE}"
+		CACHE FILEPATH "CMake toolchain file" FORCE)
+endif()
 
-find_package(Qt4 REQUIRED)
+project(vacuum-im VERSION 1.0 LANGUAGES CXX)
+
+if (OS2)
+	list(PREPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+	list(APPEND CMAKE_MODULE_PATH "${CMAKE_PREFIX_PATH}/lib/cmake/Qt6")
+	# The OS/2 Qt build currently does not install every static plugin target
+	# referenced by its generated Qt6*Plugins.cmake files.  Do not make the
+	# application configuration depend on those incomplete auto-import lists.
+	set(QT_SKIP_AUTO_PLUGIN_INCLUSION ON)
+	set(QT_SKIP_AUTO_QML_PLUGIN_INCLUSION ON)
+	# The OS/2 CMake port aborts inside its built-in include_directories()
+	# command. Preserve the project-wide include roots through compiler flags;
+	# source-file-local quoted includes remain handled by the compiler.
+	function(include_directories)
+	endfunction()
+	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -idirafter D:/usr/include -I${CMAKE_SOURCE_DIR}/src -I${CMAKE_SOURCE_DIR}/src/thirdparty/zlib -I${CMAKE_SOURCE_DIR}/src/thirdparty/idn")
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -idirafter D:/usr/include -I${CMAKE_SOURCE_DIR}/src -I${CMAKE_SOURCE_DIR}/src/thirdparty/zlib -I${CMAKE_SOURCE_DIR}/src/thirdparty/idn")
+	list(APPEND CMAKE_AUTOMOC_MOC_OPTIONS "-I${CMAKE_SOURCE_DIR}/src")
+	set(CMAKE_CXX_CREATE_SHARED_LIBRARY
+		"<CMAKE_CXX_COMPILER> <LANGUAGE_COMPILE_FLAGS> <CMAKE_SHARED_LIBRARY_CXX_FLAGS> <LINK_FLAGS> <CMAKE_SHARED_LIBRARY_CREATE_CXX_FLAGS> -o <TARGET> <OBJECTS> <LINK_LIBRARIES> <TARGET_BASE>.def && emximp -o <TARGET_IMPLIB> <TARGET>")
+endif (OS2)
+
+find_package(Threads REQUIRED)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network Xml Sql)
+
+if (OS2)
+	get_filename_component(_vacuum_qt_cmake_dir "${Qt6Core_DIR}" DIRECTORY)
+	get_filename_component(_vacuum_qt_lib_dir "${_vacuum_qt_cmake_dir}" DIRECTORY)
+	get_filename_component(_vacuum_qt_prefix "${_vacuum_qt_lib_dir}" DIRECTORY)
+	foreach(_vacuum_qt_component Core Gui Widgets Network Xml Sql)
+		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -I${_vacuum_qt_prefix}/include/Qt${_vacuum_qt_component}")
+		list(APPEND CMAKE_AUTOMOC_MOC_OPTIONS
+			"-I${_vacuum_qt_prefix}/include/Qt${_vacuum_qt_component}")
+	endforeach()
+endif()
+
+set(VACUUM_OS2_QT_STATIC_LIB_DIR ""
+	CACHE PATH "Directory containing the static OS/2 Qt6 archives")
+if (OS2 AND NOT "${VACUUM_OS2_QT_STATIC_LIB_DIR}" STREQUAL "")
+	foreach(_vacuum_qt_component Core Gui Widgets Network Xml Sql)
+		set(_vacuum_qt_archive
+			"${VACUUM_OS2_QT_STATIC_LIB_DIR}/Qt6${_vacuum_qt_component}.a")
+		if (NOT EXISTS "${_vacuum_qt_archive}")
+			message(FATAL_ERROR "Missing OS/2 static Qt archive: ${_vacuum_qt_archive}")
+		endif()
+		# The existing Qt OS/2 package describes these static archives as
+		# imported shared-library implementations. Override only the imported
+		# archive path so every Vacuum target uses the working .a files.
+		set_target_properties(Qt6::${_vacuum_qt_component} PROPERTIES
+			IMPORTED_IMPLIB "${_vacuum_qt_archive}"
+			IMPORTED_IMPLIB_DEBUG "${_vacuum_qt_archive}"
+			IMPORTED_IMPLIB_RELEASE "${_vacuum_qt_archive}")
+	endforeach()
+endif()
+
+set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTOUIC ON)
+set(CMAKE_AUTORCC ON)
 
 add_custom_target(updatets)
 
@@ -69,17 +147,11 @@ if (WIN32)
 	cpack_add_component_group(libs
 		DISPLAY_NAME "Shared libraries"
 		DESCRIPTION "Required libraries that already may be present in your system")
-	set(QT_LIBS "${QT_LIBRARY_DIR}/../bin/QtCore4.dll"
-		"${QT_LIBRARY_DIR}/../bin/QtGui4.dll"
-		"${QT_LIBRARY_DIR}/../bin/QtNetwork4.dll"
-		"${QT_LIBRARY_DIR}/../bin/QtXml4.dll"
-		"${QT_LIBRARY_DIR}/../bin/QtWebkit4.dll")
-	if (NOT WEBKIT_WITHOUT_PHONON)
-		set(QT_LIBS ${QT_LIBS} "${QT_LIBRARY_DIR}/../bin/phonon4.dll")
-	endif (NOT WEBKIT_WITHOUT_PHONON)
-	if (NOT WEBKIT_WITHOUT_XMLPATTERNS)
-		set(QT_LIBS ${QT_LIBS} "${QT_LIBRARY_DIR}/../bin/QtXmlPatterns4.dll")
-	endif (NOT WEBKIT_WITHOUT_XMLPATTERNS)
+	set(QT_LIBS "${QT_LIBRARY_DIR}/../bin/Qt6Core.dll"
+		"${QT_LIBRARY_DIR}/../bin/Qt6Gui.dll"
+		"${QT_LIBRARY_DIR}/../bin/Qt6Network.dll"
+		"${QT_LIBRARY_DIR}/../bin/Qt6Xml.dll"
+		"${QT_LIBRARY_DIR}/../bin/Qt6Widgets.dll")
 	install(FILES ${QT_LIBS}
 		DESTINATION "."
 		COMPONENT qt_libs)
@@ -90,8 +162,8 @@ if (WIN32)
 		PATTERN "*.dll"
 		PATTERN "*d4.dll" EXCLUDE)
 	cpack_add_component(qt_libs
-		DISPLAY_NAME "Qt4 libraries"
-		DESCRIPTION "May be unchecked if you already have working Qt4 installation"
+		DISPLAY_NAME "Qt6 libraries"
+		DESCRIPTION "May be unchecked if you already have working Qt6 installation"
 		GROUP libs)
 	# Qt localization
 	foreach(LANG ${LOCALIZED_LANGS})
@@ -100,7 +172,7 @@ if (WIN32)
 			DESTINATION "${INSTALL_TRANSLATIONS}/${LANG}"
 			COMPONENT qt_${LANG})
 		cpack_add_component(qt_${LANG}
-			DISPLAY_NAME "Qt4 translation"
+			DISPLAY_NAME "Qt6 translation"
 			GROUP ${LANG}_translation
 			DEPENDS qt_libs)
 	endforeach(LANG)

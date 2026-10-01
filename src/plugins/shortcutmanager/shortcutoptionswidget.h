@@ -8,7 +8,7 @@
 #include <interfaces/ioptionsmanager.h>
 #include <utils/shortcuts.h>
 #include "shortcutoptionsdelegate.h"
-#include "ui_shortcutoptionswidget.h"
+#include <ui_shortcutoptionswidget.h>
 
 class SortFilterProxyModel : 
 	public QSortFilterProxyModel

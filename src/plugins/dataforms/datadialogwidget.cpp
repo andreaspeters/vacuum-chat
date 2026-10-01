@@ -2,13 +2,13 @@
 
 #include <QVBoxLayout>
 #include <QApplication>
-#include <QDesktopWidget>
+#include <QScreen>
 
 DataDialogWidget::DataDialogWidget(IDataForms *ADataForms, const IDataForm &AForm, QWidget *AParent) : QDialog(AParent)
 {
 	setAttribute(Qt::WA_DeleteOnClose,true);
 	setLayout(new QVBoxLayout(this));
-	layout()->setMargin(5);
+	layout()->setContentsMargins(5,5,5,5);
 
 	FFormWidget = NULL;
 	FAllowInvalid = false;
@@ -20,7 +20,7 @@ DataDialogWidget::DataDialogWidget(IDataForms *ADataForms, const IDataForm &AFor
 
 	FFormHolder = new QWidget(this);
 	FFormHolder->setLayout(new QVBoxLayout(FFormHolder));
-	FFormHolder->layout()->setMargin(0);
+	FFormHolder->layout()->setContentsMargins(0,0,0,0);
 	layout()->addWidget(FFormHolder);
 
 	QFrame *hline = new QFrame(this);
@@ -81,7 +81,7 @@ void DataDialogWidget::setAllowInvalid( bool AAllowInvalid )
 
 QSize DataDialogWidget::sizeHint() const
 {
-   QSize desktopSize = QApplication::desktop()->availableGeometry(this).size();
+   QSize desktopSize = QApplication::primaryScreen()->availableGeometry().size();
    return QDialog::sizeHint().boundedTo(desktopSize/2);
 }
 

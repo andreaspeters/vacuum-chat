@@ -3,7 +3,7 @@
 
 #include <QDialog>
 #include <QCheckBox>
-#include "ui_edititemdialog.h"
+#include <ui_edititemdialog.h>
 
 class EditItemDialog :
 			public QDialog

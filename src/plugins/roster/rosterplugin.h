@@ -16,6 +16,7 @@ class RosterPlugin :
 			public IRosterPlugin
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.roster")
 	Q_INTERFACES(IPlugin IRosterPlugin);
 public:
 	RosterPlugin();

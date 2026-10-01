@@ -2,6 +2,7 @@
 
 #include <QKeyEvent>
 #include <QCoreApplication>
+#include <QDockWidget>
 
 #define ADR_SELECTED_TEXT    Action::DR_Parametr1
 
@@ -17,32 +18,42 @@ ChatWindow::ChatWindow(IMessageWidgets *AMessageWidgets, const Jid& AStreamJid, 
 	FShownDetached = false;
 
 	FTabPageNotifier = NULL;
+	FSidebarDock = new QDockWidget(tr("Room details"), this);
+	FSidebarDock->setAllowedAreas(Qt::RightDockWidgetArea);
+	FSidebarDock->setFeatures(QDockWidget::NoDockWidgetFeatures);
+	FSidebarDock->setObjectName(QStringLiteral("roomDetailsSidebar"));
+	FSidebarDock->installEventFilter(this);
+	FRestoringSidebarWidth = false;
+	addDockWidget(Qt::RightDockWidgetArea, FSidebarDock);
 
 	ui.wdtInfo->setLayout(new QVBoxLayout);
-	ui.wdtInfo->layout()->setMargin(0);
+	ui.wdtInfo->layout()->setContentsMargins(0,0,0,0);
 	FInfoWidget = FMessageWidgets->newInfoWidget(AStreamJid,AContactJid,ui.wdtInfo);
 	ui.wdtInfo->layout()->addWidget(FInfoWidget->instance());
 	onOptionsChanged(Options::node(OPV_MESSAGES_SHOWINFOWIDGET));
 
 	ui.wdtView->setLayout(new QVBoxLayout);
-	ui.wdtView->layout()->setMargin(0);
+	ui.wdtView->layout()->setContentsMargins(0,0,0,0);
 	FViewWidget = FMessageWidgets->newViewWidget(AStreamJid,AContactJid,ui.wdtView);
 	connect(FViewWidget->instance(),SIGNAL(viewContextMenu(const QPoint &, const QTextDocumentFragment &, Menu *)),
 		SLOT(onViewWidgetContextMenu(const QPoint &, const QTextDocumentFragment &, Menu *)));
 	ui.wdtView->layout()->addWidget(FViewWidget->instance());
 
 	ui.wdtEdit->setLayout(new QVBoxLayout);
-	ui.wdtEdit->layout()->setMargin(0);
+	ui.wdtEdit->layout()->setContentsMargins(0,0,0,0);
 	FEditWidget = FMessageWidgets->newEditWidget(AStreamJid,AContactJid,ui.wdtEdit);
 	FEditWidget->setSendShortcut(SCT_MESSAGEWINDOWS_CHAT_SENDMESSAGE);
 	ui.wdtEdit->layout()->addWidget(FEditWidget->instance());
 	connect(FEditWidget->instance(),SIGNAL(messageReady()),SLOT(onMessageReady()));
 
 	ui.wdtToolBar->setLayout(new QVBoxLayout);
-	ui.wdtToolBar->layout()->setMargin(0);
+	ui.wdtToolBar->layout()->setContentsMargins(0,0,0,0);
 	FToolBarWidget = FMessageWidgets->newToolBarWidget(FInfoWidget,FViewWidget,FEditWidget,NULL,ui.wdtToolBar);
 	FToolBarWidget->toolBarChanger()->setSeparatorsVisible(false);
 	ui.wdtToolBar->layout()->addWidget(FToolBarWidget->instance());
+	QWidget *sidebarSpacer = new QWidget(this);
+	sidebarSpacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+	FToolBarWidget->instance()->addWidget(sidebarSpacer);
 
 	FMenuBarWidget = FMessageWidgets->newMenuBarWidget(FInfoWidget,FViewWidget,FEditWidget,NULL,this);
 	setMenuBar(FMenuBarWidget->instance());
@@ -50,6 +61,53 @@ ChatWindow::ChatWindow(IMessageWidgets *AMessageWidgets, const Jid& AStreamJid, 
 	FStatusBarWidget = FMessageWidgets->newStatusBarWidget(FInfoWidget,FViewWidget,FEditWidget,NULL,this);
 	setStatusBar(FStatusBarWidget->instance());
 
+	initialize();
+}
+
+ChatWindow::ChatWindow(IMessageWidgets *AMessageWidgets, const AccountId &AAccountId, const ConversationId &AConversationId)
+{
+	ui.setupUi(this);
+	setAttribute(Qt::WA_DeleteOnClose, false);
+	FMessageWidgets = AMessageWidgets;
+	FAccountId = AAccountId;
+	FConversationId = AConversationId;
+	FShownDetached = false;
+	FTabPageNotifier = NULL;
+	FSidebarDock = new QDockWidget(tr("Room details"), this);
+	FSidebarDock->setAllowedAreas(Qt::RightDockWidgetArea);
+	FSidebarDock->setFeatures(QDockWidget::NoDockWidgetFeatures);
+	FSidebarDock->setObjectName(QStringLiteral("roomDetailsSidebar"));
+	FSidebarDock->installEventFilter(this);
+	FRestoringSidebarWidth = false;
+	addDockWidget(Qt::RightDockWidgetArea, FSidebarDock);
+	ui.wdtInfo->setLayout(new QVBoxLayout);
+	ui.wdtInfo->layout()->setContentsMargins(0,0,0,0);
+	FInfoWidget = FMessageWidgets->newInfoWidget(AAccountId,AConversationId,ui.wdtInfo);
+	ui.wdtInfo->layout()->addWidget(FInfoWidget->instance());
+	onOptionsChanged(Options::node(OPV_MESSAGES_SHOWINFOWIDGET));
+	ui.wdtView->setLayout(new QVBoxLayout);
+	ui.wdtView->layout()->setContentsMargins(0,0,0,0);
+	FViewWidget = FMessageWidgets->newViewWidget(AAccountId,AConversationId,ui.wdtView);
+	connect(FViewWidget->instance(),SIGNAL(viewContextMenu(const QPoint &, const QTextDocumentFragment &, Menu *)),SLOT(onViewWidgetContextMenu(const QPoint &, const QTextDocumentFragment &, Menu *)));
+	ui.wdtView->layout()->addWidget(FViewWidget->instance());
+	ui.wdtEdit->setLayout(new QVBoxLayout);
+	ui.wdtEdit->layout()->setContentsMargins(0,0,0,0);
+	FEditWidget = FMessageWidgets->newEditWidget(AAccountId,AConversationId,ui.wdtEdit);
+	FEditWidget->setSendShortcut(SCT_MESSAGEWINDOWS_CHAT_SENDMESSAGE);
+	ui.wdtEdit->layout()->addWidget(FEditWidget->instance());
+	connect(FEditWidget->instance(),SIGNAL(messageReady()),SLOT(onMessageReady()));
+	ui.wdtToolBar->setLayout(new QVBoxLayout);
+	ui.wdtToolBar->layout()->setContentsMargins(0,0,0,0);
+	FToolBarWidget = FMessageWidgets->newToolBarWidget(FInfoWidget,FViewWidget,FEditWidget,NULL,ui.wdtToolBar);
+	FToolBarWidget->toolBarChanger()->setSeparatorsVisible(false);
+	ui.wdtToolBar->layout()->addWidget(FToolBarWidget->instance());
+	QWidget *sidebarSpacer = new QWidget(this);
+	sidebarSpacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+	FToolBarWidget->instance()->addWidget(sidebarSpacer);
+	FMenuBarWidget = FMessageWidgets->newMenuBarWidget(FInfoWidget,FViewWidget,FEditWidget,NULL,this);
+	setMenuBar(FMenuBarWidget->instance());
+	FStatusBarWidget = FMessageWidgets->newStatusBarWidget(FInfoWidget,FViewWidget,FEditWidget,NULL,this);
+	setStatusBar(FStatusBarWidget->instance());
 	initialize();
 }
 
@@ -64,9 +122,29 @@ ChatWindow::~ChatWindow()
 	delete FStatusBarWidget->instance();
 }
 
+void ChatWindow::setSidebarWidget(QWidget *AWidget)
+{
+	if (!FSidebarDock)
+		return;
+	FRestoringSidebarWidth = true;
+	if (QWidget *old = FSidebarDock->widget())
+		old->deleteLater();
+	FSidebarDock->setWidget(AWidget);
+	FSidebarDock->setVisible(AWidget != nullptr);
+	if (AWidget) {
+		FSidebarDock->show();
+		const int savedWidth = Options::fileValue("messages.chatwindow.sidebar-width").toInt();
+		if (savedWidth > 0)
+			resizeDocks(QList<QDockWidget *>() << FSidebarDock, QList<int>() << savedWidth, Qt::Horizontal);
+	}
+	FRestoringSidebarWidth = false;
+}
+
 QString ChatWindow::tabPageId() const
 {
-	return "ChatWindow|"+FStreamJid.pBare()+"|"+FContactJid.pBare();
+	return !FAccountId.isEmpty() && !FConversationId.isEmpty()
+		? "ChatWindow|"+FAccountId+"|"+FConversationId
+		: "ChatWindow|"+FStreamJid.pBare()+"|"+FContactJid.pBare();
 }
 
 bool ChatWindow::isVisibleTabPage() const
@@ -203,6 +281,15 @@ void ChatWindow::loadWindowGeometry()
 			setGeometry(WidgetManager::alignGeometry(QSize(640,480),this));
 		restoreState(Options::fileValue("messages.chatwindow.state",tabPageId()).toByteArray());
 	}
+}
+
+bool ChatWindow::eventFilter(QObject *AObject, QEvent *AEvent)
+{
+	if (AObject == FSidebarDock && AEvent->type() == QEvent::Resize &&
+		!FRestoringSidebarWidth && FSidebarDock->isVisible() && FSidebarDock->widget() &&
+		FSidebarDock->width() > 0 && !Options::isNull())
+		Options::setFileValue(FSidebarDock->width(), "messages.chatwindow.sidebar-width");
+	return QMainWindow::eventFilter(AObject, AEvent);
 }
 
 bool ChatWindow::event(QEvent *AEvent)

@@ -45,6 +45,7 @@ class VCardPlugin :
 	public IXmppUriHandler
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.vcard")
 	Q_INTERFACES(IPlugin IVCardPlugin IStanzaRequestOwner IXmppUriHandler);
 	friend class VCard;
 public:

@@ -6,7 +6,7 @@
 #include <definitions/menuicons.h>
 #include <interfaces/iclientinfo.h>
 #include <utils/iconstorage.h>
-#include "ui_clientinfodialog.h"
+#include <ui_clientinfodialog.h>
 
 class ClientInfoDialog :
 			public QDialog

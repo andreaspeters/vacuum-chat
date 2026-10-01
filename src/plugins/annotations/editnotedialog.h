@@ -6,7 +6,7 @@
 #include <definitions/resources.h>
 #include <interfaces/iannotations.h>
 #include <utils/iconstorage.h>
-#include "ui_editnotedialog.h"
+#include <ui_editnotedialog.h>
 
 class EditNoteDialog :
 			public QDialog

@@ -103,7 +103,7 @@ QString FileStorage::fileFullName(const QString &AKey, int AIndex) const
 		int prefix = FObjects.value(FKey2Object.value(AKey,-1)).prefix;
 		return FPrefixes.at(prefix) + name;
 	}
-	return QString::null;
+	return QString();
 }
 
 QString FileStorage::fileMime(const QString &AKey, int AIndex) const
@@ -121,7 +121,7 @@ QString FileStorage::fileCacheKey(const QString &AKey, int AIndex) const
 	QString name = fileName(AKey,AIndex);
 	if (!name.isEmpty())
 		return FSubStorage + "/" + name;
-	return QString::null;
+	return QString();
 }
 
 QList<QString> FileStorage::availStorages()

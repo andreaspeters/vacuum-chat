@@ -25,12 +25,12 @@ MessageWindow::MessageWindow(IMessageWidgets *AMessageWidgets, const Jid& AStrea
 	FReceiversWidget->addReceiver(FContactJid);
 
 	ui.wdtInfo->setLayout(new QVBoxLayout(ui.wdtInfo));
-	ui.wdtInfo->layout()->setMargin(0);
+	ui.wdtInfo->layout()->setContentsMargins(0,0,0,0);
 	FInfoWidget = FMessageWidgets->newInfoWidget(AStreamJid,AContactJid,ui.wdtInfo);
 	ui.wdtInfo->layout()->addWidget(FInfoWidget->instance());
 
 	ui.wdtMessage->setLayout(new QVBoxLayout(ui.wdtMessage));
-	ui.wdtMessage->layout()->setMargin(0);
+	ui.wdtMessage->layout()->setContentsMargins(0,0,0,0);
 	FViewWidget = FMessageWidgets->newViewWidget(AStreamJid,AContactJid,ui.wdtMessage);
 	FEditWidget = FMessageWidgets->newEditWidget(AStreamJid,AContactJid,ui.wdtMessage);
 	FEditWidget->setSendShortcut(SCT_MESSAGEWINDOWS_NORMAL_SENDMESSAGE);
@@ -38,7 +38,7 @@ MessageWindow::MessageWindow(IMessageWidgets *AMessageWidgets, const Jid& AStrea
 	connect(FEditWidget->instance(),SIGNAL(messageReady()),SLOT(onMessageReady()));
 
 	ui.wdtToolBar->setLayout(new QVBoxLayout(ui.wdtToolBar));
-	ui.wdtToolBar->layout()->setMargin(0);
+	ui.wdtToolBar->layout()->setContentsMargins(0,0,0,0);
 	FViewToolBarWidget = FMessageWidgets->newToolBarWidget(FInfoWidget,FViewWidget,NULL,NULL,ui.wdtToolBar);
 	FViewToolBarWidget->toolBarChanger()->setSeparatorsVisible(false);
 	FEditToolBarWidget = FMessageWidgets->newToolBarWidget(FInfoWidget,NULL,FEditWidget,NULL,ui.wdtToolBar);

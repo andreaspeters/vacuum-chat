@@ -181,7 +181,7 @@ void Menu::clear()
 
 void Menu::setIcon(const QIcon &AIcon)
 {
-	setIcon(QString::null,QString::null,0);
+	setIcon(QString(),QString(),0);
 	FMenuAction->setIcon(AIcon);
 	QMenu::setIcon(AIcon);
 }

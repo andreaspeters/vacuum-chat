@@ -20,7 +20,7 @@ Shortcuts::ShortcutsData *Shortcuts::d = new Shortcuts::ShortcutsData;
 
 QKeySequence correctKeySequence(const QKeySequence &AKey)
 {
-#ifdef Q_WS_WIN
+#ifdef Q_OS_WIN
 	if ((AKey[0] & ~Qt::KeyboardModifierMask) == Qt::Key_Backtab)
 	{
 		return QKeySequence(Qt::Key_Tab | (AKey[0] & Qt::KeyboardModifierMask));

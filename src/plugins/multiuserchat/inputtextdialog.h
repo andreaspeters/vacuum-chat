@@ -2,7 +2,7 @@
 #define INPUTTEXTDIALOG_H
 
 #include <QDialog>
-#include "ui_inputtextdialog.h"
+#include <ui_inputtextdialog.h>
 
 class InputTextDialog :
 			public QDialog

@@ -5,7 +5,7 @@
 #include <interfaces/imessagestyles.h>
 #include <interfaces/ioptionsmanager.h>
 #include "simplemessagestyleplugin.h"
-#include "ui_simpleoptionswidget.h"
+#include <ui_simpleoptionswidget.h>
 
 class SimpleMessageStylePlugin;
 

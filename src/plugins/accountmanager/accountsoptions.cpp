@@ -5,16 +5,16 @@
 #include <QTextDocument>
 
 #define COL_NAME                0
-#define COL_JID                 1
+#define COL_ACCOUNT             1
 
 AccountsOptions::AccountsOptions(AccountManager *AManager, QWidget *AParent) : QWidget(AParent)
 {
 	ui.setupUi(this);
 	FManager = AManager;
 
-	ui.trwAccounts->setHeaderLabels(QStringList() << tr("Name") << tr("Jabber ID"));
-	ui.trwAccounts->header()->setResizeMode(COL_NAME, QHeaderView::ResizeToContents);
-	ui.trwAccounts->header()->setResizeMode(COL_JID, QHeaderView::Stretch);
+	ui.trwAccounts->setHeaderLabels(QStringList() << tr("Name") << tr("Account/Address"));
+	ui.trwAccounts->header()->setSectionResizeMode(COL_NAME, QHeaderView::ResizeToContents);
+	ui.trwAccounts->header()->setSectionResizeMode(COL_ACCOUNT, QHeaderView::Stretch);
 	ui.trwAccounts->sortByColumn(COL_NAME,Qt::AscendingOrder);
 	connect(ui.trwAccounts,SIGNAL(itemChanged(QTreeWidgetItem *, int)),SIGNAL(modified()));
 
@@ -29,7 +29,7 @@ AccountsOptions::AccountsOptions(AccountManager *AManager, QWidget *AParent) : Q
 
 AccountsOptions::~AccountsOptions()
 {
-	foreach(QString accountId, FAccountItems.keys())
+	foreach(QUuid accountId, FAccountItems.keys())
 		if (FManager->accountById(accountId) == NULL)
 			removeAccount(accountId);
 }
@@ -67,7 +67,8 @@ void AccountsOptions::reset()
 	{
 		QTreeWidgetItem *item = appendAccount(account->accountId(),account->name());
 		item->setCheckState(COL_NAME,account->isActive() ? Qt::Checked : Qt::Unchecked);
-		item->setText(COL_JID,account->streamJid().uFull());
+		QString addressText = accountIdentifier(account);
+		item->setText(COL_ACCOUNT, addressText);
 		curAccounts.append(account->accountId());
 	}
 
@@ -86,6 +87,14 @@ QTreeWidgetItem *AccountsOptions::appendAccount(const QUuid &AAccountId, const Q
 		item = new QTreeWidgetItem(ui.trwAccounts);
 		item->setText(COL_NAME,AName);
 		item->setCheckState(COL_NAME,Qt::Checked);
+
+		IAccount *account = FManager->accountById(AAccountId);
+		if (account)
+		{
+			QString addressText = accountIdentifier(account);
+			item->setText(COL_ACCOUNT,addressText);
+		}
+
 		FAccountItems.insert(AAccountId,item);
 		FManager->openAccountOptionsNode(AAccountId,AName);
 	}
@@ -96,6 +105,25 @@ void AccountsOptions::removeAccount(const QUuid &AAccountId)
 {
 	FManager->closeAccountOptionsNode(AAccountId);
 	delete FAccountItems.take(AAccountId);
+}
+
+QString AccountsOptions::accountIdentifier(IAccount *AAccount) const
+{
+	if (!AAccount)
+		return QString();
+
+	// XMPP accounts use streamJid.uFull()
+	if (AAccount->protocolKind() != IProtocolAccount::ProtocolMatrix)
+		return AAccount->streamJid().uFull();
+
+	// Matrix accounts use username@instance
+	const QString matrixInstance = AAccount->optionsNode().value("matrix.instance").toString();
+	const QString matrixUsername = AAccount->optionsNode().value("matrix.username").toString();
+
+	if (!matrixUsername.isEmpty() && !matrixInstance.isEmpty())
+		return matrixUsername + "@" + matrixInstance;
+
+	return matrixUsername.isEmpty() ? matrixInstance : matrixUsername;
 }
 
 void AccountsOptions::onAddButtonClicked(bool)
@@ -113,7 +141,7 @@ void AccountsOptions::onRemoveButtonClicked(bool)
 	{
 		QMessageBox::StandardButton res = QMessageBox::warning(this,
 		                                  tr("Confirm removal of an account"),
-		                                  tr("You are assured that wish to remove an account <b>%1</b>?<br>All settings will be lost.").arg(Qt::escape(item->text(0))),
+		                                  tr("You are assured that wish to remove an account <b>%1</b>?<br>All settings will be lost.").arg(item->text(0).toHtmlEscaped()),
 		                                  QMessageBox::Ok | QMessageBox::Cancel);
 
 		if (res == QMessageBox::Ok)
@@ -138,20 +166,18 @@ void AccountsOptions::onAccountOptionsChanged(IAccount *AAcount, const OptionsNo
 	QTreeWidgetItem *item = FAccountItems.value(AAcount->accountId());
 	if (item)
 	{
-		if (AAcount->optionsNode().childPath(ANode) == "name")
-		{
+		const QString path = AAcount->optionsNode().childPath(ANode);
+		if (path == "name")
 			item->setText(COL_NAME,AAcount->name());
-		}
-		else if (AAcount->optionsNode().childPath(ANode) == "streamJid")
-		{
-			item->setText(COL_JID,AAcount->streamJid().uFull());
+		if (path == "name" || path == "type" || path == "streamJid"
+				|| path == "matrix.instance" || path == "matrix.username")
+			item->setText(COL_ACCOUNT,accountIdentifier(AAcount));
 
-			if (FPendingAccounts.contains(AAcount->accountId()))
-			{
-				AAcount->setActive(item->checkState(COL_NAME) == Qt::Checked);
-				item->setCheckState(COL_NAME, AAcount->isActive() ? Qt::Checked : Qt::Unchecked);
-				FPendingAccounts.removeAll(AAcount->accountId());
-			}
+		if (FPendingAccounts.contains(AAcount->accountId()) && AAcount->isValid())
+		{
+			AAcount->setActive(item->checkState(COL_NAME) == Qt::Checked);
+			item->setCheckState(COL_NAME,AAcount->isActive() ? Qt::Checked : Qt::Unchecked);
+			FPendingAccounts.removeAll(AAcount->accountId());
 		}
 	}
 }

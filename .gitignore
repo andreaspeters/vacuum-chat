@@ -1,0 +1,6 @@
+build**
+*.exe
+todos.md
+tests**
+tests/__pycache__
+*.log

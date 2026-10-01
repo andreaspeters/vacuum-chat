@@ -217,7 +217,7 @@ void DataStreamsManger::stanzaRequestResult(const Jid &AStreamJid, const Stanza 
 			IDataForm form = FDataForms->dataForm(formElem);
 
 			int index = FDataForms->fieldIndex(DFV_STREAM_METHOD,form.fields);
-			QString smethod = index>=0 ? form.fields.at(index).value.toString() : QString::null;
+			QString smethod = index>=0 ? form.fields.at(index).value.toString() : QString();
 			if (FMethods.contains(smethod) && FDataForms->isSubmitValid(params.features,form))
 			{
 				sprofile->dataStreamResponce(sid,AStanza,smethod);
@@ -293,10 +293,13 @@ void DataStreamsManger::removeProfile(IDataStreamProfile *AProfile)
 QList<QUuid> DataStreamsManger::settingsProfiles() const
 {
 	QList<QUuid> sprofiles;
-	sprofiles.append(QUuid().toString());
+	sprofiles.append(QUuid());
 	foreach(QString sprofile, Options::node(OPV_DATASTREAMS_ROOT).childNSpaces("settings-profile"))
-		if (!sprofiles.contains(sprofile))
-			sprofiles.append(sprofile);
+	{
+		QUuid profileId = QUuid::fromString(sprofile);
+		if (!sprofiles.contains(profileId))
+			sprofiles.append(profileId);
+	}
 	return sprofiles;
 }
 
@@ -324,7 +327,7 @@ void DataStreamsManger::removeSettingsProfile(const QUuid &AProfileId)
 	if (!AProfileId.isNull())
 	{
 		Options::node(OPV_DATASTREAMS_ROOT).removeChilds("settings-profile",AProfileId.toString());
-		emit settingsProfileRemoved(AProfileId.toString());
+		emit settingsProfileRemoved(AProfileId);
 	}
 }
 
@@ -426,7 +429,7 @@ QString DataStreamsManger::streamIdByRequestId(const QString &ARequestId) const
 	for (QMap<QString, StreamParams>::const_iterator it = FStreams.constBegin(); it!=FStreams.constEnd(); ++it)
 		if (it->requestId == ARequestId)
 			return it.key();
-	return QString::null;
+	return QString();
 }
 
 void DataStreamsManger::onXmppStreamClosed(IXmppStream *AXmppStream)
@@ -448,4 +451,4 @@ void DataStreamsManger::onXmppStreamClosed(IXmppStream *AXmppStream)
 	}
 }
 
-Q_EXPORT_PLUGIN2(plg_datastreamsmanager, DataStreamsManger);
+

@@ -36,7 +36,7 @@ MultiUserChat::MultiUserChat(IMultiUserChatPlugin *AChatPlugin, const Jid &AStre
 MultiUserChat::~MultiUserChat()
 {
 	if (!FUsers.isEmpty())
-		closeChat(IPresence::Offline, QString::null);
+		closeChat(IPresence::Offline, QString());
 
 	if (FStanzaProcessor)
 	{
@@ -914,7 +914,7 @@ void MultiUserChat::closeChat(int AShow, const QString &AStatus)
 	{
 		FMainUser->setData(MUDR_SHOW,AShow);
 		FMainUser->setData(MUDR_STATUS,AStatus);
-		emit userPresence(FMainUser,IPresence::Offline,QString::null);
+		emit userPresence(FMainUser,IPresence::Offline,QString());
 		delete FMainUser;
 	}
 	FMainUser = NULL;
@@ -924,7 +924,7 @@ void MultiUserChat::closeChat(int AShow, const QString &AStatus)
 	{
 		user->setData(MUDR_SHOW,IPresence::Offline);
 		user->setData(MUDR_STATUS,QString());
-		emit userPresence(user,IPresence::Offline,QString::null);
+		emit userPresence(user,IPresence::Offline,QString());
 	}
 	qDeleteAll(FUsers);
 	FUsers.clear();
@@ -972,7 +972,7 @@ void MultiUserChat::onPresenceAboutToClose(int AShow, const QString &AStatus)
 void MultiUserChat::onStreamClosed()
 {
 	if (!FUsers.isEmpty())
-		closeChat(IPresence::Offline,QString::null);
+		closeChat(IPresence::Offline,QString());
 }
 
 void MultiUserChat::onStreamJidChanged(const Jid &ABefore)

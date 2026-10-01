@@ -9,6 +9,10 @@ RostersModel::RostersModel()
 	FRosterPlugin = NULL;
 	FPresencePlugin = NULL;
 	FAccountManager = NULL;
+	FProtocolPresence = NULL;
+	FProtocolRoster = NULL;
+	FPluginManager = NULL;
+	FProtocolRosterRetryCount = 0;
 
 	FRootIndex = new RosterIndex(RIT_ROOT);
 	FRootIndex->setParent(this);
@@ -37,6 +41,7 @@ void RostersModel::pluginInfo(IPluginInfo *APluginInfo)
 bool RostersModel::initConnections(IPluginManager *APluginManager, int &AInitOrder)
 {
 	Q_UNUSED(AInitOrder);
+	FPluginManager = APluginManager;
 	IPlugin *plugin = APluginManager->pluginInterface("IRosterPlugin").value(0,NULL);
 	if (plugin)
 	{
@@ -74,6 +79,67 @@ bool RostersModel::initConnections(IPluginManager *APluginManager, int &AInitOrd
 		}
 	}
 
+	plugin = APluginManager->pluginInterface("IProtocolPresence").value(0,NULL);
+	if (plugin)
+	{
+		FProtocolPresence = qobject_cast<IProtocolPresence *>(plugin->instance());
+		if (FProtocolPresence)
+		{
+			connect(FProtocolPresence->instance(),SIGNAL(protocolPresenceChanged(QString, int, QString)),
+				SLOT(onProtocolPresenceChanged(QString, int, QString)));
+			connect(FProtocolPresence->instance(),SIGNAL(protocolPresenceClosed(QString)),
+				SLOT(onProtocolPresenceClosed(QString)));
+		}
+	}
+
+	for (IPlugin *rosterPlugin : APluginManager->pluginInterface("IProtocolRoster"))
+	{
+		IProtocolRoster *roster = qobject_cast<IProtocolRoster *>(rosterPlugin->instance());
+		if (roster && !FProtocolRosters.contains(roster)) {
+			FProtocolRosters.append(roster);
+			if (!FProtocolRoster)
+				FProtocolRoster = roster;
+			connect(rosterPlugin->instance(),SIGNAL(protocolRosterChanged()),
+				SLOT(onProtocolRosterChanged()),Qt::UniqueConnection);
+		}
+	}
+
+	return true;
+}
+
+bool RostersModel::startPlugin()
+{
+	if (!FProtocolPresence && FPluginManager)
+	{
+		IPlugin *plugin = FPluginManager->pluginInterface("IProtocolPresence").value(0,NULL);
+		if (plugin)
+		{
+			FProtocolPresence = qobject_cast<IProtocolPresence *>(plugin->instance());
+			if (FProtocolPresence)
+			{
+				connect(FProtocolPresence->instance(),SIGNAL(protocolPresenceChanged(QString, int, QString)),
+					SLOT(onProtocolPresenceChanged(QString, int, QString)),Qt::UniqueConnection);
+				connect(FProtocolPresence->instance(),SIGNAL(protocolPresenceClosed(QString)),
+					SLOT(onProtocolPresenceClosed(QString)),Qt::UniqueConnection);
+			}
+		}
+	}
+	if (FPluginManager)
+	{
+		for (IPlugin *rosterPlugin : FPluginManager->pluginInterface("IProtocolRoster")) {
+			IProtocolRoster *roster = qobject_cast<IProtocolRoster *>(rosterPlugin->instance());
+			if (!roster || FProtocolRosters.contains(roster))
+				continue;
+			FProtocolRosters.append(roster);
+			if (!FProtocolRoster)
+				FProtocolRoster = roster;
+			connect(rosterPlugin->instance(), SIGNAL(protocolRosterChanged()),
+				this, SLOT(onProtocolRosterChanged()), Qt::UniqueConnection);
+		}
+	}
+	for (IProtocolRoster *roster : FProtocolRosters)
+		rebuildProtocolRoster(roster);
+	QTimer::singleShot(0,this,SLOT(onProtocolRosterChanged()));
 	return true;
 }
 
@@ -150,18 +216,47 @@ bool RostersModel::setData(const QModelIndex &AIndex, const QVariant &AValue, in
 	return false;
 }
 
+IRosterIndex *RostersModel::addProtocolStream(const QString &AAccountId)
+{
+	IRosterIndex *streamIndex = FProtocolStreams.value(AAccountId);
+	if (!streamIndex && !AAccountId.isEmpty())
+	{
+		streamIndex = createRosterIndex(RIT_STREAM_ROOT, FRootIndex);
+		streamIndex->setRemoveOnLastChildRemoved(false);
+		streamIndex->setData(RDR_ACCOUNT_ID, AAccountId);
+		streamIndex->setData(RDR_NAME, AAccountId);
+		streamIndex->setData(RDR_SHOW, IPresence::Online);
+		streamIndex->setData(RDR_STATUS, QStringLiteral("Online"));
+		FProtocolStreams.insert(AAccountId, streamIndex);
+		insertRosterIndex(streamIndex, FRootIndex);
+	}
+	return streamIndex;
+}
+
+IRosterIndex *RostersModel::protocolStreamRoot(const QString &AAccountId) const
+{
+	return FProtocolStreams.value(AAccountId, NULL);
+}
+
 IRosterIndex *RostersModel::addStream(const Jid &AStreamJid)
 {
+	const QString protocolStreamId = AStreamJid.bare();
+	if (FProtocolRoster && FProtocolRoster->streamId() == protocolStreamId)
+		return addProtocolStream(protocolStreamId);
+	if (FProtocolPresence && FProtocolPresence->streamId() == protocolStreamId)
+		return addProtocolStream(protocolStreamId);
 	IRosterIndex *streamIndex = FStreamsRoot.value(AStreamJid);
 	if (streamIndex == NULL)
 	{
 		IRoster *roster = FRosterPlugin!=NULL ? FRosterPlugin->findRoster(AStreamJid) : NULL;
 		IPresence *presence = FPresencePlugin!=NULL ? FPresencePlugin->findPresence(AStreamJid) : NULL;
+		bool protocolPresence = FProtocolPresence!=NULL && FProtocolPresence->streamId()==AStreamJid.bare();
+		bool protocolRoster = FProtocolRoster!=NULL && FProtocolRoster->streamId()==AStreamJid.bare();
 		IAccount *account = FAccountManager!=NULL ? FAccountManager->accountByStream(AStreamJid) : NULL;
 
-		if (roster || presence)
+		if (roster || presence || protocolPresence || protocolRoster)
 		{
-			IRosterIndex *streamIndex = createRosterIndex(RIT_STREAM_ROOT,FRootIndex);
+			streamIndex = createRosterIndex(RIT_STREAM_ROOT,FRootIndex);
 			streamIndex->setRemoveOnLastChildRemoved(false);
 			streamIndex->setData(RDR_STREAM_JID,AStreamJid.pFull());
 			streamIndex->setData(RDR_FULL_JID,AStreamJid.full());
@@ -172,6 +267,11 @@ IRosterIndex *RostersModel::addStream(const Jid &AStreamJid)
 			{
 				streamIndex->setData(RDR_SHOW, presence->show());
 				streamIndex->setData(RDR_STATUS,presence->status());
+			}
+			if (protocolPresence)
+			{
+				streamIndex->setData(RDR_SHOW, FProtocolPresence->show());
+				streamIndex->setData(RDR_STATUS, FProtocolPresence->status());
 			}
 			if (account)
 			{
@@ -261,7 +361,7 @@ IRosterIndex *RostersModel::createRosterIndex(int AType, IRosterIndex *AParent)
 IRosterIndex *RostersModel::findGroupIndex(int AType, const QString &AGroup, const QString &AGroupDelim, IRosterIndex *AParent) const
 {
 	QString groupPath = getGroupName(AType,AGroup);
-	QList<QString> groupTree = groupPath.split(AGroupDelim,QString::SkipEmptyParts);
+	QList<QString> groupTree = groupPath.split(AGroupDelim,Qt::SkipEmptyParts);
 
 	IRosterIndex *groupIndex = AParent;
 	do
@@ -284,7 +384,7 @@ IRosterIndex *RostersModel::createGroupIndex(int AType, const QString &AGroup, c
 	if (!groupIndex)
 	{
 		QString groupPath = getGroupName(AType,AGroup);
-		QList<QString> groupTree = groupPath.split(AGroupDelim,QString::SkipEmptyParts);
+		QList<QString> groupTree = groupPath.split(AGroupDelim,Qt::SkipEmptyParts);
 
 		int i = 0;
 		groupIndex = AParent;
@@ -308,7 +408,7 @@ IRosterIndex *RostersModel::createGroupIndex(int AType, const QString &AGroup, c
 		while (i < groupTree.count())
 		{
 			childGroupIndex = createRosterIndex(AType, groupIndex);
-			childGroupIndex->setData(RDR_GROUP, !FSingleGroups.contains(AType) ? group : QString::null);
+			childGroupIndex->setData(RDR_GROUP, !FSingleGroups.contains(AType) ? group : QString());
 			childGroupIndex->setData(RDR_NAME, groupTree.at(i));
 			insertRosterIndex(childGroupIndex, groupIndex);
 			groupIndex = childGroupIndex;
@@ -349,9 +449,9 @@ QList<IRosterIndex *> RostersModel::getContactIndexList(const Jid &AStreamJid, c
 
 			IRosterIndex *groupIndex;
 			if (type == RIT_MY_RESOURCE)
-				groupIndex = createGroupIndex(RIT_GROUP_MY_RESOURCES,QString::null,"::",streamIndex);
+				groupIndex = createGroupIndex(RIT_GROUP_MY_RESOURCES,QString(),"::",streamIndex);
 			else
-				groupIndex = createGroupIndex(RIT_GROUP_NOT_IN_ROSTER,QString::null,"::",streamIndex);
+				groupIndex = createGroupIndex(RIT_GROUP_NOT_IN_ROSTER,QString(),"::",streamIndex);
 
 			IRosterIndex *itemIndex = createRosterIndex(type,groupIndex);
 			itemIndex->setData(RDR_FULL_JID,AContactJid.full());
@@ -519,13 +619,142 @@ QList<IRosterIndex *> RostersModel::findContactIndexes(const Jid &AStreamJid, co
 
 void RostersModel::onAccountShown(IAccount *AAccount)
 {
-	if (AAccount->isActive())
+	// Guard: only process XMPP accounts with valid streams
+	if (AAccount && AAccount->protocolKind() == IProtocolAccount::ProtocolXmpp && AAccount->isActive() && AAccount->xmppStream())
 		addStream(AAccount->xmppStream()->streamJid());
+}
+
+void RostersModel::onProtocolPresenceChanged(const QString &AStreamId, int AShow, const QString &AStatus)
+{
+	IRosterIndex *streamIndex = protocolStreamRoot(AStreamId);
+	if (!streamIndex) streamIndex = addProtocolStream(AStreamId);
+	if (streamIndex)
+	{
+		streamIndex->setData(RDR_NAME, AStreamId);
+		streamIndex->setData(RDR_SHOW, AShow);
+		streamIndex->setData(RDR_STATUS, AStatus);
+	}
+}
+
+void RostersModel::onProtocolPresenceClosed(const QString &AStreamId)
+{
+	IRosterIndex *streamIndex = FProtocolStreams.take(AStreamId);
+	if (streamIndex) removeRosterIndex(streamIndex);
+}
+
+void RostersModel::onProtocolRosterChanged()
+{
+	if (FPluginManager) {
+		for (IPlugin *rosterPlugin : FPluginManager->pluginInterface("IProtocolRoster")) {
+			IProtocolRoster *roster = qobject_cast<IProtocolRoster *>(rosterPlugin->instance());
+			if (roster && !FProtocolRosters.contains(roster)) {
+				FProtocolRosters.append(roster);
+				connect(rosterPlugin->instance(), SIGNAL(protocolRosterChanged()),
+					this, SLOT(onProtocolRosterChanged()), Qt::UniqueConnection);
+			}
+		}
+	}
+	IProtocolRoster *senderRoster = qobject_cast<IProtocolRoster *>(sender());
+	if (senderRoster) {
+		rebuildProtocolRoster(senderRoster);
+		return;
+	}
+	const int availableRosters = FPluginManager
+		? FPluginManager->pluginInterface("IProtocolRoster").size() : FProtocolRosters.size();
+	if (FProtocolRosters.isEmpty() || FProtocolRosters.size() < availableRosters) {
+		if (FProtocolRosterRetryCount++ < 20)
+			QTimer::singleShot(250, this, SLOT(onProtocolRosterChanged()));
+		if (FProtocolRosters.isEmpty())
+			return;
+	}
+	FProtocolRosterRetryCount = 0;
+	for (IProtocolRoster *roster : FProtocolRosters)
+		rebuildProtocolRoster(roster);
+}
+
+void RostersModel::rebuildProtocolRoster(IProtocolRoster *roster)
+{
+	if (!roster || roster->streamId().isEmpty())
+		return;
+	if (FPendingProtocolRoster) {
+		if (FPendingProtocolRoster != roster && !FProtocolRosterRebuildQueue.contains(roster))
+			FProtocolRosterRebuildQueue.append(roster);
+		return;
+	}
+	IRosterIndex *streamIndex = addProtocolStream(roster->streamId());
+	if (!streamIndex) return;
+	streamIndex->setData(RDR_NAME, roster->streamId());
+	FPendingProtocolRoster = roster;
+	FPendingProtocolStreamId = roster->streamId();
+	FPendingDirectGroup = createGroupIndex(RIT_GROUP, tr("Direct Chats"), QStringLiteral("::"), streamIndex);
+	FPendingRoomGroup = createGroupIndex(RIT_GROUP, tr("Rooms"), QStringLiteral("::"), streamIndex);
+	FPendingProtocolRooms = roster->rooms();
+	FPendingProtocolRoomIndex = 0;
+	FPendingExistingRooms.clear();
+	for (IRosterIndex *group : {FPendingDirectGroup, FPendingRoomGroup})
+		for (int row = 0; row < group->childCount(); ++row)
+		{
+			IRosterIndex *index = group->child(row);
+			const QString roomId = index->data(RDR_CONVERSATION_ID).toString();
+			if (!roomId.isEmpty())
+				FPendingExistingRooms.insert(roomId, index);
+		}
+	rebuildProtocolRosterBatch();
+}
+
+void RostersModel::rebuildProtocolRosterBatch()
+{
+	if (!FPendingProtocolRoster)
+		return;
+	const int batchSize = 16;
+	const int end = qMin(FPendingProtocolRoomIndex + batchSize, FPendingProtocolRooms.size());
+	for (; FPendingProtocolRoomIndex < end; ++FPendingProtocolRoomIndex)
+	{
+		const ProtocolRoom &room = FPendingProtocolRooms.at(FPendingProtocolRoomIndex);
+		if (room.id.isEmpty()) continue;
+		IRosterIndex *groupIndex = room.isDirect ? FPendingDirectGroup : FPendingRoomGroup;
+		IRosterIndex *index = FPendingExistingRooms.take(room.id);
+		if (!index)
+		{
+			index = createRosterIndex(RIT_CONTACT, groupIndex);
+			insertRosterIndex(index, groupIndex);
+		}
+		else if (index->parentIndex() != groupIndex)
+		{
+			if (index->parentIndex())
+				index->parentIndex()->removeChild(index);
+			insertRosterIndex(index, groupIndex);
+		}
+		index->setData(RDR_NAME, room.name.isEmpty() ? room.id : room.name);
+		index->setData(RDR_STATUS, room.subject);
+		index->setData(RDR_CONVERSATION_ID, room.id);
+		// Protocol-room avatars are keyed by the stable room identity. Keep the
+		// conversation ID separate; RDR_FULL_JID is only the generic avatar key.
+		index->setData(RDR_AVATAR_KEY, room.avatarKey);
+		index->setData(RDR_ACCOUNT_ID, FPendingProtocolStreamId);
+		index->setData(RDR_SHOW, IPresence::Online);
+	}
+	if (FPendingProtocolRoomIndex < FPendingProtocolRooms.size()) {
+		QTimer::singleShot(0, this, [this]() { rebuildProtocolRosterBatch(); });
+		return;
+	}
+	FPendingProtocolRoster = nullptr;
+	FPendingProtocolStreamId.clear();
+	FPendingDirectGroup = nullptr;
+	FPendingRoomGroup = nullptr;
+	FPendingProtocolRooms.clear();
+	FPendingExistingRooms.clear();
+	FPendingProtocolRoomIndex = 0;
+	if (!FProtocolRosterRebuildQueue.isEmpty()) {
+		IProtocolRoster *nextRoster = FProtocolRosterRebuildQueue.takeFirst();
+		QTimer::singleShot(0, this, [this, nextRoster]() { rebuildProtocolRoster(nextRoster); });
+	}
 }
 
 void RostersModel::onAccountHidden(IAccount *AAccount)
 {
-	if (AAccount->isActive())
+	// Guard: only process XMPP accounts with valid streams
+	if (AAccount && AAccount->protocolKind() == IProtocolAccount::ProtocolXmpp && AAccount->isActive() && AAccount->xmppStream())
 		removeStream(AAccount->xmppStream()->streamJid());
 }
 
@@ -554,12 +783,12 @@ void RostersModel::onRosterItemReceived(IRoster *ARoster, const IRosterItem &AIt
 		if (itemType == RIT_AGENT)
 		{
 			groupType = RIT_GROUP_AGENTS;
-			itemGroups += QString::null;
+			itemGroups += QString();
 		}
 		else if (AItem.groups.isEmpty())
 		{
 			groupType = RIT_GROUP_BLANK;
-			itemGroups += QString::null;
+			itemGroups += QString();
 		}
 		else
 		{
@@ -589,7 +818,7 @@ void RostersModel::onRosterItemReceived(IRoster *ARoster, const IRosterItem &AIt
 					IRosterIndex *oldGroupIndex;
 					QString oldGroup = oldGroups.values().value(0);
 					if (oldGroup.isEmpty())
-						oldGroupIndex = findGroupIndex(RIT_GROUP_BLANK,QString::null,groupDelim,streamIndex);
+						oldGroupIndex = findGroupIndex(RIT_GROUP_BLANK,QString(),groupDelim,streamIndex);
 					else
 						oldGroupIndex = findGroupIndex(RIT_GROUP,oldGroup,groupDelim,streamIndex);
 					if (oldGroupIndex)
@@ -753,24 +982,24 @@ void RostersModel::onPresenceItemReceived(IPresence *APresence, const IPresenceI
 					if (!ritem.groups.isEmpty())
 						itemGroups = ritem.groups;
 					else
-						itemGroups += QString::null;
+						itemGroups += QString();
 				}
 				else if (itemType == RIT_MY_RESOURCE)
 				{
-					itemGroups += QString::null;
+					itemGroups += QString();
 				}
 
 				foreach(QString group, itemGroups)
 				{
 					IRosterIndex *groupIndex = NULL;
 					if (itemType == RIT_MY_RESOURCE)
-						groupIndex = createGroupIndex(RIT_GROUP_MY_RESOURCES,QString::null,groupDelim,streamIndex);
+						groupIndex = createGroupIndex(RIT_GROUP_MY_RESOURCES,QString(),groupDelim,streamIndex);
 					else if (!ritem.isValid)
-						groupIndex = createGroupIndex(RIT_GROUP_NOT_IN_ROSTER,QString::null,groupDelim,streamIndex);
+						groupIndex = createGroupIndex(RIT_GROUP_NOT_IN_ROSTER,QString(),groupDelim,streamIndex);
 					else if (itemType == RIT_AGENT)
-						groupIndex = findGroupIndex(RIT_GROUP_AGENTS,QString::null,groupDelim,streamIndex);
+						groupIndex = findGroupIndex(RIT_GROUP_AGENTS,QString(),groupDelim,streamIndex);
 					else if (group.isEmpty())
-						groupIndex = findGroupIndex(RIT_GROUP_BLANK,QString::null,groupDelim,streamIndex);
+						groupIndex = findGroupIndex(RIT_GROUP_BLANK,QString(),groupDelim,streamIndex);
 					else
 						groupIndex = findGroupIndex(RIT_GROUP,group,groupDelim,streamIndex);
 
@@ -839,14 +1068,14 @@ void RostersModel::onIndexChildInserted(IRosterIndex *AIndex)
 	if (isGroupType(AIndex->type()))
 	{
 		if (AIndex->parentIndex())
-			FGroupsCache[AIndex->parentIndex()].insertMulti(AIndex->data(RDR_NAME).toString(),AIndex);
+			FGroupsCache[AIndex->parentIndex()].insert(AIndex->data(RDR_NAME).toString(),AIndex);
 	}
 	else
 	{
 		QString bareJid = AIndex->data(RDR_PREP_BARE_JID).toString();
 		IRosterIndex *streamIndex = !bareJid.isEmpty() ? FStreamsRoot.value(AIndex->data(RDR_STREAM_JID).toString()) : NULL;
 		if (streamIndex && isChildIndex(AIndex,streamIndex))
-			FContactsCache[streamIndex].insertMulti(bareJid,AIndex);
+			FContactsCache[streamIndex].insert(bareJid,AIndex);
 	}
 
 	endInsertRows();
@@ -921,9 +1150,10 @@ void RostersModel::onDelayedDataChanged()
 	}
 	else
 	{
-		reset();
+		beginResetModel();
+		endResetModel();
 	}
 	FChangedIndexes.clear();
 }
 
-Q_EXPORT_PLUGIN2(plg_rostersmodel, RostersModel)
+

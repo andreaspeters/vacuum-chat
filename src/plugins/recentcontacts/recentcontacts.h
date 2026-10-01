@@ -23,6 +23,7 @@ class RecentContacts :
 	public IRecentItemHandler
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.recentcontacts")
 	Q_INTERFACES(IPlugin IRecentContacts IRosterDataHolder IRostersDragDropHandler IRostersLabelHolder IRostersClickHooker IRecentItemHandler);
 public:
 	RecentContacts();
@@ -92,6 +93,10 @@ signals:
 	void recentItemUpdated(const IRecentItem &AItem);
 protected:
 	void updateVisibleItems();
+	void setFavorite(const IRecentItem &item, bool favorite);
+	void loadFavorites();
+	void saveFavorites() const;
+	void updateFavoritesRoot();
 	void createItemIndex(const IRecentItem &AItem);
 	void updateItemIndex(const IRecentItem &AItem);
 	void removeItemIndex(const IRecentItem &AItem);
@@ -184,6 +189,10 @@ private:
 	bool FSortByLastActivity;
 	bool FShowOnlyFavorite;
 	IRosterIndex *FRootIndex;
+	IRosterIndex *FFavoritesRootIndex;
+	QList<IRecentItem> FFavorites;
+	QList<IRecentItem> FContextFavoriteItems;
+	QMap<IRecentItem, IRosterIndex *> FFavoriteIndexes;
 	QMap<QString, IRecentItemHandler *> FItemHandlers;
 };
 

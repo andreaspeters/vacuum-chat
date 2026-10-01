@@ -136,6 +136,16 @@ bool ChatStates::initConnections(IPluginManager *APluginManager, int &/*AInitOrd
 	{
 		FNotifications = qobject_cast<INotifications *>(plugin->instance());
 	}
+	foreach (IPlugin *protocolPlugin, APluginManager->pluginInterface("IProtocolMessaging"))
+	{
+		IProtocolMessaging *messaging = qobject_cast<IProtocolMessaging *>(protocolPlugin->instance());
+		if (messaging)
+		{
+			FProtocolMessaging.append(messaging);
+			connect(protocolPlugin->instance(), SIGNAL(protocolTypingChanged(ProtocolTypingUpdate)),
+				this, SLOT(onProtocolTypingChanged(ProtocolTypingUpdate)), Qt::UniqueConnection);
+		}
+	}
 
 	connect(Options::instance(),SIGNAL(optionsOpened()),SLOT(onOptionsOpened()));
 	connect(Options::instance(),SIGNAL(optionsClosed()),SLOT(onOptionsClosed()));
@@ -193,10 +203,10 @@ bool ChatStates::archiveMessageEdit(int AOrder, const Jid &AStreamJid, Message &
 	Q_UNUSED(AOrder);
 	Q_UNUSED(AStreamJid);
 	Q_UNUSED(ADirectionIn);
-	if (!AMessage.stanza().firstElement(QString::null,NS_CHATSTATES).isNull())
+	if (!AMessage.stanza().firstElement(QString(),NS_CHATSTATES).isNull())
 	{
 		AMessage.detach();
-		QDomElement elem = AMessage.stanza().firstElement(QString::null,NS_CHATSTATES);
+		QDomElement elem = AMessage.stanza().firstElement(QString(),NS_CHATSTATES);
 		elem.parentNode().removeChild(elem);
 	}
 	return false;
@@ -358,7 +368,7 @@ bool ChatStates::stanzaReadWrite(int AHandlerId, const Jid &AStreamJid, Stanza &
 		if (!message.isDelayed())
 		{
 			Jid contactJid = AStanza.from();
-			QDomElement elem = AStanza.firstElement(QString::null,NS_CHATSTATES);
+			QDomElement elem = AStanza.firstElement(QString(),NS_CHATSTATES);
 			if (!elem.isNull())
 			{
 				if (hasBody || FChatParams.value(AStreamJid).value(contactJid).canSendStates)
@@ -469,6 +479,23 @@ bool ChatStates::isSendingPossible(const Jid &AStreamJid, const Jid &AContactJid
 
 void ChatStates::sendStateMessage(const Jid &AStreamJid, const Jid &AContactJid, int AState) const
 {
+	foreach (IProtocolMessaging *messaging, FProtocolMessaging)
+	{
+		if (messaging->streamId() != AStreamJid.full() && messaging->streamId() != AStreamJid.bare())
+			continue;
+		ConversationId conversationId;
+		if (messaging->conversationIdForAddress(AContactJid, conversationId) &&
+			messaging->supportsTyping(conversationId))
+		{
+			ProtocolTypingStatus status = TypingStatusNotTyping;
+			if (AState == IChatStates::StateComposing)
+				status = TypingStatusComposing;
+			else if (AState == IChatStates::StatePaused)
+				status = TypingStatusPaused;
+			messaging->setTyping(conversationId, status);
+			return;
+		}
+	}
 	if (FStanzaProcessor && isSendingPossible(AStreamJid,AContactJid))
 	{
 		QString state;
@@ -536,12 +563,70 @@ void ChatStates::setUserState(const Jid &AStreamJid, const Jid &AContactJid, int
 	}
 }
 
+void ChatStates::setProtocolUserState(const QString &accountId, const QString &conversationId, int state)
+{
+	if (accountId.isEmpty() || conversationId.isEmpty())
+		return;
+	QMap<QString, int> &accountStates = FProtocolUserStates[accountId];
+	if (accountStates.value(conversationId, IChatStates::StateUnknown) != state)
+	{
+		accountStates.insert(conversationId, state);
+		emit protocolUserChatStateChanged(accountId, conversationId, state);
+		notifyProtocolUserState(accountId, conversationId, state);
+	}
+}
+
+void ChatStates::notifyProtocolUserState(const QString &accountId, const QString &conversationId, int state)
+{
+	if (accountId.isEmpty() || conversationId.isEmpty())
+		return;
+	if (state != IChatStates::StateComposing)
+	{
+		removeProtocolUserNotification(accountId, conversationId);
+		return;
+	}
+	if (!FNotifications || !FMessageWidgets || FProtocolNotifyIds.value(accountId).value(conversationId, 0) > 0)
+		return;
+	IChatWindow *window = FMessageWidgets->findConversationWindow(accountId, conversationId);
+	if (!window)
+		return;
+
+	INotification notify;
+	notify.kinds = FNotifications->enabledTypeNotificationKinds(NNT_CHATSTATE_TYPING);
+	if (notify.kinds > 0)
+	{
+		notify.typeId = NNT_CHATSTATE_TYPING;
+		notify.data.insert(NDR_ACCOUNT_ID, accountId);
+		notify.data.insert(NDR_CONVERSATION_ID, conversationId);
+		notify.data.insert(NDR_ICON, IconStorage::staticStorage(RSR_STORAGE_MENUICONS)->getIcon(MNI_CHATSTATES_COMPOSING));
+		notify.data.insert(NDR_TOOLTIP, tr("Typing a message..."));
+		notify.data.insert(NDR_TABPAGE_WIDGET, (qint64)window->instance());
+		notify.data.insert(NDR_TABPAGE_PRIORITY, TPNP_CHATSTATE_TYPING);
+		notify.data.insert(NDR_TABPAGE_ICONBLINK, false);
+		int notifyId = FNotifications->appendNotification(notify);
+		if (notifyId > 0)
+			FProtocolNotifyIds[accountId].insert(conversationId, notifyId);
+	}
+}
+
+void ChatStates::removeProtocolUserNotification(const QString &accountId, const QString &conversationId)
+{
+	if (!FProtocolNotifyIds.contains(accountId))
+		return;
+	QMap<QString, int> &accountNotifyIds = FProtocolNotifyIds[accountId];
+	int notifyId = accountNotifyIds.take(conversationId);
+	if (notifyId > 0 && FNotifications)
+		FNotifications->removeNotification(notifyId);
+	if (accountNotifyIds.isEmpty())
+		FProtocolNotifyIds.remove(accountId);
+}
+
 void ChatStates::setSelfState(const Jid &AStreamJid, const Jid &AContactJid, int AState, bool ASend)
 {
 	if (FChatParams.contains(AStreamJid))
 	{
 		ChatParams &params = FChatParams[AStreamJid][AContactJid];
-		params.selfLastActive = QDateTime::currentDateTime().toTime_t();
+		params.selfLastActive = QDateTime::currentDateTime().toSecsSinceEpoch();
 		if (params.selfState != AState)
 		{
 			params.selfState = AState;
@@ -674,6 +759,21 @@ void ChatStates::onMultiUserPresenceReceived(IMultiUser *AUser, int AShow, const
 
 void ChatStates::onChatWindowCreated(IChatWindow *AWindow)
 {
+	IPluginManager *pluginManager = FMessageWidgets ? FMessageWidgets->pluginManager() : NULL;
+	if (pluginManager)
+	{
+		foreach (IPlugin *protocolPlugin, pluginManager->pluginInterface("IProtocolMessaging"))
+		{
+			IProtocolMessaging *messaging = qobject_cast<IProtocolMessaging *>(protocolPlugin->instance());
+			if (messaging && !FProtocolMessaging.contains(messaging))
+			{
+				FProtocolMessaging.append(messaging);
+				connect(protocolPlugin->instance(), SIGNAL(protocolTypingChanged(ProtocolTypingUpdate)),
+					this, SLOT(onProtocolTypingChanged(ProtocolTypingUpdate)), Qt::UniqueConnection);
+			}
+		}
+	}
+	FChatParams[AWindow->streamJid()][AWindow->contactJid()];
 	StateWidget *widget = new StateWidget(this,AWindow,AWindow->toolBarWidget()->toolBarChanger()->toolBar());
 	AWindow->toolBarWidget()->toolBarChanger()->insertWidget(widget,TBG_MWTBW_CHATSTATES);
 	widget->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
@@ -683,6 +783,20 @@ void ChatStates::onChatWindowCreated(IChatWindow *AWindow)
 	connect(AWindow->instance(),SIGNAL(tabPageActivated()),SLOT(onChatWindowActivated()));
 	connect(AWindow->instance(),SIGNAL(tabPageClosed()),SLOT(onChatWindowClosed()));
 	connect(AWindow->editWidget()->textEdit(),SIGNAL(textChanged()),SLOT(onChatWindowTextChanged()));
+	notifyProtocolUserState(AWindow->accountId(), AWindow->conversationId(),
+		FProtocolUserStates.value(AWindow->accountId()).value(AWindow->conversationId(), IChatStates::StateUnknown));
+}
+
+void ChatStates::onProtocolTypingChanged(const ProtocolTypingUpdate &update)
+{
+	foreach (IProtocolMessaging *messaging, FProtocolMessaging)
+	{
+		if (messaging->streamId() != update.accountId)
+			continue;
+		setProtocolUserState(update.accountId, update.conversationId,
+			update.hasTypingUsers() ? IChatStates::StateComposing : IChatStates::StateActive);
+		return;
+	}
 }
 
 void ChatStates::onChatWindowActivated()
@@ -714,6 +828,7 @@ void ChatStates::onChatWindowClosed()
 	IChatWindow *window = qobject_cast<IChatWindow *>(sender());
 	if (window)
 	{
+		removeProtocolUserNotification(window->accountId(), window->conversationId());
 		int state = selfChatState(window->streamJid(),window->contactJid());
 		if (state != IChatStates::StateGone)
 			setSelfState(window->streamJid(),window->contactJid(),IChatStates::StateInactive);
@@ -722,6 +837,7 @@ void ChatStates::onChatWindowClosed()
 
 void ChatStates::onChatWindowDestroyed(IChatWindow *AWindow)
 {
+	removeProtocolUserNotification(AWindow->accountId(), AWindow->conversationId());
 	setSelfState(AWindow->streamJid(),AWindow->contactJid(),IChatStates::StateGone);
 	FChatByEditor.remove(AWindow->editWidget()->textEdit());
 }
@@ -734,7 +850,7 @@ void ChatStates::onUpdateSelfStates()
 		if (FChatParams.value(window->streamJid()).contains(window->contactJid()))
 		{
 			ChatParams &params = FChatParams[window->streamJid()][window->contactJid()];
-			uint timePassed = QDateTime::currentDateTime().toTime_t() - params.selfLastActive;
+			uint timePassed = QDateTime::currentDateTime().toSecsSinceEpoch() - params.selfLastActive;
 			if (params.selfState==IChatStates::StateActive && window->isActiveTabPage())
 			{
 				setSelfState(window->streamJid(),window->contactJid(),IChatStates::StateActive);
@@ -786,4 +902,4 @@ void ChatStates::onStanzaSessionTerminated(const IStanzaSession &ASession)
 	FStanzaSessions[ASession.streamJid].remove(ASession.contactJid);
 }
 
-Q_EXPORT_PLUGIN2(plg_chatstates, ChatStates)
+

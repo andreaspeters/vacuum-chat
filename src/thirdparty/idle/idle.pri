@@ -1,7 +1,7 @@
 HEADERS += idle.h
 SOURCES += idle.cpp
 
-unix:!macx {
+unix:!macx:!os2 {
 	SOURCES += idle_x11.cpp
 }
 win32 {

@@ -6,7 +6,7 @@ SelectIconMenu::SelectIconMenu(const QString &AIconset, QWidget *AParent) : Menu
 	setIconset(AIconset);
 
 	FLayout = new QVBoxLayout(this);
-	FLayout->setMargin(0);
+	FLayout->setContentsMargins(0,0,0,0);
 	setAttribute(Qt::WA_AlwaysShowToolTips,true);
 	connect(this,SIGNAL(aboutToShow()),SLOT(onAboutToShow()));
 }
@@ -18,7 +18,7 @@ SelectIconMenu::~SelectIconMenu()
 
 QString SelectIconMenu::iconset() const
 {
-	return FStorage!=NULL ? FStorage->subStorage() : QString::null;
+	return FStorage!=NULL ? FStorage->subStorage() : QString();
 }
 
 void SelectIconMenu::setIconset(const QString &ASubStorage)

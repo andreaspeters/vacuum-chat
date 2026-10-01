@@ -31,7 +31,7 @@
 #  define SVN_REVISION              "0"
 #endif
 
-#if defined(Q_WS_WIN)
+#if defined(Q_OS_WIN)
 #  define ENV_APP_DATA              "APPDATA"
 #  define DIR_APP_DATA              APPLICATION_NAME
 #  define PATH_APP_DATA             ORGANIZATION_NAME"/"DIR_APP_DATA
@@ -39,21 +39,21 @@
 #  define ENV_APP_DATA              "APPDATA"
 #  define DIR_APP_DATA              APPLICATION_NAME
 #  define PATH_APP_DATA             ORGANIZATION_NAME"/"DIR_APP_DATA
-#elif defined(Q_WS_X11)
+#elif defined(Q_OS_LINUX)
 #  define ENV_APP_DATA              "HOME"
 #  define DIR_APP_DATA              ".vacuum"
 #  define PATH_APP_DATA             DIR_APP_DATA
-#elif defined(Q_WS_MAC)
+#elif defined(Q_OS_MACOS)
 #  define ENV_APP_DATA              "HOME"
 #  define DIR_APP_DATA              APPLICATION_NAME
 #  define PATH_APP_DATA             "Library/Application Support/"DIR_APP_DATA
-#elif defined(Q_WS_HAIKU)
+#elif defined(Q_OS_HAIKU)
 #  define ENV_APP_DATA              "APPDATA"
 #  define DIR_APP_DATA              APPLICATION_NAME
 #  define PATH_APP_DATA             ORGANIZATION_NAME"/"DIR_APP_DATA
 #endif
 
-#if defined(Q_WS_WIN)
+#if defined(Q_OS_WIN)
 #  define LIB_PREFIX_SIZE           0
 #else
 #  define LIB_PREFIX_SIZE           3
@@ -133,7 +133,7 @@ QList<IPlugin *> PluginManager::pluginInterface(const QString &AInterface) const
 	{
 		foreach(PluginItem pluginItem, FPluginItems)
 			if (AInterface.isEmpty() || pluginItem.plugin->instance()->inherits(AInterface.toLatin1().data()))
-				FPlugins.insertMulti(AInterface,pluginItem.plugin);
+				FPlugins.insert(AInterface,pluginItem.plugin);
 	}
 	return FPlugins.values(AInterface);
 }
@@ -243,7 +243,7 @@ void PluginManager::loadSettings()
 	}
 	QLocale::setDefault(locale);
 
-	FDataPath = QString::null;
+	FDataPath = QString();
 	if (args.contains(CLO_APP_DATA_DIR))
 	{
 		QDir dir(args.value(args.indexOf(CLO_APP_DATA_DIR)+1));
@@ -316,7 +316,13 @@ void PluginManager::saveSettings()
 void PluginManager::loadPlugins()
 {
 	QDir pluginsDir(QApplication::applicationDirPath());
-	if (pluginsDir.cd(PLUGINS_DIR))
+	bool pluginsFound = pluginsDir.cd(PLUGINS_DIR);
+	if (!pluginsFound && !QDir::isAbsolutePath(PLUGINS_DIR))
+	{
+		pluginsDir = QDir::current();
+		pluginsFound = pluginsDir.cd(PLUGINS_DIR);
+	}
+	if (pluginsFound)
 	{
 		QString localeName = QLocale().name();
 		QDir tsDir(QApplication::applicationDirPath());
@@ -591,7 +597,10 @@ QList<QUuid> PluginManager::getConflicts(const QUuid &AUuid) const
 			}
 		}
 	}
-	return plugins.toList();
+	QList<QUuid> result;
+	for (const QUuid &plugin : plugins)
+		result.append(plugin);
+	return result;
 }
 
 void PluginManager::loadCoreTranslations(const QDir &ADir, const QString &ALocaleName)

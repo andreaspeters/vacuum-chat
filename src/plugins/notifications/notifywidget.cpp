@@ -4,6 +4,7 @@
 #include <QScrollBar>
 #include <QTextFrame>
 #include <QTextDocument>
+#include <QApplication>
 
 #define ANIMATE_STEPS             17
 #define ANIMATE_TIME              700
@@ -15,7 +16,7 @@
 #define MAX_TEXT_LINES            5
 
 QList<NotifyWidget *> NotifyWidget::FWidgets;
-QDesktopWidget *NotifyWidget::FDesktop = new QDesktopWidget;
+QScreen *NotifyWidget::FDesktop = QApplication::primaryScreen();
 IMainWindow *NotifyWidget::FMainWindow = NULL;
 QRect NotifyWidget::FDisplay = QRect();
 
@@ -110,7 +111,7 @@ void NotifyWidget::appear()
 		setWindowOpacity(ANIMATE_OPACITY_START);
 
 		if (FWidgets.isEmpty())
-			FDisplay = FDesktop->availableGeometry(FMainWindow->instance());
+			FDisplay = FMainWindow->instance()->screen()->availableGeometry();
 		FWidgets.prepend(this);
 		layoutWidgets();
 	}

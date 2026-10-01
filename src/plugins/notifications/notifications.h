@@ -2,9 +2,12 @@
 #define NOTIFICATIONS_H
 
 #include <QTimer>
-#include <QSound>
+
 #include <QPointer>
 #include <definitions/notificationdataroles.h>
+#include <definitions/notificationtypes.h>
+#include <definitions/notificationtypeorders.h>
+#include <definitions/rosterindextyperole.h>
 #include <definitions/actiongroups.h>
 #include <definitions/toolbargroups.h>
 #include <definitions/optionvalues.h>
@@ -16,6 +19,8 @@
 #include <definitions/shortcuts.h>
 #include <interfaces/ipluginmanager.h>
 #include <interfaces/inotifications.h>
+#include <interfaces/iprotocolnotifications.h>
+#include <interfaces/iprotocolmessaging.h>
 #include <interfaces/irostersview.h>
 #include <interfaces/itraymanager.h>
 #include <interfaces/iroster.h>
@@ -63,6 +68,7 @@ class Notifications :
 	public IOptionsHolder
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.notifications")
 	Q_INTERFACES(IPlugin INotifications IOptionsHolder);
 public:
 	Notifications();
@@ -98,6 +104,9 @@ public:
 	virtual void removeNotificationHandler(int AOrder, INotificationHandler *AHandler);
 	//Notification Utilities
 	virtual QImage contactAvatar(const Jid &AContactJid) const;
+	virtual QImage contactAvatarById(const AccountId &AAccountId, const UserId &AUserId) const;
+	virtual QIcon contactIconById(const AccountId &AAccountId, const UserId &AUserId) const;
+	virtual QString contactNameById(const AccountId &AAccountId, const UserId &AUserId) const;
 	virtual QIcon contactIcon(const Jid &AStreamJid, const Jid &AContactJid) const;
 	virtual QString contactName(const Jid &AStreamJId, const Jid &AContactJid) const;
 signals:
@@ -129,6 +138,9 @@ protected slots:
 	void onOptionsOpened();
 	void onOptionsChanged(const OptionsNode &ANode);
 	void onShortcutActivated(const QString &AId, QWidget *AWidget);
+	void onProtocolNotificationsChanged();
+	void onProtocolNotificationActivated(int ANotifyId);
+	void onProtocolNotificationRemoved(int ANotifyId);
 private:
 	IAvatars *FAvatars;
 	IRosterPlugin *FRosterPlugin;
@@ -140,6 +152,7 @@ private:
 	IOptionsManager *FOptionsManager;
 	IMainWindowPlugin *FMainWindowPlugin;
 	IUrlProcessor *FUrlProcessor;
+	IPluginManager *FPluginManager;
 private:
 	Menu *FNotifyMenu;
 	Action *FSoundOnOff;
@@ -148,13 +161,17 @@ private:
 	QList<int> FTrayNotifies;
 private:
 	int FNotifyId;
-	QSound *FSound;
+
 	QList<int> FDelayedActivations;
 	QList<QWidget *> FDelayedShowMinimized;
 	QMap<int, NotifyRecord> FNotifyRecords;
+	QMap<QString, int> FProtocolNotificationIds;
+	QMap<int, QString> FProtocolNotificationKeys;
+	QMap<QString, ProtocolNotification> FProtocolNotificationValues;
 	mutable QMap<QString, TypeRecord> FTypeRecords;
 	QMultiMap<int, INotificationHandler *> FHandlers;
 	QNetworkAccessManager *FNetworkAccessManager;
+	void synchronizeProtocolNotifications();
 };
 
 #endif // NOTIFICATIONS_H

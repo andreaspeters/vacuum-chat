@@ -8,5 +8,5 @@ include("defaultconnection.cmake")
 include("${CMAKE_SOURCE_DIR}/src/plugins/plugins.cmake")
 
 if (IS_ENABLED)
-	target_link_libraries(defaultconnection jdns)
+	target_link_libraries(defaultconnection PRIVATE jdns)
 endif (IS_ENABLED)

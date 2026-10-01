@@ -12,7 +12,7 @@
 #include <interfaces/iroster.h>
 #include <interfaces/ivcard.h>
 #include <utils/action.h>
-#include "ui_addcontactdialog.h"
+#include <ui_addcontactdialog.h>
 
 class AddContactDialog :
 			public QDialog,

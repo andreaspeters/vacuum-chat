@@ -262,7 +262,7 @@ IXmppFeature *Registration::newXmppFeature(const QString &AFeatureNS, IXmppStrea
 QMultiMap<int, IOptionsWidget *> Registration::optionsWidgets(const QString &ANodeId, QWidget *AParent)
 {
 	QMultiMap<int, IOptionsWidget *> widgets;
-	QStringList nodeTree = ANodeId.split(".",QString::SkipEmptyParts);
+	QStringList nodeTree = ANodeId.split(".",Qt::SkipEmptyParts);
 	if (FOptionsManager && nodeTree.count()==2 && nodeTree.at(0)==OPN_ACCOUNTS)
 	{
 		widgets.insertMulti(OWO_ACCOUNT_REGISTER, FOptionsManager->optionsNodeWidget(Options::node(OPV_ACCOUNT_ITEM,nodeTree.at(1)).node("register-on-server"),tr("Register new account on server"),AParent));
@@ -303,7 +303,7 @@ QString Registration::sendRegiterRequest(const Jid &AStreamJid, const Jid &AServ
 		FSendRequests.append(reg.id());
 		return reg.id();
 	}
-	return QString::null;
+	return QString();
 }
 
 QString Registration::sendUnregiterRequest(const Jid &AStreamJid, const Jid &AServiceJid)
@@ -316,7 +316,7 @@ QString Registration::sendUnregiterRequest(const Jid &AStreamJid, const Jid &ASe
 		FSubmitRequests.append(unreg.id());
 		return unreg.id();
 	}
-	return QString::null;
+	return QString();
 }
 
 QString Registration::sendChangePasswordRequest(const Jid &AStreamJid, const Jid &AServiceJid,
@@ -332,7 +332,7 @@ QString Registration::sendChangePasswordRequest(const Jid &AStreamJid, const Jid
 		FSubmitRequests.append(change.id());
 		return change.id();
 	}
-	return QString::null;
+	return QString();
 }
 
 QString Registration::sendSubmit(const Jid &AStreamJid, const IRegisterSubmit &ASubmit)
@@ -359,7 +359,7 @@ QString Registration::sendSubmit(const Jid &AStreamJid, const IRegisterSubmit &A
 		FSubmitRequests.append(submit.id());
 		return submit.id();
 	}
-	return QString::null;
+	return QString();
 }
 
 bool Registration::showRegisterDialog(const Jid &AStreamJid, const Jid &AServiceJid, int AOperation, QWidget *AParent)
@@ -405,4 +405,4 @@ void Registration::onXmppFeatureDestroyed()
 		emit featureDestroyed(feature);
 }
 
-Q_EXPORT_PLUGIN2(plg_registration, Registration)
+

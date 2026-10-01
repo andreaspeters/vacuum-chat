@@ -1,4 +1,5 @@
 #include "filestreamsmanager.h"
+#include <QStandardPaths>
 
 #include <QSet>
 #include <QDir>
@@ -92,9 +93,9 @@ bool FileStreamsManager::initObjects()
 bool FileStreamsManager::initSettings()
 {
 	QStringList availMethods = FDataManager!=NULL ? FDataManager->methods() : QStringList();
-	Options::setDefaultValue(OPV_FILESTREAMS_DEFAULTDIR,QDesktopServices::storageLocation(QDesktopServices::DocumentsLocation));
+	Options::setDefaultValue(OPV_FILESTREAMS_DEFAULTDIR,QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation));
 	Options::setDefaultValue(OPV_FILESTREAMS_GROUPBYSENDER,false);
-	Options::setDefaultValue(OPV_FILESTREAMS_DEFAULTMETHOD,availMethods.contains(NS_SOCKS5_BYTESTREAMS) ? QString(NS_SOCKS5_BYTESTREAMS) : QString::null);
+	Options::setDefaultValue(OPV_FILESTREAMS_DEFAULTMETHOD,availMethods.contains(NS_SOCKS5_BYTESTREAMS) ? QString(NS_SOCKS5_BYTESTREAMS) : QString());
 	Options::setDefaultValue(OPV_FILESTREAMS_ACCEPTABLEMETHODS,availMethods);
 
 	if (FOptionsManager)
@@ -282,4 +283,4 @@ void FileStreamsManager::onProfileClosed(const QString &AName)
 		delete stream->instance();
 }
 
-Q_EXPORT_PLUGIN2(plg_filestreamsmanager, FileStreamsManager);
+

@@ -7,7 +7,7 @@
 #include <interfaces/ipresence.h>
 #include <interfaces/istatusicons.h>
 #include <interfaces/irostersmodel.h>
-#include "ui_receiverswidget.h"
+#include <ui_receiverswidget.h>
 
 class ReceiversWidget :
 			public QWidget,

@@ -78,7 +78,7 @@ QWidget *OptionsDialog::createNodeWidget(const QString &ANodeId)
 {
 	QWidget *nodeWidget = new QWidget(ui.scaScroll);
 	nodeWidget->setLayout(new QVBoxLayout);
-	nodeWidget->layout()->setMargin(5);
+	nodeWidget->layout()->setContentsMargins(5,5,5,5);
 
 	QMultiMap<int, IOptionsWidget *> orderedWidgets;
 	foreach(IOptionsHolder *optionsHolder,FOptionsManager->optionsHolders())
@@ -116,7 +116,7 @@ QStandardItem *OptionsDialog::createNodeItem(const QString &ANodeID)
 {
 	QString curNodeID;
 	QStandardItem *item = NULL;
-	foreach(QString nodeID, ANodeID.split(NodeDelimiter,QString::SkipEmptyParts))
+	foreach(QString nodeID, ANodeID.split(NodeDelimiter,Qt::SkipEmptyParts))
 	{
 		if (curNodeID.isEmpty())
 			curNodeID = nodeID;

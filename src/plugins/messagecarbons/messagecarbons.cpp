@@ -213,4 +213,4 @@ void MessageCarbons::onDiscoInfoReceived(const IDiscoInfo &AInfo)
 	}
 }
 
-Q_EXPORT_PLUGIN2(plg_messagecarbons, MessageCarbons)
+

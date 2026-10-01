@@ -11,7 +11,7 @@
 #include <utils/options.h>
 #include <utils/iconstorage.h>
 #include <utils/widgetmanager.h>
-#include "ui_optionsdialog.h"
+#include <ui_optionsdialog.h>
 
 class SortFilterProxyModel :
 			public QSortFilterProxyModel

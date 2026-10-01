@@ -36,7 +36,7 @@ void Action::setMenu(Menu *AMenu)
 
 void Action::setIcon(const QIcon &AIcon)
 {
-	setIcon(QString::null,QString::null,0);
+	setIcon(QString(),QString(),0);
 	QAction::setIcon(AIcon);
 }
 
@@ -69,7 +69,8 @@ void Action::setData(int ARole, const QVariant &AData)
 
 void Action::setData(const QHash<int,QVariant> &AData)
 {
-	FData.unite(AData);
+	for (QHash<int,QVariant>::const_iterator it = AData.constBegin(); it != AData.constEnd(); ++it)
+		FData.insert(it.key(),it.value());
 }
 
 QString Action::shortcutId() const
@@ -116,5 +117,5 @@ void Action::onMenuDestroyed(Menu *AMenu)
 {
 	Q_UNUSED(AMenu);
 	FMenu = NULL;
-	QAction::setMenu(NULL);
+	QAction::setMenu(nullptr);
 }

@@ -1,6 +1,6 @@
 #include "consolewidget.h"
 
-#include <QRegExp>
+#include <QRegularExpression>
 #include <QLineEdit>
 #include <QInputDialog>
 
@@ -144,7 +144,7 @@ void ConsoleWidget::loadContext(const QUuid &AContextId)
 void ConsoleWidget::saveContext(const QUuid &AContextId)
 {
 	OptionsNode node = Options::node(OPV_CONSOLE_CONTEXT_ITEM, AContextId.toString());
-	node.setValue(ui.cmbStreamJid->currentIndex()>0 ? ui.cmbStreamJid->itemData(ui.cmbStreamJid->currentIndex()).toString() : QString::null,"streamjid");
+	node.setValue(ui.cmbStreamJid->currentIndex()>0 ? ui.cmbStreamJid->itemData(ui.cmbStreamJid->currentIndex()).toString() : QString(),"streamjid");
 
 	QStringList conditions;
 	for (int i=0; i<ui.ltwConditions->count(); i++)
@@ -178,22 +178,23 @@ void ConsoleWidget::colorXml(QString &AXml) const
 
 	for (int i=0; i<changesCount; i++)
 	{
-		QRegExp regexp(changes[i].regexp);
-		regexp.setMinimal(changes[i].minimal);
+		QRegularExpression regexp(QString::fromUtf8(changes[i].regexp));
+		if (changes[i].minimal)
+			regexp.setPatternOptions(QRegularExpression::InvertedGreedinessOption);
 		AXml.replace(regexp,changes[i].replace);
 	}
 }
 
 void ConsoleWidget::hidePasswords(QString &AXml) const
 {
-	static const QRegExp passRegExp("<password>.*</password>", Qt::CaseInsensitive);
+	static const QRegularExpression passRegExp("<password>.*</password>", QRegularExpression::CaseInsensitiveOption);
 	static const QString passNewStr = "<password>[password]</password>";
 	AXml.replace(passRegExp,passNewStr);
 }
 
 void ConsoleWidget::showElement(IXmppStream *AXmppStream, const QDomElement &AElem, bool ASended)
 {
-	Jid streamJid = ui.cmbStreamJid->currentIndex()>0 ? ui.cmbStreamJid->itemData(ui.cmbStreamJid->currentIndex()).toString() : QString::null;
+	Jid streamJid = ui.cmbStreamJid->currentIndex()>0 ? ui.cmbStreamJid->itemData(ui.cmbStreamJid->currentIndex()).toString() : QString();
 	if (streamJid.isEmpty() || streamJid==AXmppStream->streamJid())
 	{
 		Stanza stanza(AElem);
@@ -203,17 +204,17 @@ void ConsoleWidget::showElement(IXmppStream *AXmppStream, const QDomElement &AEl
 
 		if (accepted)
 		{
-			static QString sended =   Qt::escape(">>>>") + " <b>%1</b> %2 +%3 " + Qt::escape(">>>>");
-			static QString received = Qt::escape("<<<<") + " <b>%1</b> %2 +%3 " + Qt::escape("<<<<");
+			static QString sended =   QString(">>>>").toHtmlEscaped() + " <b>%1</b> %2 +%3 " + QString(">>>>").toHtmlEscaped();
+			static QString received = QString("<<<<").toHtmlEscaped() + " <b>%1</b> %2 +%3 " + QString("<<<<").toHtmlEscaped();
 
 			int delta = FTimePoint.isValid() ? FTimePoint.msecsTo(QTime::currentTime()) : 0;
 			FTimePoint = QTime::currentTime();
-			QString caption = (ASended ? sended : received).arg(Qt::escape(AXmppStream->streamJid().uFull())).arg(FTimePoint.toString()).arg(delta);
+			QString caption = (ASended ? sended : received).arg(AXmppStream->streamJid().uFull().toHtmlEscaped()).arg(FTimePoint.toString()).arg(delta);
 			ui.tbrConsole->append(caption);
 
 			QString xml = stanza.toString(2);
 			hidePasswords(xml);
-			xml = "<pre>"+Qt::escape(xml).replace('\n',"<br>")+"</pre>";
+			xml = "<pre>"+xml.toHtmlEscaped().replace('\n',"<br>")+"</pre>";
 			if (ui.chbHilightXML->checkState() == Qt::Checked)
 				colorXml(xml);
 			else if (ui.chbHilightXML->checkState()==Qt::PartiallyChecked && xml.size() < 5000)
@@ -281,7 +282,7 @@ void ConsoleWidget::onAddContextClicked()
 
 void ConsoleWidget::onRemoveContextClicked()
 {
-	QUuid oldId = ui.cmbContext->itemData(ui.cmbContext->currentIndex()).toString();
+	QUuid oldId = QUuid::fromString(ui.cmbContext->itemData(ui.cmbContext->currentIndex()).toString());
 	if (!oldId.isNull())
 	{
 		ui.cmbContext->removeItem(ui.cmbContext->findData(oldId.toString()));
@@ -292,7 +293,7 @@ void ConsoleWidget::onRemoveContextClicked()
 void ConsoleWidget::onContextChanged(int AIndex)
 {
 	saveContext(FContext);
-	FContext = ui.cmbContext->itemData(AIndex).toString();
+	FContext = QUuid::fromString(ui.cmbContext->itemData(AIndex).toString());
 	loadContext(FContext);
 }
 
@@ -329,7 +330,7 @@ void ConsoleWidget::onTextSearchStart()
 	{
 		QTextCursor cursor(ui.tbrConsole->document());
 		do {
-			cursor = ui.tbrConsole->document()->find(ui.lneTextSearch->text(),cursor,0);
+			cursor = ui.tbrConsole->document()->find(ui.lneTextSearch->text(),cursor,QTextDocument::FindFlags());
 			if (!cursor.isNull())
 			{
 				QTextEdit::ExtraSelection selection;

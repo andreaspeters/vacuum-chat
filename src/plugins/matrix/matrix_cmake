@@ -1,0 +1,38 @@
+cmake_minimum_required(VERSION 3.16)
+
+project(matrix)
+
+set(PLUGIN_NAME "matrix")
+set(PLUGIN_DISPLAY_NAME "Matrix")
+set(${PLUGIN_NAME}_IS_ESSENTIAL NO)
+
+include("${CMAKE_SOURCE_DIR}/src/plugins/plugins.cmake")
+
+# Include matrix-specific source files
+include(matrix_common.cmake)
+
+if (IS_ENABLED)
+    add_library(${PLUGIN_NAME} SHARED ${MATRIX_SOURCES} ${MATRIX_HEADERS})
+
+    target_link_libraries(${PLUGIN_NAME}
+        Qt6::Core
+        Qt6::Network
+    )
+
+    install(TARGETS ${PLUGIN_NAME}
+        LIBRARY DESTINATION ${INSTALL_PLUGINS}
+    )
+
+    install(FILES matrixoptions.h matrixnetwork.h matrixplugin.h
+        DESTINATION ${INSTALL_PLUGINS}/matrix
+    )
+
+    install(FILES matrix.cpp matrixnetwork.cpp matrixoptions.cpp matrixplugin.cpp
+        DESTINATION ${INSTALL_PLUGINS}/matrix
+    )
+
+    install(FILES matrixoptions.ui
+        DESTINATION ${INSTALL_RESOURCES}
+    )
+
+endif ()

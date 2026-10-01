@@ -35,7 +35,7 @@ SearchDialog::SearchDialog(IJabberSearch *ASearch, IPluginManager *APluginManage
 	layout()->setMenuBar(toolBar);
 
 	ui.pgeForm->setLayout(new QVBoxLayout);
-	ui.pgeForm->layout()->setMargin(0);
+	ui.pgeForm->layout()->setContentsMargins(0,0,0,0);
 
 	connect(FSearch->instance(),SIGNAL(searchFields(const QString &, const ISearchFields &)),SLOT(onSearchFields(const QString &, const ISearchFields &)));
 	connect(FSearch->instance(),SIGNAL(searchResult(const QString &, const ISearchResult &)),SLOT(onSearchResult(const QString &, const ISearchResult &)));
@@ -91,7 +91,7 @@ void SearchDialog::resetDialog()
 		FCurrentForm = NULL;
 	}
 	ui.tbwResult->clear();
-	ui.lblInstructions->setText(QString::null);
+	ui.lblInstructions->setText(QString());
 	ui.lblFirst->setVisible(false);
 	ui.lneFirst->setVisible(false);
 	ui.lblLast->setVisible(false);
@@ -302,7 +302,7 @@ void SearchDialog::onToolBarActionTriggered(bool)
 		Action *action = qobject_cast<Action *>(sender());
 		if (action == FDiscoInfo)
 		{
-			FDiscovery->showDiscoInfo(FStreamJid,item.itemJid,QString::null,this);
+			FDiscovery->showDiscoInfo(FStreamJid,item.itemJid,QString(),this);
 		}
 		else if (action == FAddContact)
 		{

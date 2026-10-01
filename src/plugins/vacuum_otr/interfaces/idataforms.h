@@ -9,7 +9,7 @@
 #include <utils/xmpperror.h>
 #include <utils/toolbarchanger.h>
 
-#define DATAFORMS_UUID "{2B8F89D0-EAA7-46eb-B2FD-AE30DF60E440}"
+#define DATAFORMS_UUID QUuid("{2B8F89D0-EAA7-46eb-B2FD-AE30DF60E440}")
 
 #define DATAVALIDATE_TYPE_STRING        "xs:string"
 #define DATAVALIDATE_TYPE_URI           "xs:anyURI"
@@ -257,7 +257,7 @@ public:
 	virtual IDataForm localizeForm(const IDataForm &AForm) const =0;
 	virtual IDataLocalizer *dataLocalizer(const QString &AFormType) const =0;
 	virtual void insertLocalizer(IDataLocalizer *ALocalizer, const QString &ATypeField) =0;
-	virtual void removeLocalizer(IDataLocalizer *ALocalizer, const QString &ATypeField = QString::null) =0;
+	virtual void removeLocalizer(IDataLocalizer *ALocalizer, const QString &ATypeField = QString()) =0;
 	//Data actions
 	virtual int fieldIndex(const QString &AVar, const QList<IDataField> &AFields) const =0;
 	virtual QVariant fieldValue(const QString &AVar, const QList<IDataField> &AFields) const =0;

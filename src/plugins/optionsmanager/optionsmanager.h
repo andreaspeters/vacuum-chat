@@ -43,6 +43,7 @@ class OptionsManager :
 			public IOptionsHolder
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.optionsmanager")
 	Q_INTERFACES(IPlugin IOptionsManager IOptionsHolder);
 public:
 	OptionsManager();
@@ -59,6 +60,7 @@ public:
 	virtual QMultiMap<int, IOptionsWidget *> optionsWidgets(const QString &ANodeId, QWidget *AParent);
 	//IOptionsManager
 	virtual bool isOpened() const;
+	virtual bool saveOptions() const;
 	virtual QList<QString> profiles() const;
 	virtual QString profilePath(const QString &AProfile) const;
 	virtual QString lastActiveProfile() const;
@@ -80,7 +82,7 @@ public:
 	virtual IOptionsDialogNode optionsDialogNode(const QString &ANodeId) const;
 	virtual void insertOptionsDialogNode(const IOptionsDialogNode &ANode);
 	virtual void removeOptionsDialogNode(const QString &ANodeId);
-	virtual QDialog *showOptionsDialog(const QString &ANodeId = QString::null, QWidget *AParent = NULL);
+	virtual QDialog *showOptionsDialog(const QString &ANodeId = QString(), QWidget *AParent = NULL);
 	virtual IOptionsWidget *optionsHeaderWidget(const QString &ACaption, QWidget *AParent) const;
 	virtual IOptionsWidget *optionsNodeWidget(const OptionsNode &ANode, const QString &ACaption, QWidget *AParent) const;
 signals:
@@ -96,7 +98,7 @@ signals:
 protected:
 	void openProfile(const QString &AProfile, const QString &APassword);
 	void closeProfile();
-	bool saveOptions() const;
+
 	bool saveProfile(const QString &AProfile, const QDomDocument &AProfileDoc) const;
 	QDomDocument profileDocument(const QString &AProfile) const;
 	void importOldSettings();

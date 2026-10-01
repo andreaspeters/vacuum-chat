@@ -29,7 +29,11 @@ enum NotificationDataRoles {
 	NDR_TABPAGE_PRIORITY,
 	NDR_TABPAGE_ICONBLINK,
 	// ShowMinimized
-	NDR_SHOWMINIMIZED_WIDGET
+	NDR_SHOWMINIMIZED_WIDGET,
+	// Generic protocol identities (append-only to preserve legacy role values)
+	NDR_ACCOUNT_ID,
+	NDR_USER_ID,
+	NDR_CONVERSATION_ID
 };
 
 #endif // DEF_NOTIFICATIONDATAROLES_H

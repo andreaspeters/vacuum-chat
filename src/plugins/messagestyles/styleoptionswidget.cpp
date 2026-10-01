@@ -24,10 +24,10 @@ StyleOptionsWidget::StyleOptionsWidget(IMessageStyles *AMessageStyles, QWidget *
 		ui.cmbStyleEngine->addItem(FMessageStyles->pluginById(spluginId)->pluginName(),spluginId);
 
 	ui.wdtStyleOptions->setLayout(new QVBoxLayout);
-	ui.wdtStyleOptions->layout()->setMargin(0);
+	ui.wdtStyleOptions->layout()->setContentsMargins(0,0,0,0);
 
 	ui.frmExample->setLayout(new QVBoxLayout);
-	ui.frmExample->layout()->setMargin(0);
+	ui.frmExample->layout()->setContentsMargins(0,0,0,0);
 
 	connect(ui.cmbMessageType,SIGNAL(currentIndexChanged(int)),SLOT(onMessageTypeChanged(int)));
 	connect(ui.cmbStyleEngine,SIGNAL(currentIndexChanged(int)),SLOT(onStyleEngineChanged(int)));

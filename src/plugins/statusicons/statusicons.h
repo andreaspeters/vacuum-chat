@@ -1,7 +1,7 @@
 #ifndef STATUSICONS_H
 #define STATUSICONS_H
 
-#include <QRegExp>
+#include <QRegularExpression>
 #include <definitions/resources.h>
 #include <definitions/statusicons.h>
 #include <definitions/optionvalues.h>
@@ -14,6 +14,7 @@
 #include <definitions/rosterdataholderorders.h>
 #include <interfaces/ipluginmanager.h>
 #include <interfaces/istatusicons.h>
+#include <interfaces/iprotocolstatusicons.h>
 #include <interfaces/iroster.h>
 #include <interfaces/ipresence.h>
 #include <interfaces/irostersmodel.h>
@@ -27,11 +28,13 @@ class StatusIcons :
 			public QObject,
 			public IPlugin,
 			public IStatusIcons,
+			public IProtocolStatusIcons,
 			public IOptionsHolder,
 			public IRosterDataHolder
 {
 	Q_OBJECT;
-	Q_INTERFACES(IPlugin IStatusIcons IOptionsHolder IRosterDataHolder);
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.statusicons")
+	Q_INTERFACES(IPlugin IStatusIcons IProtocolStatusIcons IOptionsHolder IRosterDataHolder);
 public:
 	StatusIcons();
 	~StatusIcons();
@@ -57,6 +60,8 @@ public:
 	virtual void insertRule(const QString &APattern, const QString &ASubStorage, RuleType ARuleType);
 	virtual void removeRule(const QString &APattern, RuleType ARuleType);
 	virtual QIcon iconByJid(const Jid &AStreamJid, const Jid &AContactJid) const;
+	virtual QIcon iconByIdentity(const AccountId &AAccountId, const UserId &AUserId) const;
+	virtual QString iconKeyByIdentity(const AccountId &AAccountId, const UserId &AUserId) const;
 	virtual QIcon iconByStatus(int AShow, const QString &ASubscription, bool AAsk) const;
 	virtual QIcon iconByJidStatus(const Jid &AContactJid, int AShow, const QString &ASubscription, bool AAsk) const;
 	virtual QString iconsetByJid(const Jid &AContactJid) const;

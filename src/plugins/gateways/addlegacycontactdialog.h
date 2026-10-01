@@ -6,7 +6,7 @@
 #include <interfaces/igateways.h>
 #include <interfaces/irosterchanger.h>
 #include <utils/iconstorage.h>
-#include "ui_addlegacycontactdialog.h"
+#include <ui_addlegacycontactdialog.h>
 
 class AddLegacyContactDialog :
 	public QDialog

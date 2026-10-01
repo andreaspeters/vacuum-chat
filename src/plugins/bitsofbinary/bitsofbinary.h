@@ -25,6 +25,7 @@ class BitsOfBinary :
 	public IStanzaRequestOwner
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.bitsofbinary")
 	Q_INTERFACES(IPlugin IBitsOfBinary IXmppStanzaHadler IStanzaHandler IStanzaRequestOwner);
 public:
 	BitsOfBinary();

@@ -375,7 +375,7 @@ bool Gateways::changeService(const Jid &AStreamJid, const Jid &AServiceFrom, con
 
 		//Удаляем подписку у старого транспорта
 		if (ritemOld.isValid && !ARemove)
-			FRosterChanger->unsubscribeContact(AStreamJid,AServiceFrom,QString::null,true);
+			FRosterChanger->unsubscribeContact(AStreamJid,AServiceFrom,QString(),true);
 
 		//Добавляем контакты нового транспорта и удаляем старые
 		QList<IRosterItem> newItems, oldItems, curItems;
@@ -433,7 +433,7 @@ QString Gateways::sendPromptRequest(const Jid &AStreamJid, const Jid &AServiceJi
 		FPromptRequests.append(request.id());
 		return request.id();
 	}
-	return QString::null;
+	return QString();
 }
 
 QString Gateways::sendUserJidRequest(const Jid &AStreamJid, const Jid &AServiceJid, const QString &AContactID)
@@ -447,7 +447,7 @@ QString Gateways::sendUserJidRequest(const Jid &AStreamJid, const Jid &AServiceJ
 		FUserJidRequests.append(request.id());
 		return request.id();
 	}
-	return QString::null;
+	return QString();
 }
 
 QDialog *Gateways::showAddLegacyContactDialog(const Jid &AStreamJid, const Jid &AServiceJid, QWidget *AParent)
@@ -615,7 +615,7 @@ void Gateways::onChangeActionTriggered(bool)
 		Jid serviceTo = action->data(ADR_NEW_SERVICE_JID).toString();
 		if (changeService(streamJid,serviceFrom,serviceTo,true,true))
 		{
-			QString id = FRegistration!=NULL ?  FRegistration->sendRegiterRequest(streamJid,serviceTo) : QString::null;
+			QString id = FRegistration!=NULL ?  FRegistration->sendRegiterRequest(streamJid,serviceTo) : QString();
 			if (!id.isEmpty())
 				FShowRegisterRequests.insert(id,streamJid);
 		}
@@ -635,7 +635,7 @@ void Gateways::onRemoveActionTriggered(bool)
 		{
 			Jid serviceJid = serviceList.first();
 			button = QMessageBox::question(NULL,tr("Remove transport and its contacts"),
-				tr("You are assured that wish to remove a transport '<b>%1</b>' and its <b>%n contacts</b> from roster?","",serviceContacts(streamJid,serviceJid).count()).arg(Qt::escape(serviceJid.domain())),
+				tr("You are assured that wish to remove a transport '<b>%1</b>' and its <b>%n contacts</b> from roster?","",serviceContacts(streamJid,serviceJid).count()).arg(serviceJid.domain().toHtmlEscaped()),
 				QMessageBox::Yes | QMessageBox::No);
 		}
 		else if (serviceList.count() > 1)
@@ -937,7 +937,7 @@ void Gateways::onPrivateDataLoaded(const QString &AId, const Jid &AStreamJid, co
 		{
 			Jid serviceJid = elem.text();
 			FSubscribeServices.insertMulti(AStreamJid,serviceJid);
-			QString id = FRegistration!=NULL ? FRegistration->sendRegiterRequest(AStreamJid,serviceJid) : QString::null;
+			QString id = FRegistration!=NULL ? FRegistration->sendRegiterRequest(AStreamJid,serviceJid) : QString();
 			if (!id.isEmpty())
 				FShowRegisterRequests.insert(id,AStreamJid);
 			elem = elem.nextSiblingElement("service");
@@ -970,7 +970,7 @@ void Gateways::onKeepTimerTimeout()
 					const QList<IPresenceItem> pitems = presence->presenceItems(service);
 					if (pitems.isEmpty() || pitems.at(0).show==IPresence::Error)
 					{
-						presence->sendPresence(service,IPresence::Offline,QString::null,0);
+						presence->sendPresence(service,IPresence::Offline,QString(),0);
 						presence->sendPresence(service,presence->show(),presence->status(),presence->priority());
 					}
 				}
@@ -1060,4 +1060,4 @@ void Gateways::onRegisterError(const QString &AId, const XmppError &AError)
 	FShowRegisterRequests.remove(AId);
 }
 
-Q_EXPORT_PLUGIN2(plg_gateways, Gateways)
+

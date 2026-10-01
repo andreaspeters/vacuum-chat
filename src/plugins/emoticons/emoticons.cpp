@@ -1,5 +1,11 @@
 #include "emoticons.h"
 
+#include <QWidgetAction>
+#include <QScrollArea>
+#include <QToolButton>
+#include "unicodeemoji_data.h"
+#include "unicodeemojigrid.h"
+
 #include <QSet>
 #include <QChar>
 #include <QMimeData>
@@ -181,11 +187,18 @@ QList<QString> Emoticons::activeIconsets() const
 	QList<QString> iconsets = Options::node(OPV_MESSAGES_EMOTICONS).value().toStringList();
 	for (QList<QString>::iterator it = iconsets.begin(); it != iconsets.end(); )
 	{
-		if (!FStorages.contains(*it))
+		if (*it != QStringLiteral("unicode") && !FStorages.contains(*it))
 			it = iconsets.erase(it);
 		else
 			++it;
 	}
+	return iconsets;
+}
+
+QList<QString> Emoticons::availableIconsets() const
+{
+	QList<QString> iconsets = IconStorage::availSubStorages(RSR_STORAGE_EMOTICONS);
+	iconsets.prepend(QStringLiteral("unicode"));
 	return iconsets;
 }
 
@@ -197,6 +210,85 @@ QUrl Emoticons::urlByKey(const QString &AKey) const
 QString Emoticons::keyByUrl(const QUrl &AUrl) const
 {
 	return FKeyByUrl.value(AUrl.toString());
+}
+
+QString Emoticons::unicodeByKey(const QString &AKey) const
+{
+	static const QHash<QString, QString> emojiByName = {
+		{QStringLiteral("smile"), QStringLiteral("😄")},
+		{QStringLiteral("lol"), QStringLiteral("😂")},
+		{QStringLiteral("laugh"), QStringLiteral("😂")},
+		{QStringLiteral("rofl"), QStringLiteral("🤣")},
+		{QStringLiteral("happy"), QStringLiteral("😊")},
+		{QStringLiteral("biggrin"), QStringLiteral("😃")},
+		{QStringLiteral("wink"), QStringLiteral("😉")},
+		{QStringLiteral("blush"), QStringLiteral("😊")},
+		{QStringLiteral("sad"), QStringLiteral("😞")},
+		{QStringLiteral("cry"), QStringLiteral("😢")},
+		{QStringLiteral("mad"), QStringLiteral("😡")},
+		{QStringLiteral("angry"), QStringLiteral("😠")},
+		{QStringLiteral("crazy"), QStringLiteral("🤪")},
+		{QStringLiteral("kiss"), QStringLiteral("😘")},
+		{QStringLiteral("heart"), QStringLiteral("❤️")},
+		{QStringLiteral("ok"), QStringLiteral("👌")},
+		{QStringLiteral("yes"), QStringLiteral("👍")},
+		{QStringLiteral("no"), QStringLiteral("👎")},
+		{QStringLiteral("clapping"), QStringLiteral("👏")},
+		{QStringLiteral("stop"), QStringLiteral("🛑")},
+		{QStringLiteral("help"), QStringLiteral("❓")},
+		{QStringLiteral("angel"), QStringLiteral("😇")},
+		{QStringLiteral("diablo"), QStringLiteral("😈")},
+		{QStringLiteral("rolleyes"), QStringLiteral("🙄")},
+		{QStringLiteral("unsure"), QStringLiteral("😕")},
+		{QStringLiteral("secret"), QStringLiteral("🤐")},
+		{QStringLiteral("drink"), QStringLiteral("🍺")},
+		{QStringLiteral("music"), QStringLiteral("🎵")},
+		{QStringLiteral("rose"), QStringLiteral("🌹")},
+		{QStringLiteral("bomb"), QStringLiteral("💣")},
+		{QStringLiteral("mail"), QStringLiteral("📧")},
+		{QStringLiteral("bye"), QStringLiteral("👋")},
+		{QStringLiteral("greeting"), QStringLiteral("🙋")},
+		{QStringLiteral("dance"), QStringLiteral("💃")}
+	};
+	QString name = AKey;
+	if (name.startsWith(QLatin1Char('*')) && name.endsWith(QLatin1Char('*')))
+		name = name.mid(1, name.size() - 2);
+	if (name.startsWith(QLatin1Char(':')) && name.endsWith(QLatin1Char(':')))
+		name = name.mid(1, name.size() - 2);
+	return emojiByName.value(name);
+}
+
+QString Emoticons::shortcodeByUnicode(const QString &AUnicode) const
+{
+	static const QHash<QString, QString> shortcodeByEmoji = {
+		{QStringLiteral("😄"), QStringLiteral(":smile:")},
+		{QStringLiteral("😂"), QStringLiteral(":lol:")},
+		{QStringLiteral("🤣"), QStringLiteral(":rofl:")},
+		{QStringLiteral("😊"), QStringLiteral(":happy:")},
+		{QStringLiteral("😉"), QStringLiteral(":wink:")},
+		{QStringLiteral("😞"), QStringLiteral(":sad:")},
+		{QStringLiteral("😢"), QStringLiteral(":cry:")},
+		{QStringLiteral("😡"), QStringLiteral(":mad:")},
+		{QStringLiteral("😠"), QStringLiteral(":angry:")},
+		{QStringLiteral("😘"), QStringLiteral(":kiss:")},
+		{QStringLiteral("❤️"), QStringLiteral(":heart:")},
+		{QStringLiteral("👌"), QStringLiteral(":ok:")},
+		{QStringLiteral("👍"), QStringLiteral(":yes:")},
+		{QStringLiteral("👎"), QStringLiteral(":no:")},
+		{QStringLiteral("👏"), QStringLiteral(":clapping:")},
+		{QStringLiteral("😇"), QStringLiteral(":angel:")},
+		{QStringLiteral("😈"), QStringLiteral(":diablo:")},
+		{QStringLiteral("🙄"), QStringLiteral(":rolleyes:")},
+		{QStringLiteral("🍺"), QStringLiteral(":drink:")},
+		{QStringLiteral("🎵"), QStringLiteral(":music:")},
+		{QStringLiteral("🌹"), QStringLiteral(":rose:")},
+		{QStringLiteral("💣"), QStringLiteral(":bomb:")},
+		{QStringLiteral("📧"), QStringLiteral(":mail:")},
+		{QStringLiteral("👋"), QStringLiteral(":bye:")},
+		{QStringLiteral("🙋"), QStringLiteral(":greeting:")},
+		{QStringLiteral("💃"), QStringLiteral(":dance:")}
+	};
+	return shortcodeByEmoji.value(AUnicode);
 }
 
 QMap<int, QString> Emoticons::findTextEmoticons(const QTextDocument *ADocument, int AStartPos, int ALength) const
@@ -440,13 +532,131 @@ void Emoticons::removeSelectIconMenu(const QString &ASubStorage)
 	}
 }
 
+Menu *Emoticons::createUnicodeEmojiMenu(QWidget *AParent)
+{
+	Menu *menu = new Menu(AParent);
+	menu->setTitle(tr("Unicode Emoji"));
+	menu->setStyleSheet(QStringLiteral(
+		"QMenu { padding: 6px; }"
+		"QPushButton { border: 0; border-radius: 6px; padding: 4px; "
+		"min-width: 34px; min-height: 34px; font-size: 22px; }"
+		"QPushButton:hover { background: palette(highlight); }"));
+	QWidget *container = new QWidget(menu);
+	QVBoxLayout *containerLayout = new QVBoxLayout(container);
+	containerLayout->setContentsMargins(2, 2, 2, 2);
+	containerLayout->setSpacing(1);
+	QHBoxLayout *categoryLayout = new QHBoxLayout;
+	categoryLayout->setSpacing(0);
+	UnicodeEmojiGrid *grid = new UnicodeEmojiGrid(container);
+	QScrollArea *scroll = new QScrollArea(container);
+	scroll->setWidgetResizable(true);
+	scroll->setFrameShape(QFrame::NoFrame);
+	scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+	scroll->setMaximumHeight(420);
+	scroll->setWidget(grid);
+	containerLayout->addLayout(categoryLayout);
+	containerLayout->addWidget(scroll);
+
+	const QHash<QString, QString> categoryIcons = {
+		{QStringLiteral("Smileys & Emotion"), QStringLiteral("😀")},
+		{QStringLiteral("People & Body"), QStringLiteral("🧑")},
+		{QStringLiteral("Animals & Nature"), QStringLiteral("🐻")},
+		{QStringLiteral("Food & Drink"), QStringLiteral("🍔")},
+		{QStringLiteral("Travel & Places"), QStringLiteral("🚗")},
+		{QStringLiteral("Activities"), QStringLiteral("⚽")},
+		{QStringLiteral("Objects"), QStringLiteral("💡")},
+		{QStringLiteral("Symbols"), QStringLiteral("❤️")},
+		{QStringLiteral("Flags"), QStringLiteral("🏳️")}
+	};
+
+	const QStringList categoryOrder = QStringList()
+		<< QStringLiteral("Smileys & Emotion") << QStringLiteral("People & Body")
+		<< QStringLiteral("Animals & Nature") << QStringLiteral("Food & Drink")
+		<< QStringLiteral("Travel & Places") << QStringLiteral("Activities")
+		<< QStringLiteral("Objects") << QStringLiteral("Symbols") << QStringLiteral("Flags");
+	for (const QString &category : categoryOrder) {
+		QToolButton *categoryButton = new QToolButton(container);
+		categoryButton->setText(categoryIcons.value(category, QStringLiteral("•")));
+		categoryButton->setToolTip(category);
+		categoryButton->setAutoRaise(true);
+		categoryButton->setCheckable(true);
+		categoryButton->setCursor(Qt::PointingHandCursor);
+		categoryLayout->addWidget(categoryButton);
+		connect(categoryButton, &QToolButton::clicked, grid,
+			[grid, category] { grid->setCategory(category); });
+	}
+	connect(grid, &UnicodeEmojiGrid::emojiSelected,
+		this, &Emoticons::onUnicodeEmojiSelected);
+	if (categoryLayout->count() > 0) {
+		QToolButton *firstCategory = qobject_cast<QToolButton *>(categoryLayout->itemAt(0)->widget());
+		firstCategory->setChecked(true);
+		connect(menu, &QMenu::aboutToShow, firstCategory, &QToolButton::click, Qt::UniqueConnection);
+	}
+	QWidgetAction *gridAction = new QWidgetAction(menu);
+	gridAction->setDefaultWidget(container);
+	menu->QMenu::addAction(gridAction);
+	return menu;
+}
+
+void Emoticons::insertUnicodeEmojiMenu(IToolBarWidget *AWidget)
+{
+	Menu *menu = createUnicodeEmojiMenu(AWidget->instance());
+	QToolButton *button = AWidget->toolBarChanger()->insertAction(menu->menuAction(), TBG_MWTBW_EMOTICONS);
+	button->setToolButtonStyle(Qt::ToolButtonTextOnly);
+	button->setText(QStringLiteral("😀"));
+	button->setToolTip(tr("Emoji"));
+	button->setPopupMode(QToolButton::InstantPopup);
+}
+
+void Emoticons::onUnicodeEmojiSelected(const QString &AEmoji)
+{
+	for (IToolBarWidget *toolbar : FToolBarsWidgets) {
+		QObject *toolbarObject = toolbar->instance();
+		for (QObject *parent = sender(); parent; parent = parent->parent()) {
+			if (parent == toolbarObject) {
+				insertUnicodeEmojiText(toolbar, AEmoji);
+				return;
+			}
+		}
+	}
+}
+
+void Emoticons::removeUnicodeEmojiMenu(IToolBarWidget *AWidget)
+{
+	for (auto it = FToolBarWidgetByUnicodeAction.begin(); it != FToolBarWidgetByUnicodeAction.end(); ) {
+		if (it.value() == AWidget)
+			it = FToolBarWidgetByUnicodeAction.erase(it);
+		else
+			++it;
+	}
+}
+
 void Emoticons::onToolBarWidgetCreated(IToolBarWidget *AWidget)
 {
 	if (AWidget->editWidget() != NULL)
 	{
 		FToolBarsWidgets.append(AWidget);
-		foreach(QString substorage, activeIconsets())
+		QString pickerType;
+		for (QObject *parent = AWidget->instance()->parent(); parent; parent = parent->parent()) {
+			IChatWindow *chatWindow = qobject_cast<IChatWindow *>(parent);
+			if (!chatWindow || chatWindow->accountId().isEmpty())
+				continue;
+			for (IPlugin *plugin : FMessageWidgets->pluginManager()->pluginInterface("IProtocolMessaging")) {
+				IProtocolMessaging *messaging = qobject_cast<IProtocolMessaging *>(plugin->instance());
+				if (messaging && messaging->streamId() == chatWindow->accountId())
+					pickerType = messaging->emojiPickerType();
+			}
+			break;
+		}
+		QStringList pickerIconsets = activeIconsets();
+		if (!pickerType.isEmpty() && pickerType != QStringLiteral("text"))
+			pickerIconsets = QStringList() << pickerType;
+		foreach(QString substorage, pickerIconsets)
 		{
+			if (substorage == QStringLiteral("unicode")) {
+				insertUnicodeEmojiMenu(AWidget);
+				continue;
+			}
 			SelectIconMenu *menu = createSelectIconMenu(substorage,AWidget->instance());
 			FToolBarWidgetByMenu.insert(menu,AWidget);
 			QToolButton *button = AWidget->toolBarChanger()->insertAction(menu->menuAction(),TBG_MWTBW_EMOTICONS);
@@ -484,6 +694,18 @@ void Emoticons::onIconSelected(const QString &ASubStorage, const QString &AIconK
 				QTextEdit *editor = widget->textEdit();
 				QTextCursor cursor = editor->textCursor();
 				cursor.beginEditBlock();
+				QString insertionText = AIconKey;
+				for (QObject *parent = widget->instance()->parent(); parent && insertionText == AIconKey;
+					parent = parent->parent()) {
+					IChatWindow *chatWindow = qobject_cast<IChatWindow *>(parent);
+					if (!chatWindow || chatWindow->accountId().isEmpty())
+						continue;
+					for (IPlugin *plugin : FMessageWidgets->pluginManager()->pluginInterface("IProtocolMessaging")) {
+						IProtocolMessaging *messaging = qobject_cast<IProtocolMessaging *>(plugin->instance());
+						if (messaging && messaging->streamId() == chatWindow->accountId())
+							insertionText = messaging->formatEmoticonForSending(AIconKey);
+					}
+				}
 
 				if (cursor.movePosition(QTextCursor::PreviousCharacter,QTextCursor::KeepAnchor,1))
 				{
@@ -493,7 +715,11 @@ void Emoticons::onIconSelected(const QString &ASubStorage, const QString &AIconK
 						cursor.insertText(" ");
 				}
 				
-				if (widget->isRichTextEnabled())
+				if (insertionText != AIconKey)
+				{
+					cursor.insertText(insertionText);
+				}
+				else if (widget->isRichTextEnabled())
 				{
 					if (!editor->document()->resource(QTextDocument::ImageResource,url).isValid())
 						editor->document()->addResource(QTextDocument::ImageResource,url,QImage(url.toLocalFile()));
@@ -526,6 +752,37 @@ void Emoticons::onSelectIconMenuDestroyed(QObject *AObject)
 			FToolBarWidgetByMenu.remove(menu);
 }
 
+void Emoticons::onUnicodeEmojiTriggered()
+{
+	QAction *action = qobject_cast<QAction *>(sender());
+	IToolBarWidget *toolbar = FToolBarWidgetByUnicodeAction.value(action, nullptr);
+	if (!action || !toolbar || !toolbar->editWidget())
+		return;
+	insertUnicodeEmojiText(toolbar, action->data().toString());
+}
+
+void Emoticons::insertUnicodeEmojiText(IToolBarWidget *toolbar, const QString &key)
+{
+	if (!toolbar || !toolbar->editWidget())
+		return;
+	QString insertionText = key;
+	for (QObject *parent = toolbar->instance()->parent(); parent; parent = parent->parent()) {
+		IChatWindow *chatWindow = qobject_cast<IChatWindow *>(parent);
+		if (!chatWindow || chatWindow->accountId().isEmpty())
+			continue;
+		for (IPlugin *plugin : FMessageWidgets->pluginManager()->pluginInterface("IProtocolMessaging")) {
+			IProtocolMessaging *messaging = qobject_cast<IProtocolMessaging *>(plugin->instance());
+			if (messaging && messaging->streamId() == chatWindow->accountId())
+				insertionText = messaging->formatEmoticonForSending(key);
+		}
+		break;
+	}
+	QTextEdit *editor = toolbar->editWidget()->textEdit();
+	QTextCursor cursor = editor->textCursor();
+	cursor.insertText(insertionText);
+	editor->setFocus();
+}
+
 void Emoticons::onOptionsOpened()
 {
 	onOptionsChanged(Options::node(OPV_MESSAGES_EMOTICONS));
@@ -540,6 +797,11 @@ void Emoticons::onOptionsChanged(const OptionsNode &ANode)
 
 		foreach(QString substorage, Options::node(OPV_MESSAGES_EMOTICONS).value().toStringList())
 		{
+			if (substorage == QStringLiteral("unicode")) {
+				foreach (IToolBarWidget *widget, FToolBarsWidgets)
+					insertUnicodeEmojiMenu(widget);
+				continue;
+			}
 			if (availStorages.contains(substorage))
 			{
 				if (!FStorages.contains(substorage))
@@ -561,4 +823,4 @@ void Emoticons::onOptionsChanged(const OptionsNode &ANode)
 	}
 }
 
-Q_EXPORT_PLUGIN2(plg_emoticons, Emoticons)
+

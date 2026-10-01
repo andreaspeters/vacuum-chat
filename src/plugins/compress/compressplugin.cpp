@@ -75,7 +75,7 @@ QMultiMap<int, IOptionsWidget *> CompressPlugin::optionsWidgets(const QString &A
 	QMultiMap<int, IOptionsWidget *> widgets;
 	if (FOptionsManager)
 	{
-		QStringList nodeTree = ANodeId.split(".",QString::SkipEmptyParts);
+		QStringList nodeTree = ANodeId.split(".",Qt::SkipEmptyParts);
 		if (nodeTree.count()==2 && nodeTree.at(0)==OPN_ACCOUNTS)
 		{
 			OptionsNode aoptions = Options::node(OPV_ACCOUNT_ITEM,nodeTree.at(1));
@@ -113,4 +113,4 @@ void CompressPlugin::onFeatureDestroyed()
 		emit featureDestroyed(feature);
 }
 
-Q_EXPORT_PLUGIN2(plg_compress, CompressPlugin)
+

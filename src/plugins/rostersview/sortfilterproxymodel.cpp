@@ -100,7 +100,7 @@ bool SortFilterProxyModel::filterAcceptsRow(int AModelRow, const QModelIndex &AM
 	{
 		if (sourceModel()->hasChildren(index))
 		{
-			for (int childRow = 0; index.child(childRow,0).isValid(); childRow++)
+			for (int childRow = 0; index.model()->index(childRow,0,index).isValid(); childRow++)
 				if (filterAcceptsRow(childRow,index))
 					return true;
 			return false;

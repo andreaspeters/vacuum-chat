@@ -1,4 +1,6 @@
 #include "servermessagearchive.h"
+#include <algorithm>
+#include <functional>
 
 #include <QDomElement>
 
@@ -105,9 +107,9 @@ void ServerMessageArchive::stanzaRequestResult(const Jid &AStreamJid, const Stan
 			}
 
 			if (request.order == Qt::AscendingOrder)
-				qSort(headers.begin(),headers.end(),qLess<IArchiveHeader>());
+				std::sort(headers.begin(),headers.end(),std::less<IArchiveHeader>());
 			else
-				qSort(headers.begin(),headers.end(),qGreater<IArchiveHeader>());
+				std::sort(headers.begin(),headers.end(),[](const IArchiveHeader &left,const IArchiveHeader &right){ return right < left; });
 
 			if (request.maxItems>0 && headers.count()>request.maxItems)
 				headers = headers.mid(0,request.maxItems);
@@ -269,7 +271,7 @@ QString ServerMessageArchive::saveCollection(const Jid &AStreamJid, const IArchi
 			return save.id();
 		}
 	}
-	return QString::null;
+	return QString();
 }
 
 QString ServerMessageArchive::loadHeaders(const Jid &AStreamJid, const IArchiveRequest &ARequest)
@@ -284,7 +286,7 @@ QString ServerMessageArchive::loadHeaders(const Jid &AStreamJid, const IArchiveR
 		FHeadersRequests.insert(id,request);
 		return request.id;
 	}
-	return QString::null;
+	return QString();
 }
 
 QString ServerMessageArchive::loadCollection(const Jid &AStreamJid, const IArchiveHeader &AHeader)
@@ -299,7 +301,7 @@ QString ServerMessageArchive::loadCollection(const Jid &AStreamJid, const IArchi
 		FCollectionRequests.insert(id,request);
 		return request.id;
 	}
-	return QString::null;
+	return QString();
 }
 
 QString ServerMessageArchive::removeCollections(const Jid &AStreamJid, const IArchiveRequest &ARequest)
@@ -327,7 +329,7 @@ QString ServerMessageArchive::removeCollections(const Jid &AStreamJid, const IAr
 			return remove.id();
 		}
 	}
-	return QString::null;
+	return QString();
 }
 
 QString ServerMessageArchive::loadModifications(const Jid &AStreamJid, const QDateTime &AStart, int ACount)
@@ -343,7 +345,7 @@ QString ServerMessageArchive::loadModifications(const Jid &AStreamJid, const QDa
 		FModificationsRequests.insert(id,request);
 		return request.id;
 	}
-	return QString::null;
+	return QString();
 }
 
 QString ServerMessageArchive::loadServerHeaders(const Jid &AStreamJid, const IArchiveRequest &ARequest, const IArchiveResultSet &AResult)
@@ -370,7 +372,7 @@ QString ServerMessageArchive::loadServerHeaders(const Jid &AStreamJid, const IAr
 			return request.id();
 		}
 	}
-	return QString::null;
+	return QString();
 }
 
 QString ServerMessageArchive::loadServerCollection(const Jid &AStreamJid, const IArchiveHeader &AHeader, const IArchiveResultSet &AResult)
@@ -391,7 +393,7 @@ QString ServerMessageArchive::loadServerCollection(const Jid &AStreamJid, const 
 			return retrieve.id();
 		}
 	}
-	return QString::null;
+	return QString();
 }
 
 QString ServerMessageArchive::loadServerModifications(const Jid &AStreamJid, const QDateTime &AStart, int ACount, const IArchiveResultSet &AResult)
@@ -411,7 +413,7 @@ QString ServerMessageArchive::loadServerModifications(const Jid &AStreamJid, con
 			return modify.id();
 		}
 	}
-	return QString::null;
+	return QString();
 }
 
 IArchiveResultSet ServerMessageArchive::readResultSetAnswer(const QDomElement &AElem) const
@@ -541,4 +543,4 @@ void ServerMessageArchive::onServerModificationsLoaded(const QString &AId, const
 	}
 }
 
-Q_EXPORT_PLUGIN2(plg_servermessagearchive, ServerMessageArchive)
+

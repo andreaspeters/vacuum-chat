@@ -5,7 +5,7 @@
 #include <QAbstractItemModel>
 #include <utils/jid.h>
 
-#define ROSTERSMODEL_UUID "{C1A1BBAB-06AF-41c8-BFBE-959F1065D80D}"
+#define ROSTERSMODEL_UUID QUuid("{C1A1BBAB-06AF-41c8-BFBE-959F1065D80D}")
 
 class IRosterIndex;
 
@@ -66,6 +66,8 @@ class IRostersModel
 public:
 	virtual QAbstractItemModel *instance() =0;
 	virtual IRosterIndex *addStream(const Jid &AStreamJid) =0;
+	virtual IRosterIndex *addProtocolStream(const QString &AAccountId) =0;
+	virtual IRosterIndex *protocolStreamRoot(const QString &AAccountId) const =0;
 	virtual QList<Jid> streams() const =0;
 	virtual void removeStream(const Jid &AStreamJid) =0;
 	virtual IRosterIndex *rootIndex() const =0;

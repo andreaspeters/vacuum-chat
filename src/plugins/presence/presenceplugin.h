@@ -13,6 +13,7 @@ class PresencePlugin :
 			public IPresencePlugin
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.presence")
 	Q_INTERFACES(IPlugin IPresencePlugin);
 public:
 	PresencePlugin();
@@ -30,7 +31,7 @@ public:
 	virtual IPresence *findPresence(const Jid &AStreamJid) const;
 	virtual bool isContactOnline(const Jid &AContactJid) const { return FContactPresences.contains(AContactJid); }
 	virtual QList<Jid> contactsOnline() const { return FContactPresences.keys(); }
-	virtual QList<IPresence *> contactPresences(const Jid &AContactJid) const { return FContactPresences.value(AContactJid).toList(); }
+	virtual QList<IPresence *> contactPresences(const Jid &AContactJid) const { QList<IPresence *> result; const QSet<IPresence *> presences = FContactPresences.value(AContactJid); for (IPresence *presence : presences) result.append(presence); return result; }
 	virtual void removePresence(IXmppStream *AXmppStream);
 signals:
 	void streamStateChanged(const Jid &AStreamJid, bool AStateOnline);

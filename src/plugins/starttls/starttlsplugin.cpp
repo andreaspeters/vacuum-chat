@@ -62,4 +62,4 @@ void StartTLSPlugin::onFeatureDestroyed()
 		emit featureDestroyed(feature);
 }
 
-Q_EXPORT_PLUGIN2(plg_starttls, StartTLSPlugin)
+

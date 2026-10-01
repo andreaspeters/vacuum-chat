@@ -104,6 +104,7 @@
 #define OPV_MESSAGES_CHATSTATESENABLED                  "messages.chatstates-enabled"
 // ChatMessageHandler
 #define OPV_MESSAGES_LOAD_HISTORY                       "messages.load-chat-history"
+#define OPV_MESSAGES_MUTED_TARGETS                      "messages.muted-notification-targets"
 // NormalMessageHandler
 #define OPV_MESSAGES_UNNOTIFYALLNORMAL                  "messages.unnotify-all-normal-messages"
 // MessageStyles

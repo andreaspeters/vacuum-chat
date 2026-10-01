@@ -2,6 +2,7 @@
 #define SATEWIDGET_H
 
 #include <QLabel>
+#include <QString>
 #include <QToolButton>
 #include <definitions/menuicons.h>
 #include <definitions/resources.h>
@@ -21,7 +22,9 @@ protected slots:
 	void onStatusActionTriggered(bool);
 	void onPermitStatusChanged(const Jid &AContactJid, int AStatus);
 	void onUserChatStateChanged(const Jid &AStreamJid, const Jid &AContactJid, int AState);
+	void onProtocolUserChatStateChanged(const QString &accountId, const QString &conversationId, int AState);
 private:
+	void updateUserChatState(int AState);
 	IChatWindow *FWindow;
 	IChatStates *FChatStates;
 private:

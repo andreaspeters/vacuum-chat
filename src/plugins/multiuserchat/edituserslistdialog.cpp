@@ -46,13 +46,13 @@ EditUsersListDialog::EditUsersListDialog(const QString &AAffiliation, const QLis
 
 	if (AAffiliation == MUC_AFFIL_OUTCAST)
 	{
-		ui.tbwTable->horizontalHeader()->setResizeMode(0,QHeaderView::ResizeToContents);
-		ui.tbwTable->horizontalHeader()->setResizeMode(1,QHeaderView::Stretch);
+		ui.tbwTable->horizontalHeader()->setSectionResizeMode(0,QHeaderView::ResizeToContents);
+		ui.tbwTable->horizontalHeader()->setSectionResizeMode(1,QHeaderView::Stretch);
 	}
 	else
 	{
 		ui.tbwTable->hideColumn(1);
-		ui.tbwTable->horizontalHeader()->setResizeMode(0,QHeaderView::Stretch);
+		ui.tbwTable->horizontalHeader()->setSectionResizeMode(0,QHeaderView::Stretch);
 	}
 	// default sort to JID column
 	ui.tbwTable->setSortingEnabled(true);

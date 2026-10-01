@@ -8,10 +8,7 @@ include("loader.cmake")
 
 project(loader CXX)
 
-include_directories("${CMAKE_SOURCE_DIR}/src" "${CMAKE_BINARY_DIR}/src/loader")
-set(QT_USE_QTXML YES)
-set(QT_USE_QTMAIN YES)
-include(${QT_USE_FILE})
+include_directories("${CMAKE_BINARY_DIR}/src/loader" "${CMAKE_SOURCE_DIR}/src")
 
 set(VER_STRING "" CACHE STRING "This string will be appended to program version (defaults to SVN revision number)")
 
@@ -42,9 +39,17 @@ if (WIN32)
 endif (WIN32)
 
 add_translations(TRANSLATIONS "${VACUUM_LOADER_NAME}" ${SOURCES} ${UIS})
-add_executable(${VACUUM_LOADER_NAME} WIN32 ${SOURCES} ${MOC_SOURCES} ${UI_HEADERS} ${TRANSLATIONS})
+add_executable(${VACUUM_LOADER_NAME} WIN32 ${SOURCES} ${HEADERS} ${UIS} ${TRANSLATIONS})
 set_target_properties(${VACUUM_LOADER_NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
-target_link_libraries(${VACUUM_LOADER_NAME} ${VACUUM_UTILS_NAME} ${QT_LIBRARIES})
+
+# Qt6 setup
+target_link_libraries(${VACUUM_LOADER_NAME} PRIVATE
+	${VACUUM_UTILS_NAME}
+	Qt6::Core
+	Qt6::Gui
+	Qt6::Widgets
+	Qt6::Xml
+)
 
 install(TARGETS ${VACUUM_LOADER_NAME}
 	RUNTIME	DESTINATION "${INSTALL_BINS}"

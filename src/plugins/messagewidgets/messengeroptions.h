@@ -5,7 +5,7 @@
 #include <interfaces/imessagewidgets.h>
 #include <interfaces/ioptionsmanager.h>
 #include <utils/options.h>
-#include "ui_messengeroptions.h"
+#include <ui_messengeroptions.h>
 
 class MessengerOptions :
 			public QWidget,

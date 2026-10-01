@@ -12,7 +12,7 @@ RegisterDialog::RegisterDialog(IRegistration *ARegistration, IDataForms *ADataFo
 	IconStorage::staticStorage(RSR_STORAGE_MENUICONS)->insertAutoIcon(this,MNI_REGISTERATION,0,0,"windowIcon");
 
 	ui.spgDataForm->setLayout(new QVBoxLayout);
-	ui.spgDataForm->layout()->setMargin(0);
+	ui.spgDataForm->layout()->setContentsMargins(0,0,0,0);
 
 	FRegistration = ARegistration;
 	FDataForms = ADataForms;
@@ -47,7 +47,7 @@ void RegisterDialog::resetDialog()
 		FCurrentForm->instance()->deleteLater();
 		FCurrentForm = NULL;
 	}
-	ui.lblInstuctions->setText(QString::null);
+	ui.lblInstuctions->setText(QString());
 	ui.lneUserName->setVisible(false);
 	ui.lblUserName->setVisible(false);
 	ui.lnePassword->setVisible(false);
@@ -84,7 +84,7 @@ void RegisterDialog::doRegister()
 void RegisterDialog::doUnregister()
 {
 	resetDialog();
-	ui.lblInstuctions->setText(tr("Do you really want to remove registration from %1?").arg(Qt::escape(FServiceJid.uFull())));
+	ui.lblInstuctions->setText(tr("Do you really want to remove registration from %1?").arg(FServiceJid.uFull().toHtmlEscaped()));
 	ui.dbbButtons->setStandardButtons(QDialogButtonBox::Ok|QDialogButtonBox::Cancel);
 }
 
@@ -144,11 +144,11 @@ void RegisterDialog::onRegisterSuccessful(const QString &AId)
 	{
 		resetDialog();
 		if (FOperation == IRegistration::Register)
-			ui.lblInstuctions->setText(tr("You are successfully registered at %1").arg(Qt::escape(FSubmit.serviceJid.uFull())));
+			ui.lblInstuctions->setText(tr("You are successfully registered at %1").arg(FSubmit.serviceJid.uFull().toHtmlEscaped()));
 		else if (FOperation == IRegistration::Unregister)
-			ui.lblInstuctions->setText(tr("You are successfully unregistered from %1").arg(Qt::escape(FSubmit.serviceJid.uFull())));
+			ui.lblInstuctions->setText(tr("You are successfully unregistered from %1").arg(FSubmit.serviceJid.uFull().toHtmlEscaped()));
 		else if (FOperation == IRegistration::ChangePassword)
-			ui.lblInstuctions->setText(tr("Password was successfully changed at %1").arg(Qt::escape(FSubmit.serviceJid.uFull())));
+			ui.lblInstuctions->setText(tr("Password was successfully changed at %1").arg(FSubmit.serviceJid.uFull().toHtmlEscaped()));
 
 		ui.dbbButtons->setStandardButtons(QDialogButtonBox::Close);
 	}

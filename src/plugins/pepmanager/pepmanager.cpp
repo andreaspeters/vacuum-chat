@@ -64,7 +64,7 @@ bool PEPManager::stanzaReadWrite(int AHandleId, const Jid &AStreamJid, Stanza &A
 	if (stanzaHandles.value(AStreamJid) == AHandleId)
 	{
 		bool hooked = false;
-		QString node = AStanza.firstElement("event", NS_PUBSUB_EVENT).firstChildElement("items").attribute("node", QString::null);
+		QString node = AStanza.firstElement("event", NS_PUBSUB_EVENT).firstChildElement("items").attribute("node", QString());
 
 		QList<int> handlers = handlersByNode.values(node);
 		foreach(int handlerId, handlers)
@@ -178,4 +178,4 @@ void PEPManager::onPEPHandlerDestroyed(QObject *AHandler)
 	}
 }
 
-Q_EXPORT_PLUGIN2(plg_pepmanager, PEPManager)
+

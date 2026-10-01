@@ -45,7 +45,7 @@ bool DefaultConnectionPlugin::initSettings()
 {
 	Options::setDefaultValue(OPV_ACCOUNT_CONNECTION_HOST,QString());
 	Options::setDefaultValue(OPV_ACCOUNT_CONNECTION_PORT,5222);
-	Options::setDefaultValue(OPV_ACCOUNT_CONNECTION_PROXY,QString(APPLICATION_PROXY_REF_UUID));
+	Options::setDefaultValue(OPV_ACCOUNT_CONNECTION_PROXY,APPLICATION_PROXY_REF_UUID.toString());
 	Options::setDefaultValue(OPV_ACCOUNT_CONNECTION_USELEGACYSSL,false);
 	return true;
 }
@@ -138,19 +138,19 @@ void DefaultConnectionPlugin::onConnectionSSLErrorsOccured(const QList<QSslError
 			errorList += "</ul>";
 
 			QStringList certInfo = QStringList()
-				<< tr("Organization: %1").arg(peerCert.subjectInfo(QSslCertificate::Organization))
-				<< tr("Subunit: %1").arg(peerCert.subjectInfo(QSslCertificate::OrganizationalUnitName))
-				<< tr("Country: %1").arg(peerCert.subjectInfo(QSslCertificate::CountryName))
-				<< tr("Locality: %1").arg(peerCert.subjectInfo(QSslCertificate::LocalityName))
-				<< tr("State/Province: %1").arg(peerCert.subjectInfo(QSslCertificate::StateOrProvinceName))
-				<< tr("Common Name: %1").arg(peerCert.subjectInfo(QSslCertificate::CommonName))
-				<< QString::null
-				<< tr("Issuer Organization: %1").arg(peerCert.issuerInfo(QSslCertificate::Organization))
-				<< tr("Issuer Unit Name: %1").arg(peerCert.issuerInfo(QSslCertificate::OrganizationalUnitName))
-				<< tr("Issuer Country: %1").arg(peerCert.issuerInfo(QSslCertificate::CountryName))
-				<< tr("Issuer Locality: %1").arg(peerCert.issuerInfo(QSslCertificate::LocalityName))
-				<< tr("Issuer State/Province: %1").arg(peerCert.issuerInfo(QSslCertificate::StateOrProvinceName))
-				<< tr("Issuer Common Name: %1").arg(peerCert.issuerInfo(QSslCertificate::CommonName));
+				<< tr("Organization: %1").arg(peerCert.subjectInfo(QSslCertificate::Organization).join(", "))
+				<< tr("Subunit: %1").arg(peerCert.subjectInfo(QSslCertificate::OrganizationalUnitName).join(", "))
+				<< tr("Country: %1").arg(peerCert.subjectInfo(QSslCertificate::CountryName).join(", "))
+				<< tr("Locality: %1").arg(peerCert.subjectInfo(QSslCertificate::LocalityName).join(", "))
+				<< tr("State/Province: %1").arg(peerCert.subjectInfo(QSslCertificate::StateOrProvinceName).join(", "))
+				<< tr("Common Name: %1").arg(peerCert.subjectInfo(QSslCertificate::CommonName).join(", "))
+				<< QString()
+				<< tr("Issuer Organization: %1").arg(peerCert.issuerInfo(QSslCertificate::Organization).join(", "))
+				<< tr("Issuer Unit Name: %1").arg(peerCert.issuerInfo(QSslCertificate::OrganizationalUnitName).join(", "))
+				<< tr("Issuer Country: %1").arg(peerCert.issuerInfo(QSslCertificate::CountryName).join(", "))
+				<< tr("Issuer Locality: %1").arg(peerCert.issuerInfo(QSslCertificate::LocalityName).join(", "))
+				<< tr("Issuer State/Province: %1").arg(peerCert.issuerInfo(QSslCertificate::StateOrProvinceName).join(", "))
+				<< tr("Issuer Common Name: %1").arg(peerCert.issuerInfo(QSslCertificate::CommonName).join(", "));
 
 			QMessageBox dialog;
 			dialog.setIcon(QMessageBox::Warning);
@@ -189,4 +189,4 @@ void DefaultConnectionPlugin::onConnectionDestroyed()
 		emit connectionDestroyed(connection);
 }
 
-Q_EXPORT_PLUGIN2(plg_defaultconnection, DefaultConnectionPlugin)
+

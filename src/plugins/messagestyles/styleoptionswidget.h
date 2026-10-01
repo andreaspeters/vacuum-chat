@@ -8,7 +8,7 @@
 #include <interfaces/iroster.h>
 #include <utils/message.h>
 #include <utils/options.h>
-#include "ui_styleoptionswidget.h"
+#include <ui_styleoptionswidget.h>
 
 class StyleOptionsWidget :
 			public QWidget,

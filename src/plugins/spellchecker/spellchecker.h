@@ -16,6 +16,7 @@ class SpellChecker :
 	public ISpellChecker
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.spellchecker")
 	Q_INTERFACES(IPlugin ISpellChecker);
 public:
 	SpellChecker();

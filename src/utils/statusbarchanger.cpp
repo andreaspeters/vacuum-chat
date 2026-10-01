@@ -46,7 +46,9 @@ QStatusBar *StatusBarChanger::statusBar() const
 
 int StatusBarChanger::widgetGroup(QWidget *AWidget) const
 {
-	QMultiMap<int, QWidget *>::const_iterator it = qFind(FWidgets.begin(),FWidgets.end(),AWidget);
+	QMultiMap<int, QWidget *>::const_iterator it = FWidgets.constBegin();
+	while (it != FWidgets.constEnd() && it.value() != AWidget)
+		++it;
 	if (it != FWidgets.constEnd())
 		return it.key();
 	return SBG_NULL;
@@ -61,7 +63,9 @@ QList<QWidget *> StatusBarChanger::groupWidgets(int AGroup) const
 
 void StatusBarChanger::insertWidget(QWidget *AWidget, int AGroup, bool APermanent, int AStretch)
 {
-	QMultiMap<int, QWidget *>::iterator it = qFind(FWidgets.begin(),FWidgets.end(),AWidget);
+	QMultiMap<int, QWidget *>::iterator it = FWidgets.begin();
+	while (it != FWidgets.end() && it.value() != AWidget)
+		++it;
 	if (it == FWidgets.end())
 	{
 		it = FWidgets.upperBound(AGroup);
@@ -92,7 +96,9 @@ void StatusBarChanger::insertWidget(QWidget *AWidget, int AGroup, bool APermanen
 
 void StatusBarChanger::removeWidget(QWidget *AWidget)
 {
-	QMultiMap<int, QWidget *>::iterator it = qFind(FWidgets.begin(),FWidgets.end(),AWidget);
+	QMultiMap<int, QWidget *>::iterator it = FWidgets.begin();
+	while (it != FWidgets.end() && it.value() != AWidget)
+		++it;
 	if (it != FWidgets.end())
 	{
 		disconnect(AWidget,SIGNAL(destroyed(QObject *)),this,SLOT(onWidgetDestroyed(QObject *)));

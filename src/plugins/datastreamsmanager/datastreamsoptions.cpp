@@ -10,7 +10,7 @@ DataStreamsOptions::DataStreamsOptions(IDataStreamsManager *ADataManager, QWidge
 	FDataManager = ADataManager;
 
 	FWidgetLayout = new QVBoxLayout;
-	FWidgetLayout->setMargin(0);
+	FWidgetLayout->setContentsMargins(0,0,0,0);
 	ui.wdtSettings->setLayout(FWidgetLayout);
 
 	connect(ui.pbtAddProfile, SIGNAL(clicked(bool)),SLOT(onAddProfileButtonClicked(bool)));
@@ -33,7 +33,7 @@ void DataStreamsOptions::apply()
 
 	for (int index=0; index<ui.cmbProfile->count(); index++)
 	{
-		QUuid profileId = ui.cmbProfile->itemData(index).toString();
+		QUuid profileId = QUuid::fromString(ui.cmbProfile->itemData(index).toString());
 		QString name = ui.cmbProfile->itemText(index);
 		FDataManager->insertSettingsProfile(profileId, name);
 
@@ -97,7 +97,7 @@ void DataStreamsOptions::onAddProfileButtonClicked(bool)
 	QString name = QInputDialog::getText(this,tr("Add Profile"),tr("Enter profile name:"));
 	if (!name.isEmpty())
 	{
-		QUuid newProfileId = QUuid::createUuid().toString();
+		QUuid newProfileId = QUuid::createUuid();
 		FNewProfiles.append(newProfileId);
 		ui.cmbProfile->addItem(name,newProfileId.toString());
 		ui.cmbProfile->setCurrentIndex(ui.cmbProfile->count()-1);
@@ -137,7 +137,7 @@ void DataStreamsOptions::onCurrentProfileChanged(int AIndex)
 		widget->instance()->setParent(NULL);
 	}
 
-	FCurProfileId = ui.cmbProfile->itemData(AIndex).toString();
+	FCurProfileId = QUuid::fromString(ui.cmbProfile->itemData(AIndex).toString());
 
 	foreach(QString smethodNS, FDataManager->methods())
 	{

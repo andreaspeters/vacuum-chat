@@ -21,7 +21,7 @@
 #include <utils/iconstorage.h>
 #include <utils/textmanager.h>
 #include <utils/widgetmanager.h>
-#include "ui_archiveviewwindow.h"
+#include <ui_archiveviewwindow.h>
 
 enum RequestStatus {
 	RequestFinished,
@@ -84,8 +84,8 @@ protected:
 protected:
 	QDate currentPage() const;
 	void setRequestStatus(RequestStatus AStatus, const QString &AMessage);
-	void setPageStatus(RequestStatus AStatus, const QString &AMessage = QString::null);
-	void setMessagesStatus(RequestStatus AStatus, const QString &AMessage = QString::null);
+	void setPageStatus(RequestStatus AStatus, const QString &AMessage = QString());
+	void setMessagesStatus(RequestStatus AStatus, const QString &AMessage = QString());
 protected:
 	void clearMessages();
 	void processCollectionsLoad();

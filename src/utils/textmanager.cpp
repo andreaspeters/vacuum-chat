@@ -1,17 +1,18 @@
 #include "textmanager.h"
 
 #include <QTextBlock>
+#include <QRegularExpression>
 
 QString TextManager::getDocumentBody(const QTextDocument &ADocument)
 {
-	QRegExp body("<body.*>(.*)</body>");
-	body.setMinimal(false);
+	QRegularExpression body("<body.*>(.*)</body>", QRegularExpression::DotMatchesEverythingOption);
 	QString html = ADocument.toHtml();
-	html = html.indexOf(body)>=0 ? body.cap(1).trimmed() : html;
+	QRegularExpressionMatch bodyMatch = body.match(html);
+	html = bodyMatch.hasMatch() ? bodyMatch.captured(1).trimmed() : html;
 
 	// XXX Replace <P> inserted by QTextDocument with <SPAN>
-	if (html.leftRef(3).compare("<p ", Qt::CaseInsensitive) == 0 &&
-		html.rightRef(4).compare("</p>", Qt::CaseInsensitive) == 0)
+	if (html.left(3).compare("<p ", Qt::CaseInsensitive) == 0 &&
+		html.right(4).compare("</p>", Qt::CaseInsensitive) == 0)
 	{
 		html.replace(1, 1, "span");
 		html.replace(html.length() - 2, 1, "span");
@@ -37,11 +38,11 @@ QString TextManager::getTextFragmentHref(const QTextDocumentFragment &AFragment)
 				if (href.isNull())
 					href = it.fragment().charFormat().anchorHref();
 				else if (href != it.fragment().charFormat().anchorHref())
-					return QString::null;
+					return QString();
 			}
 			else
 			{
-				return QString::null;
+				return QString();
 			}
 		}
 		block = block.next();

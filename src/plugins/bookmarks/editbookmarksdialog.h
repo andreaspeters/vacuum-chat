@@ -7,7 +7,7 @@
 #include <definitions/menuicons.h>
 #include <interfaces/ibookmarks.h>
 #include <utils/iconstorage.h>
-#include "ui_editbookmarksdialog.h"
+#include <ui_editbookmarksdialog.h>
 
 class EditBookmarksDialog :
 			public QDialog

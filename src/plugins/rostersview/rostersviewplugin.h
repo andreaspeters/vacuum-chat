@@ -37,6 +37,7 @@ class RostersViewPlugin :
 	public IRosterDataHolder
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.rostersview")
 	Q_INTERFACES(IPlugin IRostersViewPlugin IOptionsHolder IRosterDataHolder);
 public:
 	RostersViewPlugin();

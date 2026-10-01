@@ -29,6 +29,7 @@ class AccountManager :
 			public IOptionsHolder
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.accountmanager")
 	Q_INTERFACES(IPlugin IAccountManager IOptionsHolder);
 public:
 	AccountManager();
@@ -46,6 +47,7 @@ public:
 	//IAccountManager
 	virtual QList<IAccount *> accounts() const;
 	virtual IAccount *accountById(const QUuid &AAcoountId) const;
+	virtual IAccount *accountByProtocolId(const AccountId &AAccountId) const;
 	virtual IAccount *accountByStream(const Jid &AStreamJid) const;
 	virtual IAccount *appendAccount(const QUuid &AAccountId);
 	virtual void showAccount(const QUuid &AAccountId);
@@ -59,6 +61,8 @@ signals:
 	void removed(IAccount *AAccount);
 	void changed(IAccount *AAcount, const OptionsNode &ANode);
 	void destroyed(const QUuid &AAccountId);
+	void matrixVerificationRequested(const QUuid &accountId, const QString &userId,
+		const QString &deviceId);
 public:
 	void showAccountOptionsDialog(const QUuid &AAccountId);
 	void openAccountOptionsNode(const QUuid &AAccountId, const QString &AName);
@@ -72,10 +76,16 @@ protected slots:
 	void onAccountActiveChanged(bool AActive);
 	void onAccountOptionsChanged(const OptionsNode &ANode);
 	void onRosterIndexContextMenu(const QList<IRosterIndex *> &AIndexes, quint32 ALabelId, Menu *AMenu);
+
+	void onMatrixVerificationRequested(const QUuid &accountId, const QString &userId,
+		const QString &deviceId);
+	void onMatrixSsssRecoveryRequested(const QUuid &accountId);
+	void onMatrixRoomKeyImportRequested(const QUuid &accountId);
 private:
 	IXmppStreams *FXmppStreams;
 	IOptionsManager *FOptionsManager;
 	IRostersViewPlugin *FRostersViewPlugin;
+	IPluginManager *FPluginManager;
 private:
 	QMap<QUuid, IAccount *> FAccounts;
 };

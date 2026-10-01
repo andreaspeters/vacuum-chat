@@ -1,9 +1,10 @@
 #ifndef CHATMESSAGEHANDLER_H
 #define CHATMESSAGEHANDLER_H
 
-#define CHATMESSAGEHANDLER_UUID "{b60cc0e4-8006-4909-b926-fcb3cbc506f0}"
+#define CHATMESSAGEHANDLER_UUID QUuid("{b60cc0e4-8006-4909-b926-fcb3cbc506f0}")
 
 #include <QTimer>
+#include <QSet>
 #include <definitions/messagehandlerorders.h>
 #include <definitions/rosterindextyperole.h>
 #include <definitions/rosterclickhookerorders.h>
@@ -27,6 +28,8 @@
 #include <definitions/xmppurihandlerorders.h>
 #include <interfaces/ipluginmanager.h>
 #include <interfaces/imessageprocessor.h>
+#include <interfaces/iprotocolmessaging.h>
+#include <interfaces/iprotocolroster.h>
 #include <interfaces/imessagewidgets.h>
 #include <interfaces/imessagestyles.h>
 #include <interfaces/imessagearchiver.h>
@@ -41,6 +44,7 @@
 #include <interfaces/istatuschanger.h>
 #include <interfaces/ixmppuriqueries.h>
 #include <interfaces/irecentcontacts.h>
+#include <interfaces/ifiletransfer.h>
 #include <utils/widgetmanager.h>
 #include <utils/options.h>
 #include <utils/shortcuts.h>
@@ -55,6 +59,13 @@ struct WindowStatus
 	QDate lastDateSeparator;
 };
 
+struct ProtocolReactionSource
+{
+	QString targetKey;
+	QString reactionKey;
+	QString senderId;
+};
+
 class ChatMessageHandler :
 	public QObject,
 	public IPlugin,
@@ -64,6 +75,7 @@ class ChatMessageHandler :
 	public IOptionsHolder
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.chatmessagehandler")
 	Q_INTERFACES(IPlugin IMessageHandler IRostersClickHooker IXmppUriHandler IOptionsHolder);
 public:
 	ChatMessageHandler();
@@ -75,7 +87,7 @@ public:
 	virtual bool initConnections(IPluginManager *APluginManager, int &AInitOrder);
 	virtual bool initObjects();
 	virtual bool initSettings();
-	virtual bool startPlugin() { return true; }
+	virtual bool startPlugin();
 	//IXmppUriHandler
 	virtual bool xmppUriOpen(const Jid &AStreamJid, const Jid &AContactJid, const QString &AAction, const QMultiMap<QString, QString> &AParams);
 	//IRostersClickHooker
@@ -94,6 +106,22 @@ protected:
 	IChatWindow *findWindow(const Jid &AStreamJid, const Jid &AContactJid) const;
 	IChatWindow *findSubstituteWindow(const Jid &AStreamJid, const Jid &AContactJid) const;
 	void updateWindow(IChatWindow *AWindow);
+	void setupProtocolWindow(IChatWindow *AWindow, IProtocolMessaging *AMessaging);
+	void setupFileTransferAction(IChatWindow *AWindow, IProtocolMessaging *AMessaging = nullptr);
+	void setupRoomSidebar(IChatWindow *AWindow, IProtocolMessaging *AMessaging);
+	void showRoomMemberProfile(QWidget *AParent, IProtocolMessaging *AMessaging,
+		const ProtocolRoom &ARoom, const ProtocolRosterEntry &AMember);
+	void renderProtocolMessage(IChatWindow *AWindow, IProtocolMessaging *AMessaging, const BasicMessage &AMessage);
+	void renderProtocolHistory(IChatWindow *AWindow, IProtocolMessaging *AMessaging);
+	void rebuildProtocolConversation(IChatWindow *AWindow, IProtocolMessaging *AMessaging,
+		const QString &AHistoryKey);
+	void sortProtocolMessagesChronologically(QList<BasicMessage> &AMessages) const;
+	void addProtocolReaction(IChatWindow *AWindow, IProtocolMessaging *AMessaging,
+		const BasicMessage &AMessage);
+	void removeProtocolReaction(IChatWindow *AWindow, const QString &eventPrefix,
+		const QString &eventId);
+	void updateProtocolReactionDecoration(IChatWindow *AWindow, const QString &targetKey,
+		const QString &targetEventId);
 	void removeNotifiedMessages(IChatWindow *AWindow);
 	void showHistory(IChatWindow *AWindow);
 	void setMessageStyle(IChatWindow *AWindow);
@@ -103,6 +131,13 @@ protected:
 	void showStyledMessage(IChatWindow *AWindow, const Message &AMessage);
 	bool isSelectionAccepted(const QList<IRosterIndex *> &ASelected) const;
 protected slots:
+	void onProtocolMessageReceived(const BasicMessage &AMessage);
+	void onProtocolHistoryLoaded(const QString &ARoomId);
+	void onProtocolViewContextMenu(const QPoint &APosition,
+		const QTextDocumentFragment &ASelection, Menu *AMenu);
+	void onProtocolRosterChanged();
+	void onProtocolAvatarUpdated(const QString &key);
+	void onProtocolUrlClicked(const QUrl &AUrl);
 	void onMessageReady();
 	void onWindowActivated();
 	void onWindowClosed();
@@ -121,6 +156,9 @@ protected slots:
 private:
 	IMessageWidgets *FMessageWidgets;
 	IMessageProcessor *FMessageProcessor;
+	IPluginManager *FPluginManager;
+	QList<IProtocolMessaging *> FProtocolMessaging;
+	IProtocolRoster *FProtocolRoster;
 	IMessageStyles *FMessageStyles;
 	IPresencePlugin *FPresencePlugin;
 	IMessageArchiver *FMessageArchiver;
@@ -131,11 +169,24 @@ private:
 	IXmppUriQueries *FXmppUriQueries;
 	IOptionsManager *FOptionsManager;
 	IRecentContacts *FRecentContacts;
+	IFileTransfer *FFileTransfer;
 private:
 	QList<IChatWindow *> FWindows;
 	QMap<IChatWindow *, QTimer *> FDestroyTimers;
 	QMultiMap<IChatWindow *, int> FNotifiedMessages;
 	QMap<IChatWindow *, WindowStatus> FWindowStatus;
+	QSet<QString> FConversationHistoryLoaded;
+	QSet<QString> FProtocolRenderedMessages;
+	QMap<QString, ProtocolReactionSource> FProtocolReactionEvents;
+	QMap<QString, QMap<QString, QMap<QString, QSet<QString>>>> FProtocolReactionSenders;
+	QMap<QString, QString> FProtocolEventMessageIds;
+	QMap<QString, bool> FProtocolMessageDirections;
+	QMap<QString, QString> FProtocolMessageRelationTypes;
+	QSet<QString> FProtocolRedactedMessages;
+	QSet<QString> FProtocolHistoryLoading;
+	QSet<QString> FProtocolHistoryLoaded;
+	QMap<QString, QList<BasicMessage>> FPendingProtocolHistoryMessages;
+	QMap<QString, QList<BasicMessage>> FProtocolConversationMessages;
 private:
 	QMap<QString, IChatWindow *> FHistoryRequests;
 	QMap<IChatWindow *, QList<Message> > FPendingMessages;

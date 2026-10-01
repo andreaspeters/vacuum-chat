@@ -1,50 +1,24 @@
 /*
- * idle_win.cpp - detect desktop idle time
- * Copyright (C) 2003  Justin Karneges
+ * idle_os2.cpp - detect desktop idle time on OS/2
  *
- * This library is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Lesser General Public
- * License as published by the Free Software Foundation; either
- * version 2.1 of the License, or (at your option) any later version.
- *
- * This library is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public
- * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
- *
+ * WinQueryMsgTime() returns the posting time of the last message removed
+ * from the current Presentation Manager queue.  DosQuerySysInfo(QSV_MS_COUNT)
+ * uses the same millisecond system-time base, so their difference is the
+ * elapsed time since the last keyboard/mouse/window message.
  */
 
 #include "idle.h"
 
-#include <qlibrary.h>
+#define INCL_DOSMISC
+#define INCL_WIN
 #include <os2.h>
-
-#if defined(Q_OS_WIN32) && !defined(Q_CC_GNU) && (_WIN32_WINNT < 0x0500)
-typedef struct tagLASTINPUTINFO {
-	UINT cbSize;
-	DWORD dwTime;
-} LASTINPUTINFO, *PLASTINPUTINFO;
-#endif
 
 class IdlePlatform::Private
 {
 public:
-/*
-	Private()
-	{
-		GetLastInputInfo = 0;
-		IdleUIGetLastInputTime = 0;
-		lib = 0;
-	}
+	Private() : hab(0) {}
 
-	BOOL (__stdcall * GetLastInputInfo)(PLASTINPUTINFO);
-	DWORD (__stdcall * IdleUIGetLastInputTime)(void);
-*/
-	QLibrary *lib;
+	HAB hab;
 };
 
 IdlePlatform::IdlePlatform()
@@ -54,61 +28,32 @@ IdlePlatform::IdlePlatform()
 
 IdlePlatform::~IdlePlatform()
 {
-	delete d->lib;
 	delete d;
 }
 
 bool IdlePlatform::init()
 {
-/*
-	if(d->lib)
+	if (d->hab)
 		return true;
-	void *p;
 
-	// try to find the built-in Windows 2000 function
-	d->lib = new QLibrary("user32");
-	if(d->lib->load() && (p = d->lib->resolve("GetLastInputInfo"))) {
-		d->GetLastInputInfo = (BOOL (__stdcall *)(PLASTINPUTINFO))p;
-		return true;
-	}
-	else {
-		delete d->lib;
-		d->lib = 0;
-	}
-
-	// fall back on idleui
-	d->lib = new QLibrary("idleui");
-	if(d->lib->load() && (p = d->lib->resolve("IdleUIGetLastInputTime"))) {
-		d->IdleUIGetLastInputTime = (DWORD (__stdcall *)(void))p;
-		return true;
-	}
-	else {
-		delete d->lib;
-		d->lib = 0;
-	}
-*/
-	return false;
+	/* HWND_DESKTOP resolves to the PM anchor block of the current thread. */
+	d->hab = WinQueryAnchorBlock(HWND_DESKTOP);
+	return d->hab != 0;
 }
 
 int IdlePlatform::secondsIdle()
 {
-/*
-	int i;
-	if(d->GetLastInputInfo) {
-		LASTINPUTINFO li;
-		li.cbSize = sizeof(LASTINPUTINFO);
-		bool ok = d->GetLastInputInfo(&li);
-		if(!ok)
-			return 0;
-		i = li.dwTime;
-	}
-	else if(d->IdleUIGetLastInputTime) {
-		i = d->IdleUIGetLastInputTime();
-	}
-	else
+	if (!d->hab)
 		return 0;
 
-	return (GetTickCount() - i) / 1000;
-*/
-return 0;
+	ULONG now = 0;
+	if (DosQuerySysInfo(QSV_MS_COUNT, QSV_MS_COUNT, &now, sizeof(now)) != 0)
+		return 0;
+
+	ULONG last = WinQueryMsgTime(d->hab);
+	if (last == 0)
+		return 0;
+
+	/* ULONG subtraction intentionally handles the 32-bit tick wraparound. */
+	return static_cast<int>((now - last) / 1000UL);
 }

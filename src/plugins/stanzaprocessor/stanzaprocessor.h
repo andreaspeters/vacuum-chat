@@ -27,6 +27,7 @@ class StanzaProcessor :
 			public IXmppStanzaHadler
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.stanzaprocessor")
 	Q_INTERFACES(IPlugin IStanzaProcessor IXmppStanzaHadler);
 public:
 	StanzaProcessor();

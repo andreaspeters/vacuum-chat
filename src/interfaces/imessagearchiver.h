@@ -1,7 +1,6 @@
 #ifndef IMESSAGEARCHIVER_H
 #define IMESSAGEARCHIVER_H
 
-#include <QRegExp>
 #include <QMainWindow>
 #include <QStandardItemModel>
 #include <interfaces/ipluginmanager.h>
@@ -14,7 +13,7 @@
 #include <utils/menu.h>
 #include <utils/jid.h>
 
-#define MESSAGEARCHIVER_UUID "{66FEAE08-BE4D-4fd4-BCEA-494F3A70997A}"
+#define MESSAGEARCHIVER_UUID QUuid("{66FEAE08-BE4D-4fd4-BCEA-494F3A70997A}")
 
 #define ARCHIVE_SCOPE_GLOBAL    "global"    //the setting will remain for next streams
 #define ARCHIVE_SCOPE_STREAM    "stream"    //the setting is true only until the end of the stream. For next stream, server default value will be used
@@ -154,7 +153,7 @@ struct IArchiveRequest
 		opened = false;
 		exactmatch = false;
 		maxItems = 0;
-		threadId = QString::null;
+		threadId = QString();
 		order = Qt::AscendingOrder;
 	}
 	Jid with;
@@ -241,14 +240,14 @@ public:
 	//Archive Preferences
 	virtual QString prefsNamespace(const Jid &AStreamJid) const =0;
 	virtual IArchiveStreamPrefs archivePrefs(const Jid &AStreamJid) const =0;
-	virtual IArchiveItemPrefs archiveItemPrefs(const Jid &AStreamJid, const Jid &AItemJid, const QString &AThreadId = QString::null) const =0;
+	virtual IArchiveItemPrefs archiveItemPrefs(const Jid &AStreamJid, const Jid &AItemJid, const QString &AThreadId = QString()) const =0;
 	virtual QString setArchiveAutoSave(const Jid &AStreamJid, bool AAuto) =0;
 	virtual QString setArchivePrefs(const Jid &AStreamJid, const IArchiveStreamPrefs &APrefs) =0;
 	virtual QString removeArchiveItemPrefs(const Jid &AStreamJid, const Jid &AItemJid) =0;
 	virtual QString removeArchiveSessionPrefs(const Jid &AStreamJid, const QString &AThreadId) =0;
 	//Direct Archiving
 	virtual bool saveMessage(const Jid &AStreamJid, const Jid &AItemJid, const Message &AMessage) =0;
-	virtual bool saveNote(const Jid &AStreamJid, const Jid &AItemJid, const QString &ANote, const QString &AThreadId = QString::null) =0;
+	virtual bool saveNote(const Jid &AStreamJid, const Jid &AItemJid, const QString &ANote, const QString &AThreadId = QString()) =0;
 	//Archive Management
 	virtual QString loadMessages(const Jid &AStreamJid, const IArchiveRequest &ARequest) =0;
 	virtual QString loadHeaders(const Jid &AStreamJid, const IArchiveRequest &ARequest) =0;

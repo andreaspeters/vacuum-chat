@@ -8,7 +8,7 @@
 #include <interfaces/ipresence.h>
 #include <utils/iconstorage.h>
 #include <utils/jid.h>
-#include "ui_modifystatusdialog.h"
+#include <ui_modifystatusdialog.h>
 
 class ModifyStatusDialog :
 			public QDialog

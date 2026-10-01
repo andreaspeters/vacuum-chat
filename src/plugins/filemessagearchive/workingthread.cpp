@@ -131,7 +131,7 @@ QString WorkingThread::executeAction(int AAction)
 		start();
 		return workId();
 	}
-	return QString::null;
+	return QString();
 }
 
 void WorkingThread::run()

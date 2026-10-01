@@ -2,6 +2,7 @@
 
 #include <QKeyEvent>
 #include <QMouseEvent>
+#include <QRegularExpression>
 
 RosterSearch::RosterSearch()
 {
@@ -124,7 +125,7 @@ bool RosterSearch::rosterIndexDoubleClicked(int AOrder, IRosterIndex *AIndex, co
 		{
 			FSelectedIndexes.clear();
 			FSelectedIndexes.append(AIndex);
-			setSearchPattern(QString::null);
+			setSearchPattern(QString());
 		}
 	}
 	return false;
@@ -175,7 +176,7 @@ bool RosterSearch::rosterKeyReleased(int AOrder, const QList<IRosterIndex *> &AI
 
 void RosterSearch::startSearch()
 {
-	QString pattern = isSearchEnabled() ? searchPattern() : QString::null;
+	QString pattern = isSearchEnabled() ? searchPattern() : QString();
 
 	if (FRostersViewPlugin)
 	{
@@ -196,10 +197,9 @@ void RosterSearch::startSearch()
 		}
 	}
 
-	if (filterRegExp().pattern() != pattern)
+	if (filterRegularExpression().pattern() != pattern)
 	{
-		QRegExp regExp(pattern,Qt::CaseInsensitive,QRegExp::Wildcard);
-		setFilterRegExp(regExp);
+		setFilterRegularExpression(QRegularExpression::fromWildcard(pattern,Qt::CaseInsensitive));
 	}
 	invalidate();
 
@@ -357,7 +357,7 @@ bool RosterSearch::filterAcceptsRow(int ARow, const QModelIndex &AParent) const
 				if (isSearchFieldEnabled(dataField))
 				{
 					accept = false;
-					if (filterRegExp().indexIn(index.data(dataField).toString())>=0)
+					if (filterRegularExpression().match(index.data(dataField).toString()).hasMatch())
 						return true;
 				}
 			}
@@ -365,7 +365,7 @@ bool RosterSearch::filterAcceptsRow(int ARow, const QModelIndex &AParent) const
 		}
 		else
 		{
-			for (int childRow = 0; index.child(childRow,0).isValid(); childRow++)
+			for (int childRow = 0; index.model()->index(childRow,0,index).isValid(); childRow++)
 				if (filterAcceptsRow(childRow,index))
 					return true;
 			return false;
@@ -409,4 +409,4 @@ void RosterSearch::onOptionsClosed()
 		Options::node(OPV_ROSTER_SEARCH_FIELDEBANLED,QString::number(dataRole)).setValue(isSearchFieldEnabled(dataRole));
 }
 
-Q_EXPORT_PLUGIN2(plg_rostersearch, RosterSearch)
+

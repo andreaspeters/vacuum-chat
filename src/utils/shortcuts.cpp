@@ -3,8 +3,7 @@
 #include <QHash>
 #include <QAction>
 #include <QVariant>
-#include <QApplication>
-#include <QDesktopWidget>
+#include <QWidget>
 #include <thirdparty/qxtglobalshortcut/qxtglobalshortcut.h>
 
 struct Shortcuts::ShortcutsData
@@ -20,7 +19,7 @@ Shortcuts::ShortcutsData *Shortcuts::d = new Shortcuts::ShortcutsData;
 
 QKeySequence correctKeySequence(const QKeySequence &AKey)
 {
-#ifdef Q_WS_WIN
+#ifdef Q_OS_WIN
 	if ((AKey[0] & ~Qt::KeyboardModifierMask) == Qt::Key_Backtab)
 	{
 		return QKeySequence(Qt::Key_Tab | (AKey[0] & Qt::KeyboardModifierMask));
@@ -56,7 +55,7 @@ void Shortcuts::declareGroup(const QString &AId, const QString &ADescription, in
 {
 	if (!AId.isEmpty() && !ADescription.isEmpty())
 	{
-		d->groups.insert(AId,qMakePair<QString,int>(ADescription,AOrder));
+		d->groups.insert(AId,qMakePair(ADescription,AOrder));
 		emit instance()->groupDeclared(AId);
 	}
 }
@@ -205,29 +204,19 @@ void Shortcuts::activateShortcut(const QString &AId, QWidget *AWidget)
 
 void Shortcuts::updateObject(QObject *AObject)
 {
-	static QDesktopWidget *deskWidget = QApplication::desktop();
-
 	QString id = d->objectShortcutsId.value(AObject);
 	if (!id.isEmpty())
 	{
 		const Descriptor &descriptor = d->shortcuts.value(id);
 		if (descriptor.context == ApplicationShortcut)
 		{
-			QAction *action = qobject_cast<QAction *>(AObject);
-			if (action && !deskWidget->actions().contains(action))
-				deskWidget->addAction(action);
+			/* Qt6 applies ApplicationShortcut through the action context. */
 		}
 		AObject->setProperty("shortcut", correctKeySequence(descriptor.activeKey));
 		AObject->setProperty("shortcutContext", convertContext(descriptor.context));
 	}
 	else if (AObject)
 	{
-		if (AObject->property("shortcutContext").toInt() == Qt::ApplicationShortcut)
-		{
-			QAction *action = qobject_cast<QAction *>(AObject);
-			if (action)
-				deskWidget->removeAction(action);
-		}
 		AObject->setProperty("shortcut",QVariant());
 		AObject->setProperty("shortcutContext",QVariant());
 	}
@@ -293,7 +282,7 @@ void Shortcuts::onWidgetDestroyed(QObject *AObject)
 {
 	foreach(QWidget *widget, d->widgetShortcutsWidget.values())
 	{
-		if (qobject_cast<QObject *>(widget) == AObject)
+		if (static_cast<QObject *>(widget) == AObject)
 		{
 			foreach(QShortcut *shortcut, d->widgetShortcutsWidget.keys(widget))
 			{

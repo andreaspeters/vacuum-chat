@@ -9,7 +9,7 @@ QImage ImageManager::grayscaled(const QImage &AImage)
 	if (!AImage.isNull())
 	{
 		int pixels = img.width() * img.height();
-		if (pixels*(int)sizeof(QRgb) <= img.byteCount())
+		if (pixels*(int)sizeof(QRgb) <= img.sizeInBytes())
 		{
 			QRgb *data = (QRgb *)img.bits();
 			for (int i = 0; i < pixels; i++)
@@ -112,7 +112,6 @@ QImage ImageManager::colorized(const QImage &AImage, const QColor &AColor)
 		painter.setCompositionMode(QPainter::CompositionMode_Screen);
 		painter.fillRect(resultImage.rect(), AColor);
 		painter.end();
-		resultImage.setAlphaChannel(AImage.alphaChannel());
 		return resultImage;
 	}
 	return AImage;
@@ -128,7 +127,6 @@ QImage ImageManager::opacitized(const QImage &AImage, double AOpacity)
 		painter.setOpacity(AOpacity);
 		painter.drawImage(0, 0, AImage);
 		painter.end();
-		resultImage.setAlphaChannel(AImage.alphaChannel());
 		return resultImage;
 	}
 	return AImage;
@@ -143,7 +141,6 @@ QImage ImageManager::addSpace(const QImage &AImage, int ALeft, int ATop, int ARi
 		QPainter painter(&resultImage);
 		painter.drawImage(ALeft, ATop, AImage);
 		painter.end();
-		resultImage.setAlphaChannel(AImage.alphaChannel());
 		return resultImage;
 	}
 	return AImage;

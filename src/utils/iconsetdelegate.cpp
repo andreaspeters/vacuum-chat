@@ -1,9 +1,20 @@
 #include "iconsetdelegate.h"
 
+#include <QApplication>
 #include <QKeyEvent>
 #include <QMouseEvent>
+#include <QStyle>
 
 #define DEFAULT_ROWS              2
+
+static QRect itemCheckRect(const QStyleOptionViewItem &AOption, const QRect &ARect, const QVariant &AValue)
+{
+	QStyleOptionViewItem option = AOption;
+	option.rect = ARect;
+	option.checkState = static_cast<Qt::CheckState>(AValue.toInt());
+	QStyle *style = option.widget ? option.widget->style() : QApplication::style();
+	return style->subElementRect(QStyle::SE_ItemViewItemCheckIndicator, &option, option.widget);
+}
 
 IconsetDelegate::IconsetDelegate(QObject *AParent) : QItemDelegate(AParent)
 {
@@ -40,7 +51,7 @@ void IconsetDelegate::paint(QPainter *APainter, const QStyleOptionViewItem &AOpt
 
 		if (!AIndex.data(IDR_HIDE_ICONSET_NAME).toBool())
 		{
-			QRect checkRect(drawRect.topLeft(),check(AOption,drawRect,AIndex.data(Qt::CheckStateRole)).size());
+			QRect checkRect(drawRect.topLeft(),itemCheckRect(AOption,drawRect,AIndex.data(Qt::CheckStateRole)).size());
 			drawCheck(APainter,AOption,checkRect,static_cast<Qt::CheckState>(AIndex.data(Qt::CheckStateRole).toInt()));
 			drawRect.setLeft(checkRect.right()+space);
 
@@ -114,7 +125,7 @@ QSize IconsetDelegate::sizeHint(const QStyleOptionViewItem &AOption, const QMode
 
 		if (!AIndex.data(IDR_HIDE_ICONSET_NAME).toBool())
 		{
-			QSize checkSize = check(AOption,AOption.rect,AIndex.data(Qt::CheckStateRole)).size();
+			QSize checkSize = itemCheckRect(AOption,AOption.rect,AIndex.data(Qt::CheckStateRole)).size();
 			QString displayText = storage->option(STORAGE_NAME).isEmpty() ? name+"/"+subdir : storage->option(STORAGE_NAME);
 			QSize textSize = AOption.fontMetrics.size(Qt::TextSingleLine,displayText);
 			size.setHeight(qMax(checkSize.height(),textSize.height()));
@@ -156,7 +167,7 @@ bool IconsetDelegate::editorEvent(QEvent *AEvent, QAbstractItemModel *AModel, co
 	{
 		int space = 2;
 		QRect drawRect = AOption.rect.adjusted(space,space,-space,-space);
-		QRect checkRect(drawRect.topLeft(),check(AOption, AOption.rect, Qt::Checked).size());
+		QRect checkRect(drawRect.topLeft(),itemCheckRect(AOption, AOption.rect, Qt::Checked).size());
 
 		if (!checkRect.contains(static_cast<QMouseEvent*>(AEvent)->pos()))
 			return false;

@@ -7,6 +7,7 @@
 #include <QDateTime>
 #include <QApplication>
 #include <QCryptographicHash>
+#include <QRandomGenerator>
 
 #define DIR_PROFILES                    "profiles"
 #define DIR_BINARY                      "binary"
@@ -31,7 +32,7 @@ OptionsManager::OptionsManager()
 	FAutoSaveTimer.setSingleShot(false);
 	connect(&FAutoSaveTimer, SIGNAL(timeout()),SLOT(onAutoSaveTimerTimeout()));
 
-	qsrand(QDateTime::currentDateTime().toTime_t());
+
 }
 
 OptionsManager::~OptionsManager()
@@ -46,7 +47,7 @@ void OptionsManager::pluginInfo(IPluginInfo *APluginInfo)
 	APluginInfo ->version = "1.0";
 	APluginInfo->author = "Potapov S.A. aka Lion";
 	APluginInfo->homePage = "http://www.vacuum-im.org";
-	APluginInfo->conflicts.append("{6030FCB2-9F1E-4ea2-BE2B-B66EBE0C4367}"); // ISettings
+	APluginInfo->conflicts.append(QUuid::fromString("{6030FCB2-9F1E-4ea2-BE2B-B66EBE0C4367}")); // ISettings
 }
 
 bool OptionsManager::initConnections(IPluginManager *APluginManager, int &AInitOrder)
@@ -119,7 +120,7 @@ bool OptionsManager::initSettings()
 		importOldSettings();
 
 	if (profiles().count() == 0)
-		addProfile(DEFAULT_PROFILE, QString::null);
+		addProfile(DEFAULT_PROFILE, QString());
 
 	IOptionsDialogNode dnode = { ONO_MISC, OPN_MISC, tr("Misc"), MNI_OPTIONS_DIALOG };
 	insertOptionsDialogNode(dnode);
@@ -134,7 +135,7 @@ bool OptionsManager::startPlugin()
 	int profIndex = args.indexOf(CLO_PROFILE);
 	int passIndex = args.indexOf(CLO_PROFILE_PASSWORD);
 	QString profile = profIndex>0 ? args.value(profIndex+1) : lastActiveProfile();
-	QString password = passIndex>0 ? args.value(passIndex+1) : QString::null;
+	QString password = passIndex>0 ? args.value(passIndex+1) : QString();
 	if (profile.isEmpty() || !setCurrentProfile(profile, password))
 		showLoginDialog();
 	return true;
@@ -145,7 +146,7 @@ QMultiMap<int, IOptionsWidget *> OptionsManager::optionsWidgets(const QString &A
 	QMultiMap<int, IOptionsWidget *> widgets;
 	if (ANodeId == OPN_MISC)
 	{
-#ifdef Q_WS_WIN
+#ifdef Q_OS_WIN
 		widgets.insertMulti(OWO_MISC_AUTOSTART, optionsNodeWidget(Options::node(OPV_MISC_AUTOSTART), tr("Auto run on system startup"), AParent));
 #else
 		Q_UNUSED(AParent);
@@ -320,7 +321,7 @@ bool OptionsManager::changeProfilePassword(const QString &AProfile, const QStrin
 		{
 			keyValue.resize(16);
 			for (int i=0; i<keyValue.size(); i++)
-				keyValue[i] = qrand();
+				keyValue[i] = char(QRandomGenerator::global()->generate());
 		}
 		keyValue = Options::encrypt(keyValue, QCryptographicHash::hash(ANewPassword.toUtf8(),QCryptographicHash::Md5));
 		keyText.toText().setData(keyValue.toBase64());
@@ -346,7 +347,7 @@ bool OptionsManager::addProfile(const QString &AProfile, const QString &APasswor
 
 			QByteArray keyData(16,0);
 			for (int i=0; i<keyData.size(); i++)
-				keyData[i] = qrand();
+				keyData[i] = char(QRandomGenerator::global()->generate());
 			keyData = Options::encrypt(keyData, QCryptographicHash::hash(APassword.toUtf8(),QCryptographicHash::Md5));
 
 			QDomNode keyElem = profileDoc.documentElement().appendChild(profileDoc.createElement("key"));
@@ -509,7 +510,7 @@ void OptionsManager::closeProfile()
 			delete FOptionsDialog;
 		}
 		FShowOptionsDialogAction->setEnabled(false);
-		Options::setOptions(QDomDocument(), QString::null, QByteArray());
+		Options::setOptions(QDomDocument(), QString(), QByteArray());
 		saveOptions();
 		FProfile.clear();
 		FProfileKey.clear();
@@ -572,7 +573,7 @@ void OptionsManager::importOldSettings()
 			if (!FProfilesDir.exists(dirName + "/" FILE_PROFILE) && settings.open(QFile::ReadOnly))
 			{
 				QDomDocument doc;
-				if (doc.setContent(&settings,true) && addProfile(dirName,QString::null) && setCurrentProfile(dirName,QString::null))
+				if (doc.setContent(&settings,true) && addProfile(dirName,QString()) && setCurrentProfile(dirName,QString()))
 				{
 					QDomElement accountElem = doc.documentElement().firstChildElement("plugin");
 					while (!accountElem.isNull() &&  QUuid(accountElem.attribute("pluginId"))!=QUuid(ACCOUNTMANAGER_UUID))
@@ -581,7 +582,7 @@ void OptionsManager::importOldSettings()
 					accountElem = accountElem.firstChildElement("account");
 					while (!accountElem.isNull())
 					{
-						IAccount *account = accountManager->appendAccount(accountElem.attribute("ns"));
+						IAccount *account = accountManager->appendAccount(QUuid::fromString(accountElem.attribute("ns")));
 						if (account)
 						{
 							QByteArray key = QUuid(accountElem.attribute("ns")).toString().toUtf8();
@@ -614,7 +615,7 @@ void OptionsManager::importOldSettings()
 						}
 						accountElem = accountElem.nextSiblingElement("account");
 					}
-					setCurrentProfile(QString::null,QString::null);
+					setCurrentProfile(QString(),QString());
 				}
 				settings.close();
 			}
@@ -626,7 +627,7 @@ void OptionsManager::onOptionsChanged(const OptionsNode &ANode)
 {
 	if (ANode.path() == OPV_MISC_AUTOSTART)
 	{
-#ifdef Q_WS_WIN
+#ifdef Q_OS_WIN
 		QSettings reg("HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run", QSettings::NativeFormat);
 		if (ANode.value().toBool())
 			reg.setValue(CLIENT_NAME, QDir::toNativeSeparators(QApplication::applicationFilePath()));
@@ -669,4 +670,4 @@ void OptionsManager::onAboutToQuit()
 	closeProfile();
 }
 
-Q_EXPORT_PLUGIN2(plg_optionsmanager, OptionsManager)
+

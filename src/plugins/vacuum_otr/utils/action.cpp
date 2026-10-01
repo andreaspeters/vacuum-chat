@@ -36,7 +36,7 @@ void Action::setMenu(Menu *AMenu)
 
 void Action::setIcon(const QIcon &AIcon)
 {
-	setIcon(QString::null,QString::null,0);
+	setIcon(QString(),QString(),0);
 	QAction::setIcon(AIcon);
 }
 

@@ -29,10 +29,6 @@ int IdlePlatform::secondsIdle() { return 0; }
 
 #else
 
-#include <qapplication.h>
-#include <QDesktopWidget>
-#include <QX11Info>
-
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/extensions/scrnsaver.h>
@@ -51,12 +47,16 @@ class IdlePlatform::Private
 public:
 	Private() {}
 
+	Display *display;
+	Window root;
 	XScreenSaverInfo *ss_info;
 };
 
 IdlePlatform::IdlePlatform()
 {
 	d = new Private;
+	d->display = 0;
+	d->root = 0;
 	d->ss_info = 0;
 }
 
@@ -64,6 +64,8 @@ IdlePlatform::~IdlePlatform()
 {
 	if(d->ss_info)
 		XFree(d->ss_info);
+	if(d->display)
+		XCloseDisplay(d->display);
 	if(old_handler) {
 		XSetErrorHandler(old_handler);
 		old_handler = 0;
@@ -77,9 +79,13 @@ bool IdlePlatform::init()
 		return true;
 
 	old_handler = XSetErrorHandler(xerrhandler);
+	d->display = XOpenDisplay(NULL);
+	if (!d->display)
+		return false;
+	d->root = DefaultRootWindow(d->display);
 
 	int event_base, error_base;
-	if(XScreenSaverQueryExtension(QX11Info::display(), &event_base, &error_base)) {
+	if(XScreenSaverQueryExtension(d->display, &event_base, &error_base)) {
 		d->ss_info = XScreenSaverAllocInfo();
 		return true;
 	}
@@ -90,7 +96,7 @@ int IdlePlatform::secondsIdle()
 {
 	if(!d->ss_info)
 		return 0;
-	if(!XScreenSaverQueryInfo(QX11Info::display(), QX11Info::appRootWindow(), d->ss_info))
+	if(!XScreenSaverQueryInfo(d->display, d->root, d->ss_info))
 		return 0;
 	return d->ss_info->idle / 1000;
 }

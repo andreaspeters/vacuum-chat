@@ -6,7 +6,7 @@
 #include <utils/jid.h>
 #include <utils/toolbarchanger.h>
 
-#define ROSTERCHANGER_UUID "{018E7891-2743-4155-8A70-EAB430573500}"
+#define ROSTERCHANGER_UUID QUuid("{018E7891-2743-4155-8A70-EAB430573500}")
 
 class IAddContactDialog 
 {
@@ -49,8 +49,8 @@ public:
 	virtual bool isSilentSubsctiption(const Jid &AStreamJid, const Jid &AContactJid) const =0;
 	virtual void insertAutoSubscribe(const Jid &AStreamJid, const Jid &AContactJid, bool ASilently, bool ASubscr, bool AUnsubscr) =0;
 	virtual void removeAutoSubscribe(const Jid &AStreamJid, const Jid &AContactJid) =0;
-	virtual void subscribeContact(const Jid &AStreamJid, const Jid &AContactJid, const QString &AMessage = QString::null, bool ASilently = false) =0;
-	virtual void unsubscribeContact(const Jid &AStreamJid, const Jid &AContactJid, const QString &AMessage = QString::null, bool ASilently = false) =0;
+	virtual void subscribeContact(const Jid &AStreamJid, const Jid &AContactJid, const QString &AMessage = QString(), bool ASilently = false) =0;
+	virtual void unsubscribeContact(const Jid &AStreamJid, const Jid &AContactJid, const QString &AMessage = QString(), bool ASilently = false) =0;
 	virtual IAddContactDialog *showAddContactDialog(const Jid &AStreamJid) =0;
 protected:
 	virtual void addContactDialogCreated(IAddContactDialog *ADialog) =0;

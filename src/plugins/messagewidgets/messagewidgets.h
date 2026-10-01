@@ -15,6 +15,7 @@
 #include <definitions/shortcutgrouporders.h>
 #include <interfaces/ipluginmanager.h>
 #include <interfaces/imessagewidgets.h>
+#include <interfaces/iprotocolmessaging.h>
 #include <interfaces/ioptionsmanager.h>
 #include <interfaces/imainwindow.h>
 #include <utils/options.h>
@@ -42,6 +43,7 @@ class MessageWidgets :
 	public IEditContentsHandler
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.messagewidgets")
 	Q_INTERFACES(IPlugin IMessageWidgets IOptionsHolder IViewUrlHandler IEditContentsHandler);
 public:
 	MessageWidgets();
@@ -66,8 +68,11 @@ public:
 	//IMessageWidgets
 	virtual IPluginManager *pluginManager() const { return FPluginManager; }
 	virtual IInfoWidget *newInfoWidget(const Jid &AStreamJid, const Jid &AContactJid, QWidget *AParent);
+	virtual IInfoWidget *newInfoWidget(const AccountId &AAccountId, const ConversationId &AConversationId, QWidget *AParent);
 	virtual IViewWidget *newViewWidget(const Jid &AStreamJid, const Jid &AContactJid, QWidget *AParent);
+	virtual IViewWidget *newViewWidget(const AccountId &AAccountId, const ConversationId &AConversationId, QWidget *AParent);
 	virtual IEditWidget *newEditWidget(const Jid &AStreamJid, const Jid &AContactJid, QWidget *AParent);
+	virtual IEditWidget *newEditWidget(const AccountId &AAccountId, const ConversationId &AConversationId, QWidget *AParent);
 	virtual IReceiversWidget *newReceiversWidget(const Jid &AStreamJid, QWidget *AParent);
 	virtual IMenuBarWidget *newMenuBarWidget(IInfoWidget *AInfo, IViewWidget *AView, IEditWidget *AEdit, IReceiversWidget *AReceivers, QWidget *AParent);
 	virtual IToolBarWidget *newToolBarWidget(IInfoWidget *AInfo, IViewWidget *AView, IEditWidget *AEdit, IReceiversWidget *AReceivers, QWidget *AParent);
@@ -77,6 +82,8 @@ public:
 	virtual IMessageWindow *getMessageWindow(const Jid &AStreamJid, const Jid &AContactJid, IMessageWindow::Mode AMode);
 	virtual IMessageWindow *findMessageWindow(const Jid &AStreamJid, const Jid &AContactJid) const;
 	virtual QList<IChatWindow *> chatWindows() const;
+	virtual IChatWindow *getConversationWindow(const AccountId &AAccountId, const ConversationId &AConversationId);
+	virtual IChatWindow *findConversationWindow(const AccountId &AAccountId, const ConversationId &AConversationId) const;
 	virtual IChatWindow *getChatWindow(const Jid &AStreamJid, const Jid &AContactJid);
 	virtual IChatWindow *findChatWindow(const Jid &AStreamJid, const Jid &AContactJid) const;
 	virtual QList<QUuid> tabWindowList() const;
@@ -138,6 +145,7 @@ protected slots:
 	void onQuoteActionTriggered(bool);
 	void onAssignedTabPageDestroyed();
 	void onMessageWindowDestroyed();
+	void onMessageWindowActivated();
 	void onChatWindowDestroyed();
 	void onTabWindowPageAdded(ITabPage *APage);
 	void onTabWindowCurrentPageChanged(ITabPage *APage);

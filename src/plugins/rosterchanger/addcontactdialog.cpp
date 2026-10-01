@@ -105,7 +105,7 @@ void AddContactDialog::initialize(IPluginManager *APluginManager)
 		FRoster = rosterPlugin!=NULL ? rosterPlugin->findRoster(FStreamJid) : NULL;
 		if (FRoster)
 		{
-			ui.cmbGroup->addItems(FRoster->groups().toList());
+			ui.cmbGroup->addItems(FRoster->groups().values());
 			ui.cmbGroup->model()->sort(0,Qt::AscendingOrder);
 			ui.cmbGroup->setCurrentIndex(-1);
 			ui.lblGroupDelim->setText(tr("* nested group delimiter - '%1'").arg(FRoster->groupDelimiter()));
@@ -175,12 +175,12 @@ void AddContactDialog::onDialogAccepted()
 		}
 		else
 		{
-			QMessageBox::information(NULL,FStreamJid.uBare(),tr("Contact <b>%1</b> already exists.").arg(Qt::escape(contactJid().uBare())));
+			QMessageBox::information(NULL,FStreamJid.uBare(),tr("Contact <b>%1</b> already exists.").arg(contactJid().uBare().toHtmlEscaped()));
 		}
 	}
 	else if (!contactJid().isEmpty())
 	{
-		QMessageBox::warning(this,FStreamJid.uBare(),tr("Can't add contact '<b>%1</b>' because it is not a valid Jabber ID").arg(Qt::escape(contactJid().uBare())));
+		QMessageBox::warning(this,FStreamJid.uBare(),tr("Can't add contact '<b>%1</b>' because it is not a valid Jabber ID").arg(contactJid().uBare().toHtmlEscaped()));
 	}
 }
 

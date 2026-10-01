@@ -25,6 +25,7 @@ class AutoStatus :
 			public IOptionsHolder
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.autostatus")
 	Q_INTERFACES(IPlugin IAutoStatus IOptionsHolder);
 public:
 	AutoStatus();

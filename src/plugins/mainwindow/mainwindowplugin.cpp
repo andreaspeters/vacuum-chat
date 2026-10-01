@@ -165,4 +165,4 @@ void MainWindowPlugin::onTrayNotifyActivated(int ANotifyId, QSystemTrayIcon::Act
 	}
 }
 
-Q_EXPORT_PLUGIN2(plg_mainwindow, MainWindowPlugin)
+

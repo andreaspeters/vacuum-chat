@@ -1,6 +1,42 @@
 #include "statusicons.h"
 
+#include <QPainter>
 #include <QTimer>
+#include <utils/messagenotificationmute.h>
+
+static QIcon mutedStatusIcon(const QIcon &AIcon)
+{
+	if (AIcon.isNull())
+		return AIcon;
+	QSize size = AIcon.actualSize(QSize(16, 16));
+	if (size.isEmpty())
+		size = QSize(16, 16);
+	QPixmap pixmap = AIcon.pixmap(size);
+	if (pixmap.isNull())
+		return AIcon;
+	QPainter painter(&pixmap);
+	painter.setRenderHint(QPainter::Antialiasing, true);
+	painter.setPen(QPen(Qt::white, 3.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+	painter.drawLine(QPoint(2, pixmap.height() - 2), QPoint(pixmap.width() - 2, 2));
+	painter.setPen(QPen(Qt::red, 2.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+	painter.drawLine(QPoint(2, pixmap.height() - 2), QPoint(pixmap.width() - 2, 2));
+	return QIcon(pixmap);
+}
+
+static bool rosterTargetMuted(const IRosterIndex *AIndex)
+{
+	const QString accountId = AIndex->data(RDR_ACCOUNT_ID).toString();
+	const QString conversationId = AIndex->data(RDR_CONVERSATION_ID).toString();
+	if (!accountId.isEmpty() && !conversationId.isEmpty())
+		return messageNotificationMuted(accountId, conversationId);
+
+	const Jid streamJid = AIndex->data(RDR_STREAM_JID).toString();
+	Jid contactJid = AIndex->data(RDR_PREP_BARE_JID).toString();
+	if (!contactJid.isValid())
+		contactJid = AIndex->data(RDR_FULL_JID).toString();
+	return streamJid.isValid() && contactJid.isValid() &&
+		messageNotificationMuted(streamJid, contactJid);
+}
 
 #define ADR_RULE                          Action::DR_Parametr1
 #define ADR_SUBSTORAGE                    Action::DR_Parametr2
@@ -177,7 +213,12 @@ QVariant StatusIcons::rosterData(const IRosterIndex *AIndex, int ARole) const
 {
 	if (ARole == Qt::DecorationRole)
 	{
-		return iconByJid(AIndex->data(RDR_STREAM_JID).toString(),AIndex->data(RDR_FULL_JID).toString());
+		QIcon icon;
+		if (!AIndex->data(RDR_ACCOUNT_ID).toString().isEmpty() && !AIndex->data(RDR_CONVERSATION_ID).toString().isEmpty())
+			icon = iconByIdentity(AIndex->data(RDR_ACCOUNT_ID).toString(), AIndex->data(RDR_CONVERSATION_ID).toString());
+		else
+			icon = iconByJid(AIndex->data(RDR_STREAM_JID).toString(),AIndex->data(RDR_FULL_JID).toString());
+		return rosterTargetMuted(AIndex) ? mutedStatusIcon(icon) : icon;
 	}
 	return QVariant();
 }
@@ -211,12 +252,12 @@ QString StatusIcons::ruleIconset(const QString &APattern, RuleType ARuleType) co
 	case DefaultRule:
 		return FDefaultRules.value(APattern,STORAGE_SHARED_DIR);
 	}
-	return QString::null;
+	return QString();
 }
 
 void StatusIcons::insertRule(const QString &APattern, const QString &ASubStorage, RuleType ARuleType)
 {
-	if (APattern.isEmpty() || ASubStorage.isEmpty() || !QRegExp(APattern).isValid())
+	if (APattern.isEmpty() || ASubStorage.isEmpty() || !QRegularExpression(APattern).isValid())
 		return;
 
 	switch (ARuleType)
@@ -259,6 +300,20 @@ QIcon StatusIcons::iconByJid(const Jid &AStreamJid, const Jid &AContactJid) cons
 	return storage!=NULL ? storage->getIcon(iconKey) : QIcon();
 }
 
+QIcon StatusIcons::iconByIdentity(const AccountId &AAccountId, const UserId &AUserId) const
+{
+	Q_UNUSED(AAccountId);
+	Q_UNUSED(AUserId);
+	return iconByStatus(IPresence::Online, SUBSCRIPTION_BOTH, false);
+}
+
+QString StatusIcons::iconKeyByIdentity(const AccountId &AAccountId, const UserId &AUserId) const
+{
+	Q_UNUSED(AAccountId);
+	Q_UNUSED(AUserId);
+	return iconKeyByStatus(IPresence::Online, SUBSCRIPTION_BOTH, false);
+}
+
 QIcon StatusIcons::iconByStatus(int AShow, const QString &ASubscription, bool AAsk) const
 {
 	QString iconKey = iconKeyByStatus(AShow,ASubscription,AAsk);
@@ -277,8 +332,8 @@ QString StatusIcons::iconsetByJid(const Jid &AContactJid) const
 {
 	if (!FJid2Storage.contains(AContactJid))
 	{
-		QRegExp regExp;
-		regExp.setCaseSensitivity(Qt::CaseInsensitive);
+		QRegularExpression regExp;
+		regExp.setPatternOptions(QRegularExpression::CaseInsensitiveOption);
 
 		QString substorage;
 		foreach (QString pattern, FUserRules.keys())
@@ -373,7 +428,7 @@ QString StatusIcons::iconKeyByStatus(int AShow, const QString &ASubscription, bo
 QString StatusIcons::iconFileName(const QString &ASubStorage, const QString &AIconKey) const
 {
 	IconStorage *storage = FStorages.value(ASubStorage,FDefaultStorage);
-	return storage!=NULL ? storage->fileFullName(AIconKey) : QString::null;
+	return storage!=NULL ? storage->fileFullName(AIconKey) : QString();
 }
 
 void StatusIcons::loadStorages()
@@ -396,7 +451,7 @@ void StatusIcons::loadStorages()
 		QString name = storage->option(STORAGE_NAME);
 		Action *action = new Action(FCustomIconMenu);
 		action->setCheckable(true);
-		action->setIcon(storage->getIcon(iconKeyByStatus(IPresence::Online,QString::null,false)));
+		action->setIcon(storage->getIcon(iconKeyByStatus(IPresence::Online,QString(),false)));
 		action->setText(!name.isEmpty() ? name : substorage);
 		action->setData(ADR_SUBSTORAGE,substorage);
 		connect(action,SIGNAL(triggered(bool)),SLOT(onSetCustomIconset(bool)));
@@ -443,6 +498,8 @@ bool StatusIcons::isSelectionAccepted(const QList<IRosterIndex *> &ASelected) co
 	{
 		foreach(IRosterIndex *index, ASelected)
 		{
+			if (!index->data(RDR_ACCOUNT_ID).toString().isEmpty() && !index->data(RDR_CONVERSATION_ID).toString().isEmpty())
+				return false;
 			Jid streamJid = index->data(RDR_STREAM_JID).toString();
 			Jid contactJid = index->data(RDR_PREP_BARE_JID).toString();
 			if (!contactJid.isValid() || contactJid.pBare()==streamJid.pBare())
@@ -499,7 +556,7 @@ void StatusIcons::onRosterIndexContextMenu(const QList<IRosterIndex *> &AIndexes
 		
 		QStringList patterns;
 		foreach(QString contactJid, rolesMap.value(RDR_PREP_BARE_JID))
-			patterns.append(QRegExp::escape(contactJid));
+			patterns.append(QRegularExpression::escape(contactJid));
 		updateCustomIconMenu(patterns);
 
 		if (AIndexes.count() > 1)
@@ -514,7 +571,7 @@ void StatusIcons::onRosterIndexContextMenu(const QList<IRosterIndex *> &AIndexes
 void StatusIcons::onMultiUserContextMenu(IMultiUserChatWindow *AWindow, IMultiUser *AUser, Menu *AMenu)
 {
 	Q_UNUSED(AWindow);
-	QString rule = QString(".*@%1/%2").arg(QRegExp::escape(AUser->contactJid().domain())).arg(QRegExp::escape(AUser->nickName()));
+	QString rule = QString(".*@%1/%2").arg(QRegularExpression::escape(AUser->contactJid().domain())).arg(QRegularExpression::escape(AUser->nickName()));
 	updateCustomIconMenu(QStringList()<<rule);
 	FCustomIconMenu->setIcon(iconByJidStatus(AUser->contactJid(),IPresence::Online,SUBSCRIPTION_BOTH,false));
 	AMenu->addAction(FCustomIconMenu->menuAction(),AG_MUCM_STATUSICONS,true);
@@ -548,6 +605,11 @@ void StatusIcons::onOptionsClosed()
 
 void StatusIcons::onOptionsChanged(const OptionsNode &ANode)
 {
+	if (ANode.path()==OPV_MESSAGES_MUTED_TARGETS)
+	{
+		startStatusIconsChanged();
+		return;
+	}
 	if (FDefaultStorage && ANode.path()==OPV_STATUSICONS_DEFAULT)
 	{
 		if (IconStorage::availSubStorages(RSR_STORAGE_STATUSICONS).contains(ANode.value().toString()))
@@ -585,4 +647,4 @@ void StatusIcons::onSetCustomIconset(bool)
 	}
 }
 
-Q_EXPORT_PLUGIN2(plg_statusicons, StatusIcons)
+

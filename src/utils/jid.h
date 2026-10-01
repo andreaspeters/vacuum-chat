@@ -5,7 +5,7 @@
 #include <QHash>
 #include <QString>
 #include <QMetaType>
-#include <QStringRef>
+
 #include <QSharedData>
 #include "utilsexport.h"
 
@@ -17,10 +17,10 @@ public:
 	JidData(const JidData &AOther);
 public:
 	QString FFull, FPrepFull;
-	QStringRef FBare, FPrepBare;
-	QStringRef FNode, FPrepNode;
-	QStringRef FDomain, FPrepDomain;
-	QStringRef FResource, FPrepResource;
+	QString FBare, FPrepBare;
+	QString FNode, FPrepNode;
+	QString FDomain, FPrepDomain;
+	QString FResource, FPrepResource;
 	bool FNodeValid, FDomainValid, FResourceValid;
 };
 
@@ -28,7 +28,7 @@ class UTILS_EXPORT Jid
 {
 public:
 	Jid(const char *AJidStr);
-	Jid(const QString &AJidStr = QString::null);
+	Jid(const QString &AJidStr = QString());
 	Jid(const QString &ANode, const QString &ADomane, const QString &AResource);
 	~Jid();
 	bool isValid() const;

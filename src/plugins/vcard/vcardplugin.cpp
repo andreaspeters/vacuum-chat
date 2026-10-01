@@ -409,15 +409,7 @@ void VCardPlugin::onXmppStreamRemoved(IXmppStream *AXmppStream)
 
 void VCardPlugin::onChatWindowCreated(IChatWindow *AWindow)
 {
-	if (AWindow->toolBarWidget() && AWindow->toolBarWidget()->viewWidget())
-	{
-		Action *action = new Action(AWindow->toolBarWidget()->instance());
-		action->setText(tr("Show Profile"));
-		action->setIcon(RSR_STORAGE_MENUICONS,MNI_VCARD);
-		action->setShortcutId(SCT_MESSAGEWINDOWS_SHOWVCARD);
-		connect(action,SIGNAL(triggered(bool)),SLOT(onShowVCardDialogByChatWindowAction(bool)));
-		AWindow->toolBarWidget()->toolBarChanger()->insertAction(action,TBG_MWTBW_VCARD_VIEW);
-	}
+	Q_UNUSED(AWindow);
 }
 
-Q_EXPORT_PLUGIN2(plg_vcard, VCardPlugin)
+

@@ -9,7 +9,7 @@
 #include <interfaces/ioptionsmanager.h>
 #include <utils/options.h>
 #include <utils/iconsetdelegate.h>
-#include "ui_emoticonsoptions.h"
+#include <ui_emoticonsoptions.h>
 
 class EmoticonsOptions :
 			public QWidget,

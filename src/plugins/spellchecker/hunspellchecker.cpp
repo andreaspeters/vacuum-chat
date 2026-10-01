@@ -10,18 +10,19 @@
 #include <QFile>
 #include <QLocale>
 #include <QCoreApplication>
+#include <QStringConverter>
 #include "spellchecker.h"
 
-HunspellChecker::HunspellChecker() : FHunSpell(NULL), FDictCodec(NULL)
+HunspellChecker::HunspellChecker() : FHunSpell(NULL)
 {
-#if defined (Q_WS_WIN)
+#if defined (Q_OS_WIN)
 	FDictsPaths.append(QString("%1/hunspell").arg(QCoreApplication::applicationDirPath()));
 #elif defined (__OS2__)
 	FDictsPaths.append(QString("%1/hunspell").arg(QCoreApplication::applicationDirPath()));
-#elif defined (Q_WS_X11)
+#elif defined (Q_OS_LINUX)
 	FDictsPaths.append("/usr/share/hunspell");
 	FDictsPaths.append("/usr/share/myspell");
-#elif defined (Q_WS_MAC)
+#elif defined (Q_OS_MACOS)
 	FDictsPaths.append(QString("%1/Library/Spelling").arg(QDir::homePath()));
 #endif
 }
@@ -86,7 +87,7 @@ bool HunspellChecker::isCorrect(const QString &AWord)
 {
 	if(available())
 	{
-		QByteArray encWord = FDictCodec!=NULL ? FDictCodec->fromUnicode(AWord) : AWord.toUtf8();
+		QByteArray encWord = FDictEncoding.isEmpty() ? AWord.toUtf8() : QByteArray(QStringEncoder(FDictEncoding)(AWord));
 		return FHunSpell->spell(encWord.constData());
 	}
 	return true;
@@ -96,7 +97,7 @@ bool HunspellChecker::canAdd(const QString &AWord)
 {
 	QString trimmedWord = AWord.trimmed();
 	if (writable() && !trimmedWord.isEmpty())
-		return FDictCodec!=NULL ? FDictCodec->canEncode(trimmedWord) : true;
+		return FDictEncoding.isEmpty() || !QStringEncoder(FDictEncoding).hasError();
 	return false;
 }
 
@@ -105,7 +106,7 @@ bool HunspellChecker::add(const QString &AWord)
 	if (available() && canAdd(AWord))
 	{
 		QString trimmedWord = AWord.trimmed();
-		QByteArray encWord = FDictCodec!=NULL ? FDictCodec->fromUnicode(trimmedWord) : trimmedWord.toUtf8();
+		QByteArray encWord = FDictEncoding.isEmpty() ? trimmedWord.toUtf8() : QByteArray(QStringEncoder(FDictEncoding)(trimmedWord));
 		FHunSpell->add(encWord.constData());
 		savePersonalDict(trimmedWord);
 		return true;
@@ -119,10 +120,10 @@ QList<QString> HunspellChecker::suggestions(const QString &AWord)
 	if(available())
 	{
 		char **sugglist;
-		QByteArray encWord = FDictCodec ? FDictCodec->fromUnicode(AWord) : AWord.toUtf8();
+		QByteArray encWord = FDictEncoding.isEmpty() ? AWord.toUtf8() : QByteArray(QStringEncoder(FDictEncoding)(AWord));
 		int count = FHunSpell->suggest(&sugglist, encWord.data());
 		for(int i = 0; i < count; ++i)
-			words.append(FDictCodec ? FDictCodec->toUnicode(sugglist[i]) : QString::fromUtf8(sugglist[i]));
+			words.append(FDictEncoding.isEmpty() ? QString::fromUtf8(sugglist[i]) : QStringDecoder(FDictEncoding)(QByteArray(sugglist[i])));
 		FHunSpell->free_list(&sugglist, count);
 	}
 	return words;
@@ -140,7 +141,7 @@ void HunspellChecker::loadHunspell(const QString &ALang)
 		{
 			QString rulesFile = QString("%1/%2.aff").arg(dictsPath).arg(ALang);
 			FHunSpell = new Hunspell(rulesFile.toUtf8().constData(), dictFile.toUtf8().constData());
-			FDictCodec = QTextCodec::codecForName(FHunSpell->get_dic_encoding());
+			FDictEncoding = QByteArray(FHunSpell->get_dic_encoding());
 			loadPersonalDict();
 			break;
 		}
@@ -160,7 +161,7 @@ void HunspellChecker::loadPersonalDict()
 				QString word = QString::fromUtf8(file.readLine()).trimmed();
 				if (canAdd(word))
 				{
-					QByteArray encWord= FDictCodec!=NULL ? FDictCodec->fromUnicode(word) : word.toUtf8();
+					QByteArray encWord = FDictEncoding.isEmpty() ? word.toUtf8() : QByteArray(QStringEncoder(FDictEncoding)(word));
 					FHunSpell->add(encWord.constData());
 				}
 			}

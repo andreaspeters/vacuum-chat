@@ -426,7 +426,7 @@ QString Commands::sendCommandRequest(const ICommandRequest &ARequest)
 			return request.id();
 		}
 	}
-	return QString::null;
+	return QString();
 }
 
 bool Commands::sendCommandResult(const ICommandResult &AResult)
@@ -529,7 +529,7 @@ void Commands::onStreamClosed(IXmppStream *AXmppStream)
 
 void Commands::onDiscoInfoReceived(const IDiscoInfo &AInfo)
 {
-	if (AInfo.node.isEmpty() && FDiscovery->findIdentity(AInfo.identity,DIC_CLIENT,QString::null)<0)
+	if (AInfo.node.isEmpty() && FDiscovery->findIdentity(AInfo.identity,DIC_CLIENT,QString())<0)
 		if (AInfo.features.contains(NS_COMMANDS) && !FCommands.value(AInfo.streamJid).contains(AInfo.contactJid))
 			FDiscovery->requestDiscoItems(AInfo.streamJid,AInfo.contactJid,NS_COMMANDS);
 }
@@ -612,4 +612,4 @@ void Commands::onRequestActionTriggered(bool)
 	}
 }
 
-Q_EXPORT_PLUGIN2(plg_commands, Commands)
+

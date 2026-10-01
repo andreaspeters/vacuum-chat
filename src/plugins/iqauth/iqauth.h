@@ -14,7 +14,7 @@
 #include <utils/stanza.h>
 #include <utils/jid.h>
 
-#define IQAUTH_UUID "{1E3645BC-313F-49e9-BD00-4CC062EE76A7}"
+#define IQAUTH_UUID QUuid("{1E3645BC-313F-49e9-BD00-4CC062EE76A7}")
 
 class IqAuth :
 	public QObject,
@@ -48,6 +48,7 @@ class IqAuthPlugin :
 	public IXmppFeaturesPlugin
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.iqauth")
 	Q_INTERFACES(IPlugin IXmppFeaturesPlugin);
 public:
 	IqAuthPlugin();

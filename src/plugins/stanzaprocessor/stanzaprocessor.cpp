@@ -131,7 +131,7 @@ Stanza StanzaProcessor::makeReplyResult(const Stanza &AStanza) const
 Stanza StanzaProcessor::makeReplyError(const Stanza &AStanza, const XmppStanzaError &AError) const
 {
 	Stanza error(AStanza);
-	error.setType("error").setId(AStanza.id()).setTo(AStanza.from()).setFrom(QString::null);
+	error.setType("error").setId(AStanza.id()).setTo(AStanza.from()).setFrom(QString());
 	insertErrorElement(error,AError);
 	return error;
 }
@@ -224,7 +224,7 @@ bool StanzaProcessor::checkCondition(const QDomElement &AElem, const QString &AC
 				else pos++;
 			}
 			if (!attrName.isEmpty())
-				attributes.insertMulti(attrName,attrValue);
+				attributes.insert(attrName,attrValue);
 			pos++;
 		}
 		else pos++;
@@ -241,7 +241,7 @@ bool StanzaProcessor::checkCondition(const QDomElement &AElem, const QString &AC
 		{
 			QString attrName = attrNames.at(attr);
 			QList<QString> attrValues = attributes.values(attrName);
-			bool attrBlankValue = attrValues.contains(QString::null);
+			bool attrBlankValue = attrValues.contains(QString());
 			bool elemHasAttr;
 			QString elemAttrValue;
 			if (elem.hasAttribute(attrName))
@@ -284,7 +284,7 @@ bool StanzaProcessor::processStanza(const Jid &AStreamJid, Stanza &AStanza, int 
 	bool hooked = false;
 	bool accepted = false;
 
-	QMapIterator<int, int> it(FHandleIdByOrder);
+	QMultiMapIterator<int, int> it(FHandleIdByOrder);
 	while (!hooked && it.hasNext())
 	{
 		it.next();
@@ -415,4 +415,4 @@ void StanzaProcessor::onStanzaHandlerDestroyed(QObject *AHandler)
 			removeStanzaHandle(shandleId);
 }
 
-Q_EXPORT_PLUGIN2(plg_stanzaprocessor, StanzaProcessor)
+

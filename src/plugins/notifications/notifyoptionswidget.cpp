@@ -36,8 +36,8 @@ NotifyOptionsWidget::NotifyOptionsWidget(INotifications *ANotifications, QWidget
 
 	ui.trvNotifies->setModel(&FSortModel);
 	ui.trvNotifies->header()->hide();
-	ui.trvNotifies->header()->setResizeMode(COL_NAME,QHeaderView::Stretch);
-	ui.trvNotifies->header()->setResizeMode(COL_ENABLE,QHeaderView::ResizeToContents);
+	ui.trvNotifies->header()->setSectionResizeMode(COL_NAME,QHeaderView::Stretch);
+	ui.trvNotifies->header()->setSectionResizeMode(COL_ENABLE,QHeaderView::ResizeToContents);
 	ui.trvNotifies->sortByColumn(COL_NAME,Qt::AscendingOrder);
 	ui.trvNotifies->setItemsExpandable(false);
 	ui.trvNotifies->expandAll();
@@ -108,7 +108,7 @@ void NotifyOptionsWidget::createTreeModel()
 		{ INotification::TrayNotify, tr("Display a notification in tray") },
 		{ INotification::TrayAction, tr("Display a notification in tray context menu") },
 		{ INotification::AutoActivate, tr("Immediately activate the notification") },
-		{ 0, QString::null }
+		{ 0, QString() }
 	};
 
 	FModel.clear();
@@ -121,7 +121,7 @@ void NotifyOptionsWidget::createTreeModel()
 	globalType.icon = IconStorage::staticStorage(RSR_STORAGE_MENUICONS)->getIcon(MNI_NOTIFICATIONS);
 
 	QMap<QString,INotificationType> notifyTypes;
-	notifyTypes.insert(QString::null,globalType);
+	notifyTypes.insert(QString(),globalType);
 	foreach(QString typeId, FNotifications->notificationTypes())
 		notifyTypes.insert(typeId,FNotifications->notificationType(typeId));
 

@@ -6,7 +6,7 @@
 #include <definitions/menuicons.h>
 #include <interfaces/iservicediscovery.h>
 #include <utils/menu.h>
-#include "ui_discoinfowindow.h"
+#include <ui_discoinfowindow.h>
 
 class DiscoInfoWindow :
 			public QDialog

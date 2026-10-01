@@ -28,7 +28,7 @@ class UTILS_EXPORT Jid
 {
 public:
 	Jid(const char *AJidStr);
-	Jid(const QString &AJidStr = QString::null);
+	Jid(const QString &AJidStr = QString());
 	Jid(const QString &ANode, const QString &ADomane, const QString &AResource);
 	~Jid();
 	bool isValid() const;

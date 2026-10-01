@@ -1,4 +1,5 @@
 #include "messageeditor.h"
+#include <QMimeData>
 
 #include <QFrame>
 #include <QTextDocumentFragment>

@@ -4,12 +4,13 @@ project(qxtglobalshortcut CXX)
 
 set(SOURCES "qxtglobal.cpp" "qxtglobalshortcut.cpp")
 
-include(${QT_USE_FILE})
 
 if (APPLE)
 	set(SOURCES ${SOURCES} "qxtglobalshortcut_mac.cpp")
 elseif (HAIKU)
 	set(SOURCES ${SOURCES} "qxtglobalshortcut_haiku.cpp")
+elseif (OS2)
+	set(SOURCES ${SOURCES} "qxtglobalshortcut_os2.cpp")
 elseif (UNIX)
 	set(SOURCES ${SOURCES} "qxtglobalshortcut_x11.cpp")
 	include(FindX11)
@@ -18,13 +19,13 @@ elseif (WIN32)
 	set(SOURCES ${SOURCES} "qxtglobalshortcut_win.cpp")
 endif (APPLE)
 
-qt4_wrap_cpp(MOC_SOURCES "qxtglobalshortcut.h")
 
 add_definitions(-DUNICODE)
 add_definitions(-DQXT_STATIC)
 
-add_library(qxtglobalshortcut STATIC ${SOURCES} ${MOC_SOURCES})
-target_link_libraries(qxtglobalshortcut ${QT_LIBRARIES})
+add_library(qxtglobalshortcut STATIC ${SOURCES} "qxtglobalshortcut.h")
+target_link_libraries(qxtglobalshortcut PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets)
+set_target_properties(qxtglobalshortcut PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(qxtglobalshortcut PROPERTIES ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/src/libs"
 	COMPILE_FLAGS "${CMAKE_SHARED_LIBRARY_C_FLAGS}"
 	LINK_FLAGS "${CMAKE_SHARED_LIBRARY_C_FLAGS}")

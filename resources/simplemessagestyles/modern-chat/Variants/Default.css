@@ -1,0 +1,104 @@
+body {
+  background-color: #ffffff;
+  color: #343a40;
+  font-family: "Sans Serif";
+  font-size: 10pt;
+  margin: 0;
+  padding: 12px;
+}
+
+.xxxwrapper {
+  border-style: none;
+  border-spacing: 0;
+  margin: 0 0 10px 0;
+  table-layout: auto;
+  width: 100%;
+}
+
+.xxxavatar {
+  padding: 0 8px 0 0;
+  vertical-align: bottom;
+  width: 36px;
+}
+
+.xxxavatar img {
+  border: 1px solid #e1e5ea;
+  height: 32px;
+  width: 32px;
+}
+
+.xxxavatarSpacer {
+  width: 36px;
+}
+
+.xxxsender {
+  color: #737b86;
+  font-size: 9pt;
+  padding: 0 0 4px 2px;
+  white-space: nowrap;
+}
+
+.xxxtime {
+  color: #8a929d;
+  font-size: 8pt;
+  font-weight: normal;
+  white-space: nowrap;
+}
+
+.xxxmessageHost {
+  padding: 0 0 0 2px;
+  text-align: left;
+}
+
+.xxxbubble {
+  border-collapse: separate;
+  border-spacing: 0;
+  border-style: none;
+}
+
+.xxxmessage {
+  background-color: #f1f2f4;
+  color: #343a40;
+  padding: 8px 12px;
+  text-align: left;
+  white-space: pre-wrap;
+}
+
+.outgoing .xxxmessage {
+  background-color: #e8f1ff;
+}
+
+.consecutive {
+  margin-top: -5px;
+}
+
+.consecutive .xxxmessage {
+  padding-top: 6px;
+}
+
+.status .xxxmessage {
+  background-color: transparent;
+  color: #68717d;
+  text-align: center;
+}
+
+.date_separator .xxxmessage {
+  color: #737b86;
+  font-size: 9pt;
+  padding: 10px 0 14px 0;
+  text-align: center;
+}
+
+.xxxtopic {
+  color: #59616b;
+  padding: 8px 12px;
+  text-align: center;
+}
+
+.mention .xxxmessage {
+  border: 1px solid #e6a23c;
+}
+
+.event .xxxmessage {
+  color: #7b4545;
+}

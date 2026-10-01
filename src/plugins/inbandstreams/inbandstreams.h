@@ -19,6 +19,7 @@ class InBandStreams :
 	public IInBandStreams
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.inbandstreams")
 	Q_INTERFACES(IPlugin IInBandStreams IDataStreamMethod);
 public:
 	InBandStreams();

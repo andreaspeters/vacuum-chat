@@ -106,7 +106,7 @@ bool SocksStreams::initSettings()
 	Options::setDefaultValue(OPV_DATASTREAMS_METHOD_FORWARDPORT,0);
 	Options::setDefaultValue(OPV_DATASTREAMS_METHOD_USEACCOUNTSTREAMPROXY,true);
 	Options::setDefaultValue(OPV_DATASTREAMS_METHOD_USEACCOUNTNETPROXY,true);
-	Options::setDefaultValue(OPV_DATASTREAMS_METHOD_NETWORKPROXY,QString(APPLICATION_PROXY_REF_UUID));
+	Options::setDefaultValue(OPV_DATASTREAMS_METHOD_NETWORKPROXY,APPLICATION_PROXY_REF_UUID.toString());
 	Options::setDefaultValue(OPV_DATASTREAMS_METHOD_CONNECTTIMEOUT,10000);
 	return true;
 }
@@ -183,7 +183,7 @@ void SocksStreams::loadMethodSettings(IDataStreamSocket *ASocket, const OptionsN
 		if (ANode.value("use-account-network-proxy").toBool())
 			stream->setNetworkProxy(accountNetworkProxy(stream->streamJid()));
 		else if (FConnectionManager)
-			stream->setNetworkProxy(FConnectionManager->proxyById(ANode.value("network-proxy").toString()).proxy);
+			stream->setNetworkProxy(FConnectionManager->proxyById(QUuid::fromString(ANode.value("network-proxy").toString())).proxy);
 	}
 }
 
@@ -325,4 +325,4 @@ void SocksStreams::onServerConnectionDisconnected()
 		tcpsocket->deleteLater();
 }
 
-Q_EXPORT_PLUGIN2(plg_socksstreams, SocksStreams);
+

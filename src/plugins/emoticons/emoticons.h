@@ -2,6 +2,8 @@
 #define EMOTICONS_H
 
 #include <QHash>
+#include <QMenu>
+#include <utils/menu.h>
 #include <QStringList>
 #include <definitions/actiongroups.h>
 #include <definitions/toolbargroups.h>
@@ -16,6 +18,7 @@
 #include <interfaces/iemoticons.h>
 #include <interfaces/imessageprocessor.h>
 #include <interfaces/imessagewidgets.h>
+
 #include <interfaces/ioptionsmanager.h>
 #include <utils/iconstorage.h>
 #include <utils/options.h>
@@ -38,6 +41,7 @@ class Emoticons :
 	public IEditContentsHandler
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.emoticons")
 	Q_INTERFACES(IPlugin IEmoticons IMessageWriter IOptionsHolder IEditContentsHandler);
 public:
 	Emoticons();
@@ -62,8 +66,11 @@ public:
 	virtual bool editContentsChanged(int AOrder, IEditWidget *AWidget, int &APosition, int &ARemoved, int &AAdded);
 	//IEmoticons
 	virtual QList<QString> activeIconsets() const;
+	virtual QList<QString> availableIconsets() const;
 	virtual QUrl urlByKey(const QString &AKey) const;
 	virtual QString keyByUrl(const QUrl &AUrl) const;
+	virtual QString unicodeByKey(const QString &AKey) const;
+	virtual QString shortcodeByUnicode(const QString &AUnicode) const;
 	virtual QMap<int, QString> findTextEmoticons(const QTextDocument *ADocument, int AStartPos=0, int ALength=-1) const;
 	virtual QMap<int, QString> findImageEmoticons(const QTextDocument *ADocument, int AStartPos=0, int ALength=-1) const;
 protected:
@@ -76,11 +83,17 @@ protected:
 	SelectIconMenu *createSelectIconMenu(const QString &ASubStorage, QWidget *AParent);
 	void insertSelectIconMenu(const QString &ASubStorage);
 	void removeSelectIconMenu(const QString &ASubStorage);
+	Menu *createUnicodeEmojiMenu(QWidget *AParent);
+	void insertUnicodeEmojiMenu(IToolBarWidget *AWidget);
+	void removeUnicodeEmojiMenu(IToolBarWidget *AWidget);
+	void insertUnicodeEmojiText(IToolBarWidget *AWidget, const QString &AKey);
 protected slots:
 	void onToolBarWidgetCreated(IToolBarWidget *AWidget);
 	void onToolBarWidgetDestroyed(QObject *AObject);
 	void onIconSelected(const QString &ASubStorage, const QString &AIconKey);
 	void onSelectIconMenuDestroyed(QObject *AObject);
+	void onUnicodeEmojiTriggered();
+	void onUnicodeEmojiSelected(const QString &AEmoji);
 	void onOptionsOpened();
 	void onOptionsChanged(const OptionsNode &ANode);
 private:
@@ -94,6 +107,7 @@ private:
 	QMap<QString, IconStorage *> FStorages;
 	QList<IToolBarWidget *> FToolBarsWidgets;
 	QMap<SelectIconMenu *, IToolBarWidget *> FToolBarWidgetByMenu;
+	QMap<QAction *, IToolBarWidget *> FToolBarWidgetByUnicodeAction;
 };
 
 #endif // EMOTICONS_H

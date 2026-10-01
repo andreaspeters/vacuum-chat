@@ -1,4 +1,7 @@
 #include "archiveviewwindow.h"
+#include <algorithm>
+
+#define QT_ESCAPE(A) (A).toHtmlEscaped()
 
 #include <QLocale>
 #include <QMessageBox>
@@ -365,9 +368,9 @@ QStandardItem *ArchiveViewWindow::createHeaderItem(const IArchiveHeader &AHeader
 	item->setData(AHeader.version,HDR_HEADER_VERSION);
 	item->setIcon(IconStorage::staticStorage(RSR_STORAGE_MENUICONS)->getIcon(MNI_HISTORY_DATE));
 
-	QString itemToolTip = Qt::escape(AHeader.with.uFull());
+	QString itemToolTip = QT_ESCAPE(AHeader.with.uFull());
 	if (!AHeader.subject.isEmpty())
-		itemToolTip += "<hr>" + Qt::escape(AHeader.subject);
+		itemToolTip += "<hr>" + QT_ESCAPE(AHeader.subject);
 	item->setToolTip(itemToolTip);
 
 	QStandardItem *parentItem = createParentItem(AHeader);
@@ -607,21 +610,21 @@ QString ArchiveViewWindow::showCollectionInfo(const IArchiveCollection &ACollect
 		"</table>";
 
 	QString info;
-	QString startDate = Qt::escape(ACollection.header.start.toString());
+	QString startDate = QT_ESCAPE(ACollection.header.start.toString());
 	if (FViewOptions.isPrivateChat)
 	{
-		QString withName = Qt::escape(ACollection.header.with.resource());
-		QString confName = Qt::escape(ACollection.header.with.uBare());
+		QString withName = QT_ESCAPE(ACollection.header.with.resource());
+		QString confName = QT_ESCAPE(ACollection.header.with.uBare());
 		info = tr("Conversation with <b>%1</b> in conference %2 started at <b>%3</b>.").arg(withName,confName,startDate);
 	}
 	else if (FViewOptions.isGroupChat)
 	{
-		QString confName = Qt::escape(ACollection.header.with.uBare());
+		QString confName = QT_ESCAPE(ACollection.header.with.uBare());
 		info = tr("Conversation in conference %1 started at <b>%2</b>.").arg(confName,startDate);
 	}
 	else
 	{
-		QString withName = Qt::escape(contactName(ACollection.header.with,true));
+		QString withName = QT_ESCAPE(contactName(ACollection.header.with,true));
 		info = tr("Conversation with %1 started at <b>%2</b>.").arg(withName,startDate);
 	}
 
@@ -639,7 +642,7 @@ QString ArchiveViewWindow::showCollectionInfo(const IArchiveCollection &ACollect
 		}
 		else
 		{
-			subject += Qt::escape(ACollection.header.subject);
+			subject += QT_ESCAPE(ACollection.header.subject);
 		}
 	}
 
@@ -667,7 +670,7 @@ QString ArchiveViewWindow::showNote(const QString &ANote, const IMessageContentO
 
 	QString tmpl = statusTmpl;
 	tmpl.replace("%time%",AOptions.time.toString(AOptions.timeFormat));
-	tmpl.replace("%message%",Qt::escape(ANote));
+	tmpl.replace("%message%",QT_ESCAPE(ANote));
 
 	return tmpl;
 }
@@ -759,14 +762,14 @@ void ArchiveViewWindow::showCollection(const IArchiveCollection &ACollection)
 		}
 
 		if (!FViewOptions.isPrivateChat)
-			FViewOptions.contactName = Qt::escape(FMessageStyles!=NULL ? FMessageStyles->contactName(streamJid(),ACollection.header.with) : contactName(ACollection.header.with));
+			FViewOptions.contactName = QT_ESCAPE(FMessageStyles!=NULL ? FMessageStyles->contactName(streamJid(),ACollection.header.with) : contactName(ACollection.header.with));
 		else
-			FViewOptions.contactName = Qt::escape(ACollection.header.with.resource());
-		FViewOptions.selfName = Qt::escape(FMessageStyles!=NULL ? FMessageStyles->contactName(streamJid()) : streamJid().uBare());
+			FViewOptions.contactName = QT_ESCAPE(ACollection.header.with.resource());
+		FViewOptions.selfName = QT_ESCAPE(FMessageStyles!=NULL ? FMessageStyles->contactName(streamJid()) : streamJid().uBare());
 	}
 
 	FViewOptions.lastTime = QDateTime();
-	FViewOptions.lastSenderId = QString::null;
+	FViewOptions.lastSenderId = QString();
 
 	QString html = showCollectionInfo(ACollection);
 
@@ -783,13 +786,13 @@ void ArchiveViewWindow::showCollection(const IArchiveCollection &ACollection)
 			options.kind = IMessageContentOptions::KindMessage;
 			options.senderId = senderJid.full();
 			options.time = messageIt->dateTime();
-			options.timeFormat = FMessageStyles!=NULL ? FMessageStyles->timeFormat(options.time,ACollection.header.start) : QString::null;
+			options.timeFormat = FMessageStyles!=NULL ? FMessageStyles->timeFormat(options.time,ACollection.header.start) : QString();
 
 			if (FViewOptions.isGroupChat)
 			{
 				options.type |= IMessageContentOptions::TypeGroupchat;
 				options.direction = IMessageContentOptions::DirectionIn;
-				options.senderName = Qt::escape(senderJid.resource());
+				options.senderName = QT_ESCAPE(senderJid.resource());
 				options.senderColor = FViewOptions.style!=NULL ? FViewOptions.style->senderColor(options.senderName) : "blue";
 			}
 			else if (ACollection.header.with == senderJid)
@@ -812,10 +815,10 @@ void ArchiveViewWindow::showCollection(const IArchiveCollection &ACollection)
 		{
 			options.kind = IMessageContentOptions::KindStatus;
 			options.type = IMessageContentOptions::TypeEmpty;
-			options.senderId = QString::null;
-			options.senderName = QString::null;
+			options.senderId = QString();
+			options.senderName = QString();
 			options.time = noteIt.key();
-			options.timeFormat = FMessageStyles!=NULL ? FMessageStyles->timeFormat(options.time,ACollection.header.start) : QString::null;
+			options.timeFormat = FMessageStyles!=NULL ? FMessageStyles->timeFormat(options.time,ACollection.header.start) : QString();
 
 			html += showNote(*noteIt,options);
 			++noteIt;
@@ -845,8 +848,8 @@ void ArchiveViewWindow::onHeadersRequestTimerTimeout()
 			IArchiveRequest request;
 			request.with = isConferencePrivateChat(FContactJid) ? FContactJid : FContactJid.bare();
 			request.exactmatch = request.with.node().isEmpty();
-			request.start = QDateTime(start);
-			request.end = QDateTime(end);
+			request.start = start.startOfDay();
+			request.end = end.startOfDay();
 			request.text = searchString();
 
 			if (updateHeaders(request))
@@ -885,7 +888,7 @@ void ArchiveViewWindow::onLoadEarlierMessageClicked()
 void ArchiveViewWindow::onCurrentPageChanged(int AYear, int AMonth)
 {
 	QDate start(AYear,AMonth,1);
-	FProxyModel->setVisibleInterval(QDateTime(start),QDateTime(start.addMonths(1)));
+	FProxyModel->setVisibleInterval(start.startOfDay(),start.addMonths(1).startOfDay());
 
 	clearMessages();
 	if (!FLoadedPages.contains(start))
@@ -925,12 +928,12 @@ void ArchiveViewWindow::onCollectionsRequestTimerTimeout()
 			int rows = index.model()->rowCount(index);
 			for (int row=0; row<rows; row++)
 			{
-				IArchiveHeader header = modelIndexHeader(index.child(row,0));
+				IArchiveHeader header = modelIndexHeader(index.model()->index(row,0,index));
 				if (header.with.isValid() && header.start.isValid())
 					FCurrentHeaders.append(header);
 			}
 		}
-		qSort(FCurrentHeaders);
+		std::sort(FCurrentHeaders.begin(),FCurrentHeaders.end());
 		processCollectionsLoad();
 	}
 }
@@ -1085,20 +1088,20 @@ void ArchiveViewWindow::onRemoveCollectionsByAction()
 		if (request.end.isValid())
 		{
 			message = tr("Do you want to remove conversation history with <b>%1</b> for <b>%2 %3</b>?")
-				.arg(Qt::escape(contactName(request.with)))
+				.arg(QT_ESCAPE(contactName(request.with)))
 				.arg(QLocale().monthName(request.start.date().month()))
 				.arg(request.start.date().year());
 		}
 		else if (request.start.isValid())
 		{
 			message = tr("Do you want to remove conversation with <b>%1</b> started at <b>%2</b>?")
-				.arg(Qt::escape(contactName(request.with,true)))
+				.arg(QT_ESCAPE(contactName(request.with,true)))
 				.arg(request.start.toString());
 		}
 		else
 		{
 			message = tr("Do you want to remove <b>all</b> conversation history with <b>%1</b>?")
-				.arg(Qt::escape(contactName(request.with,true)));
+				.arg(QT_ESCAPE(contactName(request.with,true)));
 		}
 
 		if (QMessageBox::question(this, tr("Remove conversation history"), message, QMessageBox::Yes|QMessageBox::No) == QMessageBox::Yes)
@@ -1146,8 +1149,8 @@ void ArchiveViewWindow::onHeaderContextMenuRequested(const QPoint &APos)
 			QDate date = FContactJid.isEmpty() ? currentPage() : item->data(HDR_DATEGROUP_DATE).toDate();
 			removePage->setText(tr("Remove History for %1 %2").arg(QLocale().monthName(date.month())).arg(date.year()));
 			removePage->setData(ADR_HEADER_WITH,item->data(HDR_CONTACT_JID));
-			removePage->setData(ADR_HEADER_START,QDateTime(date));
-			removePage->setData(ADR_HEADER_END,QDateTime(date).addMonths(1));
+			removePage->setData(ADR_HEADER_START,date.startOfDay());
+			removePage->setData(ADR_HEADER_END,date.addMonths(1).startOfDay());
 			connect(removePage,SIGNAL(triggered()),SLOT(onRemoveCollectionsByAction()));
 			menu->addAction(removePage,AG_DEFAULT+500);
 		}

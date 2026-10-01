@@ -8,7 +8,7 @@
 #include <interfaces/ivcard.h>
 #include <utils/iconstorage.h>
 #include "edititemdialog.h"
-#include "ui_vcarddialog.h"
+#include <ui_vcarddialog.h>
 
 class VCardDialog :
 			public QDialog

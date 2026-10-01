@@ -6,8 +6,6 @@ if (WIN32)
 	endif (MSVC)
 endif (WIN32)
 
-set(QT_USE_QTNETWORK YES)
-
 set(HEADERS ${HEADERS}
 	"${CMAKE_SOURCE_DIR}/src/thirdparty/jdns/qjdns.h"
 	)
@@ -22,5 +20,4 @@ set(SOURCES ${SOURCES}
 	"${CMAKE_SOURCE_DIR}/src/thirdparty/jdns/qjdns.cpp"
 	)
 
-qt4_generate_moc("${CMAKE_SOURCE_DIR}/src/thirdparty/jdns/qjdns.cpp"
-	"${CMAKE_CURRENT_BINARY_DIR}/qjdns.moc")
+

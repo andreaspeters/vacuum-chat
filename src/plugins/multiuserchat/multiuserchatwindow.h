@@ -41,7 +41,7 @@
 #include "usercontextmenu.h"
 #include "inputtextdialog.h"
 #include "usersproxymodel.h"
-#include "ui_multiuserchatwindow.h"
+#include <ui_multiuserchatwindow.h>
 
 struct WindowStatus
 {

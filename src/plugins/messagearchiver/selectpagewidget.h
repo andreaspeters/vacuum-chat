@@ -7,7 +7,7 @@
 #include <definitions/menuicons.h>
 #include <utils/iconstorage.h>
 #include <utils/menu.h>
-#include "ui_selectpagewidget.h"
+#include <ui_selectpagewidget.h>
 
 class SelectPageWidget : 
 	public QWidget

@@ -114,7 +114,7 @@ bool BitsOfBinary::initSettings()
 			while (!reader.atEnd())
 			{
 				reader.readNext();
-				if (reader.isStartElement() && reader.qualifiedName() == "data")
+				if (reader.isStartElement() && reader.qualifiedName() == QStringLiteral("data"))
 				{
 					maxAge = reader.attributes().value("max-age").toString().toLongLong();
 					break;
@@ -343,7 +343,9 @@ void BitsOfBinary::onXmppStreamCreated(IXmppStream *AXmppStream)
 
 void BitsOfBinary::onOfflineTimerTimeout()
 {
-	QSet<QString> offlineRequests = FOfflineRequests.toSet();
+	QSet<QString> offlineRequests;
+	for (const QString &request : FOfflineRequests)
+		offlineRequests.insert(request);
 	FOfflineRequests.clear();
 	foreach(QString contentId, offlineRequests)
 	{
@@ -355,4 +357,4 @@ void BitsOfBinary::onOfflineTimerTimeout()
 	}
 }
 
-Q_EXPORT_PLUGIN2(plg_bitsofbinary, BitsOfBinary)
+

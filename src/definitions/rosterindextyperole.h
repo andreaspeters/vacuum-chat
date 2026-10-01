@@ -33,6 +33,8 @@ enum RosterIndexDataRoles {
 	RDR_GROUP,
 	RDR_SHOW,
 	RDR_STATUS,
+	RDR_CONVERSATION_ID,
+	RDR_ACCOUNT_ID,
 	RDR_PRIORITY,
 	RDR_SUBSCRIBTION,
 	RDR_ASK,
@@ -45,6 +47,7 @@ enum RosterIndexDataRoles {
 	//Avatars
 	RDR_AVATAR_HASH,
 	RDR_AVATAR_IMAGE,
+	RDR_AVATAR_KEY,
 	//Annotations
 	RDR_ANNOTATIONS,
 	//Recent Items

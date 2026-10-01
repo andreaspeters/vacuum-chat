@@ -4,9 +4,10 @@
 #include <QMap>
 #include <QIcon>
 #include <QImage>
+#include <interfaces/identity.h>
 #include <utils/jid.h>
 
-#define NOTIFICATIONS_UUID  "{59887A91-A483-4a7c-A2DE-227A01D6BC5E}"
+#define NOTIFICATIONS_UUID QUuid("{59887A91-A483-4a7c-A2DE-227A01D6BC5E}")
 
 struct INotification 
 {
@@ -75,6 +76,9 @@ public:
 	virtual void insertNotificationHandler(int AOrder, INotificationHandler *AHandler) =0;
 	virtual void removeNotificationHandler(int AOrder, INotificationHandler *AHandler) =0;
 	virtual QImage contactAvatar(const Jid &AContactJid) const =0;
+	virtual QImage contactAvatarById(const AccountId &AAccountId, const UserId &AUserId) const =0;
+	virtual QIcon contactIconById(const AccountId &AAccountId, const UserId &AUserId) const =0;
+	virtual QString contactNameById(const AccountId &AAccountId, const UserId &AUserId) const =0;
 	virtual QIcon contactIcon(const Jid &AStreamJid, const Jid &AContactJid) const =0;
 	virtual QString contactName(const Jid &AStreamJId, const Jid &AContactJid) const =0;
 protected:

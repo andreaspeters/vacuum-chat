@@ -14,6 +14,7 @@ class UrlProcessor :
 	public IOptionsHolder
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.urlprocessor")
 	Q_INTERFACES(IPlugin IUrlProcessor IOptionsHolder);
 public:
 	UrlProcessor(QObject *AParent = 0);

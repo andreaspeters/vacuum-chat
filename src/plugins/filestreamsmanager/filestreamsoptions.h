@@ -8,7 +8,7 @@
 #include <interfaces/idatastreamsmanager.h>
 #include <interfaces/ioptionsmanager.h>
 #include <utils/options.h>
-#include "ui_filestreamsoptions.h"
+#include <ui_filestreamsoptions.h>
 
 class FileStreamsOptions :
 			public QWidget,

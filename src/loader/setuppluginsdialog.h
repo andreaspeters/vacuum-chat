@@ -8,7 +8,7 @@
 #include <interfaces/ipluginmanager.h>
 #include <utils/iconstorage.h>
 #include <utils/options.h>
-#include "ui_setuppluginsdialog.h"
+#include <ui_setuppluginsdialog.h>
 
 class SetupPluginsDialog :
 			public QDialog

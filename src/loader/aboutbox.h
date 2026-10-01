@@ -4,7 +4,7 @@
 #include <QDialog>
 #include <definitions/version.h>
 #include <interfaces/ipluginmanager.h>
-#include "ui_aboutbox.h"
+#include <ui_aboutbox.h>
 
 class AboutBox :
 			public QDialog

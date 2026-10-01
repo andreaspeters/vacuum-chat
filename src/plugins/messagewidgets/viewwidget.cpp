@@ -12,7 +12,7 @@ ViewWidget::ViewWidget(IMessageWidgets *AMessageWidgets, const Jid &AStreamJid, 
 	setAcceptDrops(true);
 
 	QVBoxLayout *layout = new QVBoxLayout(ui.wdtViewer);
-	layout->setMargin(0);
+	layout->setContentsMargins(0,0,0,0);
 
 	FMessageStyle = NULL;
 	FMessageProcessor = NULL;
@@ -22,6 +22,21 @@ ViewWidget::ViewWidget(IMessageWidgets *AMessageWidgets, const Jid &AStreamJid, 
 	FContactJid = AContactJid;
 	FStyleWidget = NULL;
 
+	initialize();
+}
+
+ViewWidget::ViewWidget(IMessageWidgets *AMessageWidgets, const AccountId &AAccountId, const ConversationId &AConversationId, QWidget *AParent) : QWidget(AParent)
+{
+	ui.setupUi(this);
+	setAcceptDrops(true);
+	QVBoxLayout *layout = new QVBoxLayout(ui.wdtViewer);
+	layout->setContentsMargins(0,0,0,0);
+	FMessageStyle = NULL;
+	FMessageProcessor = NULL;
+	FMessageWidgets = AMessageWidgets;
+	FAccountId = AAccountId;
+	FConversationId = AConversationId;
+	FStyleWidget = NULL;
 	initialize();
 }
 
@@ -64,6 +79,8 @@ void ViewWidget::setMessageStyle(IMessageStyle *AStyle, const IMessageStyleOptio
 {
 	if (FMessageStyle != AStyle)
 	{
+		FMessageRanges.clear();
+		FMessageDecorations.clear();
 		IMessageStyle *before = FMessageStyle;
 		FMessageStyle = AStyle;
 		if (before)
@@ -93,7 +110,107 @@ void ViewWidget::setMessageStyle(IMessageStyle *AStyle, const IMessageStyleOptio
 void ViewWidget::appendHtml(const QString &AHtml, const IMessageContentOptions &AOptions)
 {
 	if (FMessageStyle)
+	{
+		QTextEdit *view = qobject_cast<QTextEdit *>(FStyleWidget);
+		const int start = view ? view->document()->characterCount() - 1 : -1;
 		FMessageStyle->appendContent(FStyleWidget,AHtml,AOptions);
+		if (view && !AOptions.messageId.isEmpty())
+			FMessageRanges.insert(AOptions.messageId, qMakePair(start, view->document()->characterCount() - 1));
+	}
+}
+
+bool ViewWidget::replaceMessage(const QString &AMessageId, const QString &AHtml)
+{
+	QTextEdit *view = qobject_cast<QTextEdit *>(FStyleWidget);
+	if (!view || !FMessageRanges.contains(AMessageId))
+		return false;
+	const QStringList decorationIds = FMessageDecorations.value(AMessageId).keys();
+	for (const QString &decorationId : decorationIds)
+		setMessageDecoration(AMessageId, decorationId, QString());
+	const QPair<int, int> range = FMessageRanges.value(AMessageId);
+	QTextCursor cursor(view->document());
+	cursor.setPosition(range.first);
+	cursor.setPosition(range.second, QTextCursor::KeepAnchor);
+	cursor.insertHtml(AHtml);
+	const int newEnd = cursor.position();
+	const int delta = newEnd - range.second;
+	for (auto it = FMessageRanges.begin(); it != FMessageRanges.end(); ++it)
+	{
+		if (it.key() == AMessageId)
+			it.value() = qMakePair(range.first, newEnd);
+		else if (it.value().first >= range.second)
+			it.value() = qMakePair(it.value().first + delta, it.value().second + delta);
+		else if (it.value().second >= range.second)
+			it.value().second += delta;
+	}
+	for (auto messageIt = FMessageDecorations.begin(); messageIt != FMessageDecorations.end(); ++messageIt)
+		for (auto decorationIt = messageIt.value().begin(); decorationIt != messageIt.value().end(); ++decorationIt)
+			if (decorationIt.value().first >= range.second)
+				decorationIt.value() = qMakePair(decorationIt.value().first + delta,
+					decorationIt.value().second + delta);
+			else if (decorationIt.value().second >= range.second)
+				decorationIt.value().second += delta;
+	return true;
+}
+
+bool ViewWidget::setMessageDecoration(const QString &AMessageId, const QString &ADecorationId,
+	const QString &AHtml)
+{
+	QTextEdit *view = qobject_cast<QTextEdit *>(FStyleWidget);
+	if (!view || AMessageId.isEmpty() || ADecorationId.isEmpty() ||
+		!FMessageRanges.contains(AMessageId))
+		return false;
+
+	QMap<QString, QPair<int, int>> &decorations = FMessageDecorations[AMessageId];
+	if (decorations.contains(ADecorationId))
+	{
+		const QPair<int, int> range = decorations.take(ADecorationId);
+		QTextCursor cursor(view->document());
+		cursor.setPosition(range.first);
+		cursor.setPosition(range.second, QTextCursor::KeepAnchor);
+		cursor.removeSelectedText();
+		const int delta = cursor.position() - range.second;
+		for (auto it = FMessageRanges.begin(); it != FMessageRanges.end(); ++it)
+			if (it.value().first >= range.second)
+				it.value() = qMakePair(it.value().first + delta, it.value().second + delta);
+			else if (it.value().second >= range.second)
+				it.value().second += delta;
+		for (auto messageIt = FMessageDecorations.begin(); messageIt != FMessageDecorations.end(); ++messageIt)
+			for (auto decorationIt = messageIt.value().begin(); decorationIt != messageIt.value().end(); ++decorationIt)
+				if (decorationIt.value().first >= range.second)
+					decorationIt.value() = qMakePair(decorationIt.value().first + delta,
+						decorationIt.value().second + delta);
+				else if (decorationIt.value().second >= range.second)
+					decorationIt.value().second += delta;
+		if (decorations.isEmpty())
+			FMessageDecorations.remove(AMessageId);
+	}
+	if (AHtml.isEmpty())
+		return true;
+
+	const int start = FMessageRanges.value(AMessageId).second;
+	QTextCursor cursor(view->document());
+	cursor.setPosition(start);
+	cursor.insertHtml(AHtml);
+	const int end = cursor.position();
+	const int delta = end - start;
+	if (delta <= 0)
+		return false;
+	for (auto it = FMessageRanges.begin(); it != FMessageRanges.end(); ++it)
+		if (it.value().first >= start)
+			it.value() = qMakePair(it.value().first + delta, it.value().second + delta);
+		else if (it.value().second >= start)
+			it.value().second += delta;
+	for (auto messageIt = FMessageDecorations.begin(); messageIt != FMessageDecorations.end(); ++messageIt)
+		for (auto decorationIt = messageIt.value().begin(); decorationIt != messageIt.value().end(); ++decorationIt)
+			if (decorationIt.value().first >= start)
+				decorationIt.value() = qMakePair(decorationIt.value().first + delta,
+					decorationIt.value().second + delta);
+			else if (decorationIt.value().second >= start)
+				decorationIt.value().second += delta;
+	FMessageRanges[AMessageId].second = end;
+	FMessageDecorations[AMessageId].insert(ADecorationId, qMakePair(start, end));
+	return true;
 }
 
 void ViewWidget::appendText(const QString &AText, const IMessageContentOptions &AOptions)
@@ -129,6 +246,17 @@ void ViewWidget::appendMessage(const Message &AMessage, const IMessageContentOpt
 
 void ViewWidget::contextMenuForView(const QPoint &APosition, const QTextDocumentFragment &ASelection, Menu *AMenu)
 {
+	QTextEdit *view = qobject_cast<QTextEdit *>(FStyleWidget);
+	if (view && AMenu)
+	{
+		const int position = view->cursorForPosition(APosition).position();
+		for (auto it = FMessageRanges.constBegin(); it != FMessageRanges.constEnd(); ++it)
+			if (position >= it.value().first && position <= it.value().second)
+			{
+				AMenu->setProperty("vacuum.messageId", it.key());
+				break;
+			}
+	}
 	emit viewContextMenu(APosition,ASelection,AMenu);
 }
 

@@ -11,7 +11,7 @@
 #include <utils/jid.h>
 #include <utils/options.h>
 
-#define MESSAGESTYLES_UUID  "{e3ab1bc7-35a6-431a-9b91-c778451b1eb1}"
+#define MESSAGESTYLES_UUID QUuid("{e3ab1bc7-35a6-431a-9b91-c778451b1eb1}")
 
 struct IMessageStyleOptions
 {
@@ -127,7 +127,7 @@ public:
 	virtual IMessageStylePlugin *pluginById(const QString &APluginId) const =0;
 	virtual IMessageStyle *styleForOptions(const IMessageStyleOptions &AOptions) const =0;
 	virtual IMessageStyleOptions styleOptions(const OptionsNode &ANode, int AMessageType) const =0;
-	virtual IMessageStyleOptions styleOptions(int AMessageType, const QString &AContext = QString::null) const =0;
+	virtual IMessageStyleOptions styleOptions(int AMessageType, const QString &AContext = QString()) const =0;
 	virtual QString contactAvatar(const Jid &AContactJid) const =0;
 	virtual QString contactName(const Jid &AStreamJid, const Jid &AContactJid = Jid::null) const =0;
 	virtual QString contactIcon(const Jid &AStreamJid, const Jid &AContactJid = Jid::null) const =0;

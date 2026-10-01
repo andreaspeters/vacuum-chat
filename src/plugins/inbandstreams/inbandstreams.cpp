@@ -140,4 +140,4 @@ void InBandStreams::loadMethodSettings(IDataStreamSocket *ASocket, const Options
 	}
 }
 
-Q_EXPORT_PLUGIN2(plg_inbandstreams, InBandStreams);
+

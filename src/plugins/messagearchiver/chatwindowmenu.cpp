@@ -132,7 +132,10 @@ void ChatWindowMenu::restoreSessionPrefs(const Jid &AContactJid)
 
 void ChatWindowMenu::updateMenu()
 {
-	if (FArchiver->isArchivePrefsEnabled(streamJid()))
+	const bool hasXmppConversation = streamJid().isValid() && contactJid().isValid();
+	FEnableArchiving->setVisible(hasXmppConversation);
+	FDisableArchiving->setVisible(hasXmppConversation);
+	if (hasXmppConversation && FArchiver->isArchivePrefsEnabled(streamJid()))
 	{
 		IArchiveItemPrefs iprefs = FArchiver->archiveItemPrefs(streamJid(),contactJid());
 		bool isOTRSession = FSessionNegotiation!=NULL ? isOTRStanzaSession(FSessionNegotiation->getSession(streamJid(),contactJid())) : false;

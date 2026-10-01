@@ -8,6 +8,8 @@
 #include <interfaces/iroster.h>
 #include <interfaces/ipresence.h>
 #include <interfaces/iaccountmanager.h>
+#include <interfaces/iprotocolpresence.h>
+#include <interfaces/iprotocolroster.h>
 #include <utils/jid.h>
 #include <utils/options.h>
 #include "rosterindex.h"
@@ -18,6 +20,7 @@ class RostersModel :
 	public IRostersModel
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.rostersmodel")
 	Q_INTERFACES(IPlugin IRostersModel);
 public:
 	RostersModel();
@@ -29,7 +32,7 @@ public:
 	virtual bool initConnections(IPluginManager *APluginManager, int &AInitOrder);
 	virtual bool initObjects();
 	virtual bool initSettings() { return true; }
-	virtual bool startPlugin() { return true; }
+	virtual bool startPlugin();
 	//QAbstractItemModel
 	virtual QModelIndex index(int ARow, int AColumn, const QModelIndex &AParent = QModelIndex()) const;
 	virtual QModelIndex parent(const QModelIndex &AIndex) const;
@@ -42,6 +45,8 @@ public:
 	virtual bool setData(const QModelIndex &AIndex, const QVariant &AValue, int ARole = Qt::EditRole);
 	//IRostersModel
 	virtual IRosterIndex *addStream(const Jid &AStreamJid);
+	virtual IRosterIndex *addProtocolStream(const QString &AAccountId);
+	virtual IRosterIndex *protocolStreamRoot(const QString &AAccountId) const;
 	virtual QList<Jid> streams() const;
 	virtual void removeStream(const Jid &AStreamJid);
 	virtual IRosterIndex *rootIndex() const;
@@ -80,6 +85,8 @@ protected:
 	void removeChangedIndex(IRosterIndex *AIndex);
 	QString getGroupName(int AType, const QString &AGroup) const;
 	bool isChildIndex(IRosterIndex *AIndex, IRosterIndex *AParent) const;
+	void rebuildProtocolRoster(IProtocolRoster *roster);
+	void rebuildProtocolRosterBatch();
 	QList<IRosterIndex *> findContactIndexes(const Jid &AStreamJid, const Jid &AContactJid, bool ABare, IRosterIndex *AParent = NULL) const;
 protected slots:
 	void onAccountShown(IAccount *AAccount);
@@ -89,6 +96,9 @@ protected slots:
 	void onRosterStreamJidChanged(IRoster *ARoster, const Jid &ABefore);
 	void onPresenceChanged(IPresence *APresence, int AShow, const QString &AStatus, int APriority);
 	void onPresenceItemReceived(IPresence *APresence, const IPresenceItem &AItem, const IPresenceItem &ABefore);
+	void onProtocolPresenceChanged(const QString &AStreamId, int AShow, const QString &AStatus);
+	void onProtocolPresenceClosed(const QString &AStreamId);
+	void onProtocolRosterChanged();
 	void onIndexDataChanged(IRosterIndex *AIndex, int ARole);
 	void onIndexChildAboutToBeInserted(IRosterIndex *AIndex);
 	void onIndexChildInserted(IRosterIndex *AIndex);
@@ -100,10 +110,24 @@ private:
 	IRosterPlugin *FRosterPlugin;
 	IPresencePlugin *FPresencePlugin;
 	IAccountManager *FAccountManager;
+	IProtocolPresence *FProtocolPresence;
+	IProtocolRoster *FProtocolRoster;
+	QList<IProtocolRoster *> FProtocolRosters;
+	IPluginManager *FPluginManager;
+	int FProtocolRosterRetryCount;
 private:
 	RosterIndex *FRootIndex;
 	QMap<int, QString> FSingleGroups;
 	QHash<Jid,IRosterIndex *> FStreamsRoot;
+	QHash<QString,IRosterIndex *> FProtocolStreams;
+	QList<IProtocolRoster *> FProtocolRosterRebuildQueue;
+	IProtocolRoster *FPendingProtocolRoster = nullptr;
+	QString FPendingProtocolStreamId;
+	IRosterIndex *FPendingDirectGroup = nullptr;
+	IRosterIndex *FPendingRoomGroup = nullptr;
+	QList<ProtocolRoom> FPendingProtocolRooms;
+	QHash<QString, IRosterIndex *> FPendingExistingRooms;
+	int FPendingProtocolRoomIndex = 0;
 	QSet<IRosterIndex *> FChangedIndexes;
 	QList<IRosterDataHolder *> FDataHolders;
 private:

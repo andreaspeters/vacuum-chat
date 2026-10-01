@@ -61,11 +61,11 @@ public:
 	QDateTime dateTime() const;
 	Message &setDateTime(const QDateTime &ADateTime, bool ADelayed = false);
 	QStringList subjectLangs() const;
-	QString subject(const QString &ALang = QString::null) const;
-	Message &setSubject(const QString &ASubject, const QString &ALang = QString::null);
+	QString subject(const QString &ALang = QString()) const;
+	Message &setSubject(const QString &ASubject, const QString &ALang = QString());
 	QStringList bodyLangs() const;
-	QString body(const QString &ALang = QString::null) const;
-	Message &setBody(const QString &ABody, const QString &ALang = QString::null);
+	QString body(const QString &ALang = QString()) const;
+	Message &setBody(const QString &ABody, const QString &ALang = QString());
 	QString threadId() const;
 	Message &setThreadId(const QString &AThreadId);
 	QStringList availableLangs(const QDomElement &AParent, const QString &ATagName) const;

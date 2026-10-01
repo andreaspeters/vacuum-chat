@@ -2,7 +2,7 @@
 #define NOTIFYWIDGET_H
 
 #include <QMouseEvent>
-#include <QDesktopWidget>
+#include <QScreen>
 #include <QNetworkAccessManager>
 #include <definitions/optionvalues.h>
 #include <definitions/notificationdataroles.h>
@@ -11,7 +11,7 @@
 #include <utils/message.h>
 #include <utils/options.h>
 #include <utils/textmanager.h>
-#include "ui_notifywidget.h"
+#include <ui_notifywidget.h>
 
 class NotifyWidget :
 			public QWidget
@@ -47,7 +47,7 @@ private:
 private:
 	static void layoutWidgets();
 	static IMainWindow *FMainWindow;
-	static QDesktopWidget *FDesktop;
+	static QScreen *FDesktop;
 	static QList<NotifyWidget *> FWidgets;
 	static QRect FDisplay;
 };

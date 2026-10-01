@@ -3,7 +3,7 @@
 
 #include <QDialog>
 #include <interfaces/ioptionsmanager.h>
-#include "ui_logindialog.h"
+#include <ui_logindialog.h>
 
 class LoginDialog :
 			public QDialog

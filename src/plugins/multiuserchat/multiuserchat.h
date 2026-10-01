@@ -57,7 +57,7 @@ public:
 	virtual XmppError roomError() const;
 	virtual bool sendStreamPresence();
 	virtual bool sendPresence(int AShow, const QString &AStatus);
-	virtual bool sendMessage(const Message &AMessage, const QString &AToNick = QString::null);
+	virtual bool sendMessage(const Message &AMessage, const QString &AToNick = QString());
 	virtual bool requestVoice();
 	virtual bool inviteContact(const Jid &AContactJid, const QString &AReason);
 	//Moderator
@@ -65,8 +65,8 @@ public:
 	virtual bool sendSubject(const QString &ASubject);
 	virtual bool sendDataFormMessage(const IDataForm &AForm);
 	//Administrator
-	virtual bool setRole(const QString &ANick, const QString &ARole, const QString &AReason = QString::null);
-	virtual bool setAffiliation(const QString &ANick, const QString &AAffiliation, const QString &AReason = QString::null);
+	virtual bool setRole(const QString &ANick, const QString &ARole, const QString &AReason = QString());
+	virtual bool setAffiliation(const QString &ANick, const QString &AAffiliation, const QString &AReason = QString());
 	virtual bool requestAffiliationList(const QString &AAffiliation);
 	virtual bool changeAffiliationList(const QList<IMultiUserListItem> &ADeltaList);
 	//Owner

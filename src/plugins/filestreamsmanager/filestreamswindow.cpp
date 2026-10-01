@@ -38,7 +38,7 @@ FileStreamsWindow::FileStreamsWindow(IFileStreamsManager *AManager, QWidget *APa
 	FProxy.setSortLocaleAware(true);
 
 	ui.tbvStreams->setModel(&FProxy);
-	ui.tbvStreams->verticalHeader()->setResizeMode(QHeaderView::ResizeToContents);
+	ui.tbvStreams->verticalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
 	connect(ui.tbvStreams,SIGNAL(activated(const QModelIndex &)),SLOT(onTableIndexActivated(const QModelIndex &)));
 
 	connect(FManager->instance(),SIGNAL(streamCreated(IFileStream *)),SLOT(onStreamCreated(IFileStream *)));
@@ -63,7 +63,7 @@ void FileStreamsWindow::initialize()
 	FStreamsModel.setHorizontalHeaderLabels(QStringList()<<tr("File Name")<<tr("State")<<tr("Size")<<tr("Progress")<<tr("Speed"));
 
 	for (int column=0; column<CMN_COUNT; column++)
-		ui.tbvStreams->horizontalHeader()->setResizeMode(column,column!=CMN_FILENAME ? QHeaderView::ResizeToContents : QHeaderView::Stretch);
+		ui.tbvStreams->horizontalHeader()->setSectionResizeMode(column,column!=CMN_FILENAME ? QHeaderView::ResizeToContents : QHeaderView::Stretch);
 
 	foreach(IFileStream *stream, FManager->streams()) {
 		appendStream(stream); }
@@ -173,7 +173,7 @@ void FileStreamsWindow::updateStreamProperties(IFileStream *AStream)
 	QList<QStandardItem *> columns = streamColumns(AStream->streamId());
 	if (!columns.isEmpty())
 	{
-		QString fname = !AStream->fileName().isEmpty() ? AStream->fileName().split("/").last() : QString::null;
+		QString fname = !AStream->fileName().isEmpty() ? AStream->fileName().split("/").last() : QString();
 		columns[CMN_FILENAME]->setText(fname);
 		columns[CMN_FILENAME]->setData(fname, IDR_VALUE);
 

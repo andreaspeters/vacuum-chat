@@ -8,8 +8,9 @@
 #include <interfaces/ipresence.h>
 #include <interfaces/iavatars.h>
 #include <interfaces/istatuschanger.h>
+#include <interfaces/iprotocolmessaging.h>
 #include <utils/options.h>
-#include "ui_infowidget.h"
+#include <ui_infowidget.h>
 
 class InfoWidget :
 			public QWidget,
@@ -19,6 +20,7 @@ class InfoWidget :
 	Q_INTERFACES(IInfoWidget);
 public:
 	InfoWidget(IMessageWidgets *AMessageWidgets, const Jid& AStreamJid, const Jid &AContactJid, QWidget *AParent);
+	InfoWidget(IMessageWidgets *AMessageWidgets, const AccountId &AAccountId, const ConversationId &AConversationId, QWidget *AParent);
 	~InfoWidget();
 	virtual QWidget *instance() { return this; }
 	virtual const Jid &streamJid() const;
@@ -55,13 +57,17 @@ private:
 	IPresence *FPresence;
 	IAvatars *FAvatars;
 	IStatusChanger *FStatusChanger;
+	QList<IProtocolMessaging *> FProtocolMessaging;
 	IMessageWidgets *FMessageWidgets;
 private:
 	int FAutoFields;
 	int FVisibleFields;
 	Jid FStreamJid;
 	Jid FContactJid;
+	AccountId FAccountId;
+	ConversationId FConversationId;
 	QMap<int, QVariant> FFieldValues;
+	bool protocolConversationOnline() const;
 };
 
 #endif // INFOWIDGET_H

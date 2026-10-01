@@ -239,11 +239,11 @@ ArchiveStreamOptions::ArchiveStreamOptions(IMessageArchiver *AArchiver, const Ji
 
 	ArchiveDelegate *delegat = new ArchiveDelegate(AArchiver,ui.tbwItemPrefs);
 	ui.tbwItemPrefs->setItemDelegate(delegat);
-	ui.tbwItemPrefs->horizontalHeader()->setResizeMode(JID_COLUMN,QHeaderView::Stretch);
-	ui.tbwItemPrefs->horizontalHeader()->setResizeMode(SAVE_COLUMN,QHeaderView::ResizeToContents);
-	ui.tbwItemPrefs->horizontalHeader()->setResizeMode(OTR_COLUMN,QHeaderView::ResizeToContents);
-	ui.tbwItemPrefs->horizontalHeader()->setResizeMode(EXPIRE_COLUMN,QHeaderView::ResizeToContents);
-	ui.tbwItemPrefs->horizontalHeader()->setResizeMode(EXACT_COLUMN,QHeaderView::ResizeToContents);
+	ui.tbwItemPrefs->horizontalHeader()->setSectionResizeMode(JID_COLUMN,QHeaderView::Stretch);
+	ui.tbwItemPrefs->horizontalHeader()->setSectionResizeMode(SAVE_COLUMN,QHeaderView::ResizeToContents);
+	ui.tbwItemPrefs->horizontalHeader()->setSectionResizeMode(OTR_COLUMN,QHeaderView::ResizeToContents);
+	ui.tbwItemPrefs->horizontalHeader()->setSectionResizeMode(EXPIRE_COLUMN,QHeaderView::ResizeToContents);
+	ui.tbwItemPrefs->horizontalHeader()->setSectionResizeMode(EXACT_COLUMN,QHeaderView::ResizeToContents);
 
 	ui.cmbMethodAuto->addItem(tr("Yes, if supported by server"),ARCHIVE_METHOD_PREFER);
 	ui.cmbMethodAuto->addItem(tr("Yes, if other archive is not available"),ARCHIVE_METHOD_CONCEDE);
@@ -327,8 +327,8 @@ void ArchiveStreamOptions::apply()
 				}
 				else
 				{
-					prefs.itemPrefs[itemJid].otr = QString::null;
-					prefs.itemPrefs[itemJid].save = QString::null;
+					prefs.itemPrefs[itemJid].otr = QString();
+					prefs.itemPrefs[itemJid].save = QString();
 				}
 			}
 		}
@@ -401,7 +401,7 @@ void ArchiveStreamOptions::updateItemPrefs(const Jid &AItemJid, const IArchiveIt
 		ui.tbwItemPrefs->setItem(jidItem->row(),OTR_COLUMN,otrItem);
 		ui.tbwItemPrefs->setItem(jidItem->row(),EXPIRE_COLUMN,expireItem);
 		ui.tbwItemPrefs->setItem(jidItem->row(),EXACT_COLUMN,exactItem);
-		ui.tbwItemPrefs->verticalHeader()->setResizeMode(jidItem->row(),QHeaderView::ResizeToContents);
+		ui.tbwItemPrefs->verticalHeader()->setSectionResizeMode(jidItem->row(),QHeaderView::ResizeToContents);
 		FTableItems.insert(AItemJid,jidItem);
 	}
 	QTableWidgetItem *jidItem = FTableItems.value(AItemJid);
@@ -481,7 +481,7 @@ void ArchiveStreamOptions::onAddItemPrefClicked()
 	}
 	else if (!itemJid.isEmpty())
 	{
-		QMessageBox::warning(this,tr("Unacceptable item JID"),tr("'%1' is not valid JID or already exists").arg(Qt::escape(itemJid.uFull())));
+		QMessageBox::warning(this,tr("Unacceptable item JID"),tr("'%1' is not valid JID or already exists").arg(itemJid.uFull().toHtmlEscaped()));
 	}
 }
 
@@ -530,7 +530,9 @@ void ArchiveStreamOptions::onArchivePrefsChanged(const Jid &AStreamJid)
 		}
 		ui.cmbExpireTime->setCurrentIndex(expireIndex);
 
-		QSet<Jid> oldItems = FTableItems.keys().toSet();
+		QSet<Jid> oldItems;
+		for (const Jid &item : FTableItems.keys())
+			oldItems.insert(item);
 		foreach(Jid itemJid, prefs.itemPrefs.keys())
 		{
 			oldItems -= itemJid;

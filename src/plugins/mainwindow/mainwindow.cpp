@@ -3,7 +3,7 @@
 #include <QTimer>
 #include <QResizeEvent>
 #include <QApplication>
-#include <QDesktopWidget>
+#include <QScreen>
 
 #define ONE_WINDOW_MODE_OPTIONS_NS "one-window-mode"
 
@@ -54,7 +54,7 @@ MainWindow::MainWindow(QWidget *AParent, Qt::WindowFlags AFlags) : QMainWindow(A
 	FCentralWidget->instance()->setVisible(false);
 
 	FLeftLayout = new QVBoxLayout(FLeftWidget);
-	FLeftLayout->setMargin(0);
+	FLeftLayout->setContentsMargins(0,0,0,0);
 	FLeftLayout->setSpacing(0);
 
 	FTabWidget = new MainTabWidget(FLeftWidget);
@@ -243,11 +243,14 @@ void MainWindow::loadWindowGeometryAndState()
 {
 	FAligned = false;
 	QString ns = isCentralWidgetVisible() ? ONE_WINDOW_MODE_OPTIONS_NS : "";
+	FLeftWidgetWidth = isCentralWidgetVisible()
+		? Options::fileValue("mainwindow.left-frame-width",ns).toInt() : 0;
+	if (isCentralWidgetVisible() && FLeftWidgetWidth <= 0)
+		FLeftWidgetWidth = 200;
 	if (!restoreGeometry(Options::fileValue("mainwindow.geometry",ns).toByteArray()))
 	{
 		if (isCentralWidgetVisible())
 		{
-			FLeftWidgetWidth = 200;
 			Options::setFileValue(0,"mainwindow.align",ns);
 			setGeometry(WidgetManager::alignGeometry(QSize(640,480),this,Qt::AlignCenter));
 		}
@@ -256,10 +259,6 @@ void MainWindow::loadWindowGeometryAndState()
 			Options::setFileValue((int)(Qt::AlignRight|Qt::AlignBottom),"mainwindow.align",ns);
 			setGeometry(WidgetManager::alignGeometry(QSize(200,500),this,Qt::AlignRight|Qt::AlignBottom));
 		}
-	}
-	else if (isCentralWidgetVisible())
-	{
-		FLeftWidgetWidth = Options::fileValue("mainwindow.left-frame-width",ns).toInt();
 	}
 }
 
@@ -280,10 +279,10 @@ QMenu *MainWindow::createPopupMenu()
 void MainWindow::correctWindowPosition()
 {
 	QRect windowRect = geometry();
-	QRect screenRect = qApp->desktop()->availableGeometry(this);
+	QRect screenRect = screen() != NULL ? screen()->availableGeometry() : QGuiApplication::primaryScreen()->availableGeometry();
 	if (!screenRect.isEmpty() && !windowRect.isEmpty())
 	{
-		Qt::Alignment align = 0;
+		Qt::Alignment align = Qt::Alignment();
 		if (windowRect.right() <= screenRect.left())
 			align |= Qt::AlignLeft;
 		else if (windowRect.left() >= screenRect.right())
@@ -298,7 +297,7 @@ void MainWindow::correctWindowPosition()
 
 void MainWindow::restoreAcceptDrops(QWidget *AParent)
 {
-#ifdef Q_WS_WIN
+#ifdef Q_OS_WIN
 	foreach(QObject *object, AParent->children())
 	{
 		if (object->isWidgetType())
@@ -417,4 +416,6 @@ void MainWindow::onSplitterMoved(int APos, int AIndex)
 {
 	Q_UNUSED(APos); Q_UNUSED(AIndex);
 	FLeftWidgetWidth = FSplitter->sizes().value(FSplitter->indexOf(FLeftWidget));
+	if (isCentralWidgetVisible() && FLeftWidgetWidth > 0 && !Options::isNull())
+		Options::setFileValue(FLeftWidgetWidth,"mainwindow.left-frame-width",ONE_WINDOW_MODE_OPTIONS_NS);
 }

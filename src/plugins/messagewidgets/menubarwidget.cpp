@@ -9,7 +9,7 @@ MenuBarWidget::MenuBarWidget(IInfoWidget *AInfo, IViewWidget *AView, IEditWidget
 	FMenuBarChanger = new MenuBarChanger(this);
 
 	// On Ubuntu 11.10 empty menubar cause segmentation fault
-	addAction(QString::null)->setVisible(false);
+	addAction(QString())->setVisible(false);
 }
 
 MenuBarWidget::~MenuBarWidget()

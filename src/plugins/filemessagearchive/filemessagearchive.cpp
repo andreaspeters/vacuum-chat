@@ -1,9 +1,10 @@
 #include "filemessagearchive.h"
 
 #include <QDir>
-#include <QStringRef>
+
 #include <QDirIterator>
 #include <QXmlStreamReader>
+#include <algorithm>
 #include "workingthread.h"
 
 #define ARCHIVE_DIR_NAME      "archive"
@@ -219,7 +220,7 @@ QString FileMessageArchive::saveCollection(const Jid &AStreamJid, const IArchive
 		connect(wthread,SIGNAL(finished()),SLOT(onWorkingThreadFinished()));
 		return wthread->executeAction(WorkingThread::SaveCollection);
 	}
-	return QString::null;
+	return QString();
 }
 
 QString FileMessageArchive::loadHeaders(const Jid &AStreamJid, const IArchiveRequest &ARequest)
@@ -232,7 +233,7 @@ QString FileMessageArchive::loadHeaders(const Jid &AStreamJid, const IArchiveReq
 		connect(wthread,SIGNAL(finished()),SLOT(onWorkingThreadFinished()));
 		return wthread->executeAction(WorkingThread::LoadHeaders);
 	}
-	return QString::null;
+	return QString();
 }
 
 QString FileMessageArchive::loadCollection(const Jid &AStreamJid, const IArchiveHeader &AHeader)
@@ -245,7 +246,7 @@ QString FileMessageArchive::loadCollection(const Jid &AStreamJid, const IArchive
 		connect(wthread,SIGNAL(finished()),SLOT(onWorkingThreadFinished()));
 		return wthread->executeAction(WorkingThread::LoadCollection);
 	}
-	return QString::null;
+	return QString();
 }
 
 QString FileMessageArchive::removeCollections(const Jid &AStreamJid, const IArchiveRequest &ARequest)
@@ -258,7 +259,7 @@ QString FileMessageArchive::removeCollections(const Jid &AStreamJid, const IArch
 		connect(wthread,SIGNAL(finished()),SLOT(onWorkingThreadFinished()));
 		return wthread->executeAction(WorkingThread::RemoveCollection);
 	}
-	return QString::null;
+	return QString();
 }
 
 QString FileMessageArchive::loadModifications(const Jid &AStreamJid, const QDateTime &AStart, int ACount)
@@ -272,7 +273,7 @@ QString FileMessageArchive::loadModifications(const Jid &AStreamJid, const QDate
 		connect(wthread,SIGNAL(finished()),SLOT(onWorkingThreadFinished()));
 		return wthread->executeAction(WorkingThread::LoadModifications);
 	}
-	return QString::null;
+	return QString();
 }
 
 QString FileMessageArchive::archiveHomePath() const
@@ -299,7 +300,7 @@ QString FileMessageArchive::collectionFileName(const QDateTime &AStart) const
 		DateTime start(AStart.addMSecs(-AStart.time().msec()));
 		return start.toX85UTC().replace(":","=") + COLLECTION_EXT;
 	}
-	return QString::null;
+	return QString();
 }
 
 QString FileMessageArchive::collectionDirPath(const Jid &AStreamJid, const Jid &AWith) const
@@ -351,7 +352,7 @@ QString FileMessageArchive::collectionDirPath(const Jid &AStreamJid, const Jid &
 		}
 	}
 
-	return noError ? dir.path() : QString::null;
+	return noError ? dir.path() : QString();
 }
 
 QString FileMessageArchive::collectionFilePath(const Jid &AStreamJid, const Jid &AWith, const QDateTime &AStart) const
@@ -363,7 +364,7 @@ QString FileMessageArchive::collectionFilePath(const Jid &AStreamJid, const Jid 
 		if (!dirPath.isEmpty() && !fileName.isEmpty())
 			return dirPath+"/"+fileName;
 	}
-	return QString::null;
+	return QString();
 }
 
 QStringList FileMessageArchive::findCollectionFiles(const Jid &AStreamJid, const IArchiveRequest &ARequest) const
@@ -425,7 +426,7 @@ QStringList FileMessageArchive::findCollectionFiles(const Jid &AStreamJid, const
 			}
 		}
 
-		QMapIterator<QString,QString> fileIt(filesMap);
+		QMultiMapIterator<QString,QString> fileIt(filesMap);
 		if (ARequest.order == Qt::DescendingOrder)
 			fileIt.toBack();
 		while (ARequest.order==Qt::AscendingOrder ? fileIt.hasNext() : fileIt.hasPrevious())
@@ -536,7 +537,7 @@ IArchiveModifications FileMessageArchive::loadFileModifications(const Jid &AStre
 			while (!log.atEnd() && modifs.items.count()<ACount)
 			{
 				QString logLine = QString::fromUtf8(log.readLine());
-				QStringList logFields = logLine.split(" ",QString::KeepEmptyParts);
+				QStringList logFields = logLine.split(" ",Qt::KeepEmptyParts);
 				if (logFields.count() >= 6)
 				{
 					DateTime logTime = logFields.at(0);
@@ -594,7 +595,7 @@ bool FileMessageArchive::saveCollectionToFile(const Jid &AStreamJid, const IArch
 					if (!curMessages.contains(message.dateTime(),message.body()))
 						collection.body.messages.append(message);
 
-				qSort(collection.body.messages);
+				std::sort(collection.body.messages.begin(),collection.body.messages.end());
 			}
 			if (!ACollection.body.notes.isEmpty())
 			{
@@ -938,4 +939,4 @@ void FileMessageArchive::onDiscoInfoReceived(const IDiscoInfo &AInfo)
 	}
 }
 
-Q_EXPORT_PLUGIN2(plg_filemessagearchive, FileMessageArchive)
+

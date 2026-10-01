@@ -23,6 +23,7 @@
 #include <interfaces/ioptionsmanager.h>
 #include <interfaces/iservicediscovery.h>
 #include <interfaces/imessagearchiver.h>
+#include <interfaces/iprotocolmessaging.h>
 #include <interfaces/idataforms.h>
 #include <interfaces/inotifications.h>
 #include <interfaces/isessionnegotiation.h>
@@ -57,6 +58,7 @@ class ChatStates :
 	public ISessionNegotiator
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.chatstates")
 	Q_INTERFACES(IPlugin IChatStates IStanzaHandler IArchiveHandler IOptionsHolder ISessionNegotiator);
 public:
 	ChatStates();
@@ -92,12 +94,16 @@ signals:
 	void supportStatusChanged(const Jid &AStreamJid, const Jid &AContactJid, bool ASupported) const;
 	void userChatStateChanged(const Jid &AStreamJid, const Jid &AContactJid, int AState) const;
 	void selfChatStateChanged(const Jid &AStreamJid, const Jid &AContactJid, int AState) const;
+	void protocolUserChatStateChanged(const QString &accountId, const QString &conversationId, int state) const;
 protected:
 	bool isSendingPossible(const Jid &AStreamJid, const Jid &AContactJid) const;
 	void sendStateMessage(const Jid &AStreamJid, const Jid &AContactJid, int AState) const;
 	void resetSupported(const Jid &AContactJid = Jid::null);
 	void setSupported(const Jid &AStreamJid, const Jid &AContactJid, bool ASupported);
 	void setUserState(const Jid &AStreamJid, const Jid &AContactJid, int AState);
+	void setProtocolUserState(const QString &accountId, const QString &conversationId, int state);
+	void notifyProtocolUserState(const QString &accountId, const QString &conversationId, int state);
+	void removeProtocolUserNotification(const QString &accountId, const QString &conversationId);
 	void setSelfState(const Jid &AStreamJid, const Jid &AContactJid, int AState, bool ASend = true);
 	void notifyUserState(const Jid &AStreamJid, const Jid &AContactJid);
 	void registerDiscoFeatures();
@@ -117,6 +123,7 @@ protected slots:
 	void onOptionsClosed();
 	void onOptionsChanged(const OptionsNode &ANode);
 	void onStanzaSessionTerminated(const IStanzaSession &ASession);
+	void onProtocolTypingChanged(const ProtocolTypingUpdate &update);
 private:
 	IPresencePlugin *FPresencePlugin;
 	IMessageWidgets *FMessageWidgets;
@@ -136,8 +143,11 @@ private:
 	QMap<Jid, int> FPermitStatus;
 	QMap<Jid, QList<Jid> > FNotSupported;
 	QMap<Jid, QMap<Jid, ChatParams> > FChatParams;
+	QMap<QString, QMap<QString, int> > FProtocolUserStates;
+	QMap<QString, QMap<QString, int> > FProtocolNotifyIds;
 	QMap<Jid, QMap<Jid, QString> > FStanzaSessions;
 	QMap<QTextEdit *, IChatWindow *> FChatByEditor;
+	QList<IProtocolMessaging *> FProtocolMessaging;
 };
 
 #endif // CHATSTATES_H

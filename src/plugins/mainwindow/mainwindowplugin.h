@@ -22,6 +22,7 @@ class MainWindowPlugin :
 		public IMainWindowPlugin
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.mainwindow")
 	Q_INTERFACES(IPlugin IMainWindowPlugin);
 public:
 	MainWindowPlugin();

@@ -3,6 +3,7 @@
 #include <QDir>
 #include <QTimer>
 #include <QFileInfo>
+#include <QMimeData>
 
 #define ADR_STREAM_JID                Action::DR_StreamJid
 #define ADR_CONTACT_JID               Action::DR_Parametr1
@@ -304,7 +305,13 @@ bool FileTransfer::fileStreamRequest(int AOrder, const QString &AStreamId, const
 		QString fileName = fileElem.attribute("name");
 		qint64 fileSize = fileElem.attribute("size").toLongLong();
 
-		QList<QString> methods = AMethods.toSet().intersect(Options::node(OPV_FILESTREAMS_ACCEPTABLEMETHODS).value().toStringList().toSet()).toList();
+		QSet<QString> requestedMethods;
+		for (const QString &method : AMethods)
+			requestedMethods.insert(method);
+		QSet<QString> acceptableMethods;
+		for (const QString &method : Options::node(OPV_FILESTREAMS_ACCEPTABLEMETHODS).value().toStringList())
+			acceptableMethods.insert(method);
+		QStringList methods = (requestedMethods & acceptableMethods).values();
 		if (!fileName.isEmpty() && fileSize>0)
 		{
 			IFileStream *stream = createStream(AStreamId,ARequest.to(),ARequest.from(),IFileStream::ReceiveFile);
@@ -422,7 +429,7 @@ void FileTransfer::notifyStream(IFileStream *AStream, bool ANewStream)
 		StreamDialog *dialog = getStreamDialog(AStream);
 		if (dialog==NULL || !dialog->isActiveWindow())
 		{
-			QString file = !AStream->fileName().isEmpty() ? AStream->fileName().split("/").last() : QString::null;
+			QString file = !AStream->fileName().isEmpty() ? AStream->fileName().split("/").last() : QString();
 
 			INotification notify;
 			notify.kinds = FNotifications->enabledTypeNotificationKinds(NNT_FILETRANSFER);
@@ -440,7 +447,7 @@ void FileTransfer::notifyStream(IFileStream *AStream, bool ANewStream)
 				if (AStream->streamKind() == IFileStream::ReceiveFile)
 				{
 					notify.data.insert(NDR_TOOLTIP,tr("Requested file transfer: %1").arg(file));
-					notify.data.insert(NDR_POPUP_HTML,Qt::escape(tr("You received a request to transfer the file")));
+					notify.data.insert(NDR_POPUP_HTML,tr("You received a request to transfer the file").toHtmlEscaped());
 					notify.data.insert(NDR_SOUND_FILE,SDF_FILETRANSFER_INCOMING);
 				}
 				break;
@@ -453,12 +460,12 @@ void FileTransfer::notifyStream(IFileStream *AStream, bool ANewStream)
 					if (AStream->streamKind() == IFileStream::SendFile)
 					{
 						notify.data.insert(NDR_TOOLTIP,tr("Auto sending file: %1").arg(file));
-						notify.data.insert(NDR_POPUP_HTML,Qt::escape(tr("File sending is started automatically")));
+						notify.data.insert(NDR_POPUP_HTML,tr("File sending is started automatically").toHtmlEscaped());
 					}
 					else
 					{
 						notify.data.insert(NDR_TOOLTIP,tr("Auto receiving file: %1").arg(file));
-						notify.data.insert(NDR_POPUP_HTML,Qt::escape(tr("File receiving is started automatically")));
+						notify.data.insert(NDR_POPUP_HTML,tr("File receiving is started automatically").toHtmlEscaped());
 					}
 					notify.data.insert(NDR_SOUND_FILE,SDF_FILETRANSFER_INCOMING);
 				}
@@ -469,12 +476,12 @@ void FileTransfer::notifyStream(IFileStream *AStream, bool ANewStream)
 				break;
 			case IFileStream::Finished:
 				notify.data.insert(NDR_TOOLTIP,tr("Completed transferring file: %1").arg(file));
-				notify.data.insert(NDR_POPUP_HTML,Qt::escape(tr("File transfer completed")));
+				notify.data.insert(NDR_POPUP_HTML,tr("File transfer completed").toHtmlEscaped());
 				notify.data.insert(NDR_SOUND_FILE,SDF_FILETRANSFER_COMPLETE);
 				break;
 			case IFileStream::Aborted:
 				notify.data.insert(NDR_TOOLTIP,tr("Canceled transferring file: %1").arg(file));
-				notify.data.insert(NDR_POPUP_HTML,Qt::escape(tr("File transfer canceled: %1").arg(AStream->stateString())));
+				notify.data.insert(NDR_POPUP_HTML,tr("File transfer canceled: %1").arg(AStream->stateString()).toHtmlEscaped());
 				notify.data.insert(NDR_SOUND_FILE,SDF_FILETRANSFER_CANCELED);
 				break;
 			default:
@@ -496,7 +503,7 @@ void FileTransfer::notifyStream(IFileStream *AStream, bool ANewStream)
 	if (AStream->streamState() == IFileStream::Finished)
 	{
 		QString note = AStream->streamKind()==IFileStream::SendFile ? tr("File '%1' successfully sent.") : tr("File '%1' successfully received.");
-		note = note.arg(!AStream->fileName().isEmpty() ? AStream->fileName().split("/").last() : QString::null);
+		note = note.arg(!AStream->fileName().isEmpty() ? AStream->fileName().split("/").last() : QString());
 		if (FMessageWidgets)
 		{
 			IChatWindow *window = FMessageWidgets->findChatWindow(AStream->streamJid(),AStream->contactJid());
@@ -581,9 +588,9 @@ StreamDialog *FileTransfer::getStreamDialog(IFileStream *AStream)
 			IconStorage::staticStorage(RSR_STORAGE_MENUICONS)->insertAutoIcon(dialog,MNI_FILETRANSFER_RECEIVE,0,0,"windowIcon");
 		if (FNotifications)
 		{
-			QString name = "<b>"+ Qt::escape(FNotifications->contactName(AStream->streamJid(), AStream->contactJid())) +"</b>";
+			QString name = "<b>"+ FNotifications->contactName(AStream->streamJid(), AStream->contactJid()).toHtmlEscaped() +"</b>";
 			if (!AStream->contactJid().resource().isEmpty())
-				name += Qt::escape("/" + AStream->contactJid().resource());
+				name += ("/" + AStream->contactJid().resource()).toHtmlEscaped();
 			dialog->setContactName(name);
 			dialog->installEventFilter(this);
 		}
@@ -766,4 +773,4 @@ void FileTransfer::onShortcutActivated(const QString &AId, QWidget *AWidget)
 	}
 }
 
-Q_EXPORT_PLUGIN2(plg_filetransfer, FileTransfer);
+

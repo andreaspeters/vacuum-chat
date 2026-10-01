@@ -8,6 +8,7 @@
 #include <QTextCursor>
 #include <QTextDocument>
 #include <QTextDocumentWriter>
+#include <QUrlQuery>
 
 #define ADR_CONTEXT_DATA        Action::DR_Parametr1
 
@@ -92,7 +93,7 @@ bool MessageWidgets::initObjects()
 	Shortcuts::declareShortcut(SCT_TABWINDOW_SETASDEFAULT, tr("Use as default tab window"), QKeySequence::UnknownKey);
 
 	for (int tabNumber=1; tabNumber<=10; tabNumber++)
-		Shortcuts::declareShortcut(QString(SCT_TABWINDOW_QUICKTAB).arg(tabNumber), QString::null, tr("Alt+%1","Show tab").arg(tabNumber % 10));
+		Shortcuts::declareShortcut(QString(SCT_TABWINDOW_QUICKTAB).arg(tabNumber), QString(), tr("Alt+%1","Show tab").arg(tabNumber % 10));
 
 	Shortcuts::declareGroup(SCTG_MESSAGEWINDOWS, tr("Message windows"), SGO_MESSAGEWINDOWS);
 	Shortcuts::declareShortcut(SCT_MESSAGEWINDOWS_QUOTE, tr("Quote selected text"), QKeySequence::UnknownKey);
@@ -124,7 +125,7 @@ bool MessageWidgets::initSettings()
 	Options::setDefaultValue(OPV_MESSAGES_INFOWIDGETMAXSTATUSCHARS,140);
 	Options::setDefaultValue(OPV_MESSAGES_EDITORMINIMUMLINES,1);
 	Options::setDefaultValue(OPV_MESSAGES_CLEANCHATTIMEOUT,30);
-	Options::setDefaultValue(OPV_MESSAGES_COMBINEWITHROSTER,false);
+	Options::setDefaultValue(OPV_MESSAGES_COMBINEWITHROSTER,true);
 	Options::setDefaultValue(OPV_MESSAGES_SHOWTABSINCOMBINEDMODE,false);
 	Options::setDefaultValue(OPV_MESSAGES_TABWINDOWS_ENABLE,true);
 	Options::setDefaultValue(OPV_MESSAGES_TABWINDOW_NAME,tr("Tab Window"));
@@ -181,7 +182,7 @@ bool MessageWidgets::editContentsCreate(int AOrder, IEditWidget *AWidget, QMimeD
 				writer.write(fragment);
 				buffer.close();
 				AData->setData("application/vnd.oasis.opendocument.text", buffer.data());
-				AData->setData("text/html", fragment.toHtml("utf-8").toUtf8());
+				AData->setData("text/html", fragment.toHtml().toUtf8());
 			}
 			AData->setText(fragment.toPlainText());
 		}
@@ -239,6 +240,14 @@ IInfoWidget *MessageWidgets::newInfoWidget(const Jid &AStreamJid, const Jid &ACo
 	return widget;
 }
 
+IInfoWidget *MessageWidgets::newInfoWidget(const AccountId &AAccountId, const ConversationId &AConversationId, QWidget *AParent)
+{
+	IInfoWidget *widget = new InfoWidget(this,AAccountId,AConversationId,AParent);
+	FCleanupHandler.add(widget->instance());
+	emit infoWidgetCreated(widget);
+	return widget;
+}
+
 IViewWidget *MessageWidgets::newViewWidget(const Jid &AStreamJid, const Jid &AContactJid, QWidget *AParent)
 {
 	IViewWidget *widget = new ViewWidget(this,AStreamJid,AContactJid,AParent);
@@ -247,6 +256,29 @@ IViewWidget *MessageWidgets::newViewWidget(const Jid &AStreamJid, const Jid &ACo
 	connect(widget->instance(),SIGNAL(urlClicked(const QUrl &)),SLOT(onViewWidgetUrlClicked(const QUrl &)));
 	FCleanupHandler.add(widget->instance());
 	emit viewWidgetCreated(widget);
+	return widget;
+}
+
+IViewWidget *MessageWidgets::newViewWidget(const AccountId &AAccountId, const ConversationId &AConversationId, QWidget *AParent)
+{
+	IViewWidget *widget = new ViewWidget(this,AAccountId,AConversationId,AParent);
+	connect(widget->instance(),SIGNAL(viewContextMenu(const QPoint &, const QTextDocumentFragment &, Menu *)),
+		SLOT(onViewWidgetContextMenu(const QPoint &, const QTextDocumentFragment &, Menu *)));
+	connect(widget->instance(),SIGNAL(urlClicked(const QUrl &)),SLOT(onViewWidgetUrlClicked(const QUrl &)));
+	FCleanupHandler.add(widget->instance());
+	emit viewWidgetCreated(widget);
+	return widget;
+}
+
+IEditWidget *MessageWidgets::newEditWidget(const AccountId &AAccountId, const ConversationId &AConversationId, QWidget *AParent)
+{
+	IEditWidget *widget = new EditWidget(this,AAccountId,AConversationId,AParent);
+	connect(widget->instance(),SIGNAL(createDataRequest(QMimeData *)),SLOT(onEditWidgetCreateDataRequest(QMimeData *)));
+	connect(widget->instance(),SIGNAL(canInsertDataRequest(const QMimeData *, bool &)),SLOT(onEditWidgetCanInsertDataRequest(const QMimeData *, bool &)));
+	connect(widget->instance(),SIGNAL(insertDataRequest(const QMimeData *, QTextDocument *)),SLOT(onEditWidgetInsertDataRequest(const QMimeData *, QTextDocument *)));
+	connect(widget->instance(),SIGNAL(contentsChanged(int, int, int)),SLOT(onEditWidgetContentsChanged(int, int, int)));
+	FCleanupHandler.add(widget->instance());
+	emit editWidgetCreated(widget);
 	return widget;
 }
 
@@ -320,11 +352,30 @@ IMessageWindow *MessageWidgets::getMessageWindow(const Jid &AStreamJid, const Ji
 		FMessageWindows.append(window);
 		WidgetManager::setWindowSticky(window->instance(),true);
 		connect(window->instance(),SIGNAL(tabPageDestroyed()),SLOT(onMessageWindowDestroyed()));
+		connect(window->instance(),SIGNAL(tabPageActivated()),SLOT(onMessageWindowActivated()));
 		FCleanupHandler.add(window->instance());
 		emit messageWindowCreated(window);
 		return window;
 	}
 	return NULL;
+}
+
+void MessageWidgets::onMessageWindowActivated()
+{
+	IMessageWindow *window = qobject_cast<IMessageWindow *>(sender());
+	if (!window || !window->isActiveTabPage() || !FPluginManager)
+		return;
+	foreach (IPlugin *plugin, FPluginManager->pluginInterface("IProtocolMessaging")) {
+		IProtocolMessaging *messaging = qobject_cast<IProtocolMessaging *>(plugin->instance());
+		if (!messaging || Jid::fromUserInput(messaging->streamId()).bare() != window->streamJid().bare())
+			continue;
+		QString conversationId;
+		if (!messaging->conversationIdForAddress(window->contactJid(), conversationId))
+			continue;
+		const QString eventId = messaging->latestConversationEventId(conversationId);
+		if (!eventId.isEmpty())
+			messaging->markConversationRead(conversationId, eventId);
+	}
 }
 
 IMessageWindow *MessageWidgets::findMessageWindow(const Jid &AStreamJid, const Jid &AContactJid) const
@@ -338,6 +389,29 @@ IMessageWindow *MessageWidgets::findMessageWindow(const Jid &AStreamJid, const J
 QList<IChatWindow *> MessageWidgets::chatWindows() const
 {
 	return FChatWindows;
+}
+
+IChatWindow *MessageWidgets::getConversationWindow(const AccountId &AAccountId, const ConversationId &AConversationId)
+{
+	IChatWindow *window = findConversationWindow(AAccountId, AConversationId);
+	if (!window)
+	{
+		window = new ChatWindow(this, AAccountId, AConversationId);
+		FChatWindows.append(window);
+		WidgetManager::setWindowSticky(window->instance(), true);
+		connect(window->instance(), SIGNAL(tabPageDestroyed()), SLOT(onChatWindowDestroyed()));
+		FCleanupHandler.add(window->instance());
+		emit chatWindowCreated(window);
+	}
+	return window;
+}
+
+IChatWindow *MessageWidgets::findConversationWindow(const AccountId &AAccountId, const ConversationId &AConversationId) const
+{
+	foreach (IChatWindow *window, FChatWindows)
+		if (window->accountId() == AAccountId && window->conversationId() == AConversationId)
+			return window;
+	return NULL;
 }
 
 IChatWindow *MessageWidgets::getChatWindow(const Jid &AStreamJid, const Jid &AContactJid)
@@ -368,7 +442,7 @@ QList<QUuid> MessageWidgets::tabWindowList() const
 {
 	QList<QUuid> list;
 	foreach(QString tabWindowId, Options::node(OPV_MESSAGES_TABWINDOWS_ROOT).childNSpaces("window"))
-		list.append(tabWindowId);
+		list.append(QUuid::fromString(tabWindowId));
 	return list;
 }
 
@@ -396,7 +470,7 @@ QUuid MessageWidgets::appendTabWindow(const QString &AName)
 
 void MessageWidgets::deleteTabWindow(const QUuid &AWindowId)
 {
-	if (AWindowId!=Options::node(OPV_MESSAGES_TABWINDOWS_DEFAULT).value().toString() && tabWindowList().contains(AWindowId))
+	if (AWindowId!=QUuid::fromString(Options::node(OPV_MESSAGES_TABWINDOWS_DEFAULT).value().toString()) && tabWindowList().contains(AWindowId))
 	{
 		ITabWindow *window = findTabWindow(AWindowId);
 		if (window)
@@ -461,7 +535,7 @@ void MessageWidgets::assignTabWindowPage(ITabPage *APage)
 
 	if (Options::node(OPV_MESSAGES_COMBINEWITHROSTER).value().toBool())
 	{
-		ITabWindow *window = getTabWindow(Options::node(OPV_MESSAGES_TABWINDOWS_DEFAULT).value().toString());
+		ITabWindow *window = getTabWindow(QUuid::fromString(Options::node(OPV_MESSAGES_TABWINDOWS_DEFAULT).value().toString()));
 		window->addTabPage(APage);
 	}
 	else if (Options::node(OPV_MESSAGES_TABWINDOWS_ENABLE).value().toBool())
@@ -470,7 +544,7 @@ void MessageWidgets::assignTabWindowPage(ITabPage *APage)
 
 		QUuid windowId = FPageWindows.value(APage->tabPageId());
 		if (!availWindows.contains(windowId))
-			windowId = Options::node(OPV_MESSAGES_TABWINDOWS_DEFAULT).value().toString();
+			windowId = QUuid::fromString(Options::node(OPV_MESSAGES_TABWINDOWS_DEFAULT).value().toString());
 		if (!availWindows.contains(windowId))
 			windowId = availWindows.value(0);
 
@@ -585,7 +659,7 @@ void MessageWidgets::onViewWidgetUrlClicked(const QUrl &AUrl)
 	IViewWidget *widget = qobject_cast<IViewWidget *>(sender());
 	if (widget)
 	{
-		for (QMap<int,IViewUrlHandler *>::const_iterator it = FViewUrlHandlers.constBegin(); it!=FViewUrlHandlers.constEnd(); ++it)
+		for (QMultiMap<int,IViewUrlHandler *>::const_iterator it = FViewUrlHandlers.constBegin(); it!=FViewUrlHandlers.constEnd(); ++it)
 			if (it.value()->viewUrlOpen(it.key(),widget,AUrl))
 				break;
 	}
@@ -662,7 +736,9 @@ void MessageWidgets::onViewContextSearchActionTriggered(bool)
 	{
 		QString domain = tr("google.com","Your google domain");
 		QUrl url = QString("http://www.%1/search").arg(domain);
-		url.setQueryItems(QList<QPair<QString,QString> >() << qMakePair<QString,QString>(QString("q"),action->data(ADR_CONTEXT_DATA).toString()));
+		QUrlQuery query;
+		query.addQueryItem("q",action->data(ADR_CONTEXT_DATA).toString());
+		url.setQuery(query);
 		QDesktopServices::openUrl(url);
 	}
 }
@@ -672,7 +748,7 @@ void MessageWidgets::onEditWidgetCreateDataRequest(QMimeData *AData)
 	IEditWidget *widget = qobject_cast<IEditWidget *>(sender());
 	if (widget)
 	{
-		for (QMap<int,IEditContentsHandler *>::const_iterator it = FEditContentsHandlers.constBegin(); it!=FEditContentsHandlers.constEnd(); ++it)
+		for (QMultiMap<int,IEditContentsHandler *>::const_iterator it = FEditContentsHandlers.constBegin(); it!=FEditContentsHandlers.constEnd(); ++it)
 			if (it.value()->editContentsCreate(it.key(),widget,AData))
 				break;
 	}
@@ -683,7 +759,7 @@ void MessageWidgets::onEditWidgetCanInsertDataRequest(const QMimeData *AData, bo
 	IEditWidget *widget = qobject_cast<IEditWidget *>(sender());
 	if (widget)
 	{
-		for (QMap<int,IEditContentsHandler *>::const_iterator it = FEditContentsHandlers.constBegin(); !ACanInsert && it!=FEditContentsHandlers.constEnd(); ++it)
+		for (QMultiMap<int,IEditContentsHandler *>::const_iterator it = FEditContentsHandlers.constBegin(); !ACanInsert && it!=FEditContentsHandlers.constEnd(); ++it)
 			ACanInsert = it.value()->editContentsCanInsert(it.key(),widget,AData);
 	}
 }
@@ -693,7 +769,7 @@ void MessageWidgets::onEditWidgetInsertDataRequest(const QMimeData *AData, QText
 	IEditWidget *widget = qobject_cast<IEditWidget *>(sender());
 	if (widget)
 	{
-		for (QMap<int,IEditContentsHandler *>::const_iterator it = FEditContentsHandlers.constBegin(); it!=FEditContentsHandlers.constEnd(); ++it)
+		for (QMultiMap<int,IEditContentsHandler *>::const_iterator it = FEditContentsHandlers.constBegin(); it!=FEditContentsHandlers.constEnd(); ++it)
 			if (it.value()->editContentsInsert(it.key(),widget,AData,ADocument))
 				break;
 	}
@@ -705,7 +781,7 @@ void MessageWidgets::onEditWidgetContentsChanged(int APosition, int ARemoved, in
 	if (widget)
 	{
 		widget->document()->blockSignals(true);
-		for (QMap<int,IEditContentsHandler *>::const_iterator it = FEditContentsHandlers.constBegin(); it!=FEditContentsHandlers.constEnd(); ++it)
+		for (QMultiMap<int,IEditContentsHandler *>::const_iterator it = FEditContentsHandlers.constBegin(); it!=FEditContentsHandlers.constEnd(); ++it)
 			if (it.value()->editContentsChanged(it.key(),widget,APosition,ARemoved,AAdded))
 				break;
 		widget->document()->blockSignals(false);
@@ -757,7 +833,7 @@ void MessageWidgets::onTabWindowPageAdded(ITabPage *APage)
 		ITabWindow *window = qobject_cast<ITabWindow *>(sender());
 		if (window)
 		{
-			if (window->windowId() != Options::node(OPV_MESSAGES_TABWINDOWS_DEFAULT).value().toString())
+			if (window->windowId() != QUuid::fromString(Options::node(OPV_MESSAGES_TABWINDOWS_DEFAULT).value().toString()))
 				FPageWindows.insert(APage->tabPageId(), window->windowId());
 			else
 				FPageWindows.remove(APage->tabPageId());
@@ -770,7 +846,7 @@ void MessageWidgets::onTabWindowCurrentPageChanged(ITabPage *APage)
 	if (Options::node(OPV_MESSAGES_COMBINEWITHROSTER).value().toBool() && !Options::node(OPV_MESSAGES_SHOWTABSINCOMBINEDMODE).value().toBool())
 	{
 		ITabWindow *window = qobject_cast<ITabWindow *>(sender());
-		if (window && window->windowId()==Options::node(OPV_MESSAGES_TABWINDOWS_DEFAULT).value().toString())
+		if (window && window->windowId()==QUuid::fromString(Options::node(OPV_MESSAGES_TABWINDOWS_DEFAULT).value().toString()))
 		{
 			for (int index=0; index<window->tabPageCount(); index++)
 			{
@@ -819,7 +895,7 @@ void MessageWidgets::onOptionsOpened()
 	if (tabWindowList().isEmpty())
 		appendTabWindow(tr("Main Tab Window"));
 
-	if (!tabWindowList().contains(Options::node(OPV_MESSAGES_TABWINDOWS_DEFAULT).value().toString()))
+	if (!tabWindowList().contains(QUuid::fromString(Options::node(OPV_MESSAGES_TABWINDOWS_DEFAULT).value().toString())))
 		Options::node(OPV_MESSAGES_TABWINDOWS_DEFAULT).setValue(tabWindowList().value(0).toString());
 
 	QByteArray data = Options::fileValue("messages.tab-window-pages").toByteArray();
@@ -864,11 +940,11 @@ void MessageWidgets::onOptionsChanged(const OptionsNode &ANode)
 		foreach(ITabPage *page, FAssignedPages)
 			assignTabWindowPage(page);
 
-		ITabWindow *window = findTabWindow(Options::node(OPV_MESSAGES_TABWINDOWS_DEFAULT).value().toString()); 
+		ITabWindow *window = findTabWindow(QUuid::fromString(Options::node(OPV_MESSAGES_TABWINDOWS_DEFAULT).value().toString())); 
 		if (ANode.value().toBool())
 		{
 			if (!window)
-				window = getTabWindow(Options::node(OPV_MESSAGES_TABWINDOWS_DEFAULT).value().toString()); 
+				window = getTabWindow(QUuid::fromString(Options::node(OPV_MESSAGES_TABWINDOWS_DEFAULT).value().toString())); 
 			window->setTabBarVisible(Options::node(OPV_MESSAGES_SHOWTABSINCOMBINEDMODE).value().toBool());
 			window->setAutoCloseEnabled(false);
 			FMainWindow->mainCentralWidget()->appendCentralPage(window);
@@ -894,7 +970,7 @@ void MessageWidgets::onOptionsChanged(const OptionsNode &ANode)
 	{
 		if (Options::node(OPV_MESSAGES_COMBINEWITHROSTER).value().toBool())
 		{
-			ITabWindow *window = findTabWindow(Options::node(OPV_MESSAGES_TABWINDOWS_DEFAULT).value().toString());
+			ITabWindow *window = findTabWindow(QUuid::fromString(Options::node(OPV_MESSAGES_TABWINDOWS_DEFAULT).value().toString()));
 			if (window)
 			{
 				window->setTabBarVisible(ANode.value().toBool());
@@ -903,4 +979,4 @@ void MessageWidgets::onOptionsChanged(const OptionsNode &ANode)
 	}
 }
 
-Q_EXPORT_PLUGIN2(plg_messagewidgets, MessageWidgets)
+

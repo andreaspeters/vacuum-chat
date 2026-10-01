@@ -122,7 +122,7 @@ IMessageStyleOptions SimpleMessageStylePlugin::styleOptions(const OptionsNode &A
 		QMap<QString,QVariant> info = styleInfo(styleId.toString());
 
 		if (!variants.contains(soptions.extended.value(MSO_VARIANT).toString()))
-			soptions.extended.insert(MSO_VARIANT,info.value(MSIV_DEFAULT_VARIANT, !variants.isEmpty() ? variants.first() : QString::null));
+			soptions.extended.insert(MSO_VARIANT,info.value(MSIV_DEFAULT_VARIANT, !variants.isEmpty() ? variants.first() : QString()));
 
 		if (info.value(MSIV_DISABLE_CUSTOM_BACKGROUND,false).toBool())
 		{
@@ -234,4 +234,4 @@ void SimpleMessageStylePlugin::onClearEmptyStyles()
 	}
 }
 
-Q_EXPORT_PLUGIN2(plg_simplemessagestyle, SimpleMessageStylePlugin)
+

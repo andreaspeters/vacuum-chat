@@ -6,7 +6,7 @@
 #include <interfaces/ixmppstreams.h>
 #include <utils/jid.h>
 
-#define ROSTER_UUID "{5306971C-2488-40d9-BA8E-C83327B2EED5}"
+#define ROSTER_UUID QUuid("{5306971C-2488-40d9-BA8E-C83327B2EED5}")
 
 #define SUBSCRIPTION_BOTH             "both"
 #define SUBSCRIPTION_TO               "to"
@@ -66,7 +66,7 @@ public:
 	virtual void loadRosterItems(const QString &AFileName) =0;
 	//Operations  on subscription
 	virtual QSet<Jid> subscriptionRequests() const =0;
-	virtual void sendSubscription(const Jid &AItemJid, int ASubsType, const QString &AText = QString::null) =0;
+	virtual void sendSubscription(const Jid &AItemJid, int ASubsType, const QString &AText = QString()) =0;
 	//Operations on items
 	virtual void renameItem(const Jid &AItemJid, const QString &AName) =0;
 	virtual void copyItemToGroup(const Jid &AItemJid, const QString &AGroup) =0;

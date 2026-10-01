@@ -1,12 +1,29 @@
 #include "notifications.h"
 
+#include <utils/messagenotificationmute.h>
+
 #include <QProcess>
+#include <QSet>
 #include <QVBoxLayout>
 
 #define FIRST_KIND         0x0001
 #define LAST_KIND          0x8000
 #define UNDEFINED_KINDS    0xFFFF
 #define ADR_NOTIFYID       Action::DR_Parametr1
+
+static QString protocolNotificationKey(const QString &accountId, const QString &notificationId)
+{
+	return QString::number(accountId.size()) + QLatin1Char(':') + accountId + notificationId;
+}
+
+static bool sameProtocolNotification(const ProtocolNotification &left,
+	const ProtocolNotification &right)
+{
+	return left.id == right.id && left.accountId == right.accountId &&
+		left.conversationId == right.conversationId && left.title == right.title &&
+		left.body == right.body && left.protocol == right.protocol &&
+		left.timestamp == right.timestamp && left.kind == right.kind;
+}
 
 Notifications::Notifications()
 {
@@ -20,6 +37,7 @@ Notifications::Notifications()
 	FOptionsManager = NULL;
 	FMainWindowPlugin = NULL;
 	FUrlProcessor = NULL;
+	FPluginManager = NULL;
 
 	FSoundOnOff = NULL;
 	FActivateLast = NULL;
@@ -28,7 +46,6 @@ Notifications::Notifications()
 	FNetworkAccessManager = NULL;
 
 	FNotifyId = 0;
-	FSound = NULL;
 }
 
 Notifications::~Notifications()
@@ -36,7 +53,6 @@ Notifications::~Notifications()
 	delete FActivateLast;
 	delete FRemoveAll;
 	delete FNotifyMenu;
-	delete FSound;
 }
 
 void Notifications::pluginInfo(IPluginInfo *APluginInfo)
@@ -51,6 +67,9 @@ void Notifications::pluginInfo(IPluginInfo *APluginInfo)
 bool Notifications::initConnections(IPluginManager *APluginManager, int &AInitOrder)
 {
 	Q_UNUSED(AInitOrder);
+	FPluginManager = APluginManager;
+	connect(this,SIGNAL(notificationActivated(int)),SLOT(onProtocolNotificationActivated(int)));
+	connect(this,SIGNAL(notificationRemoved(int)),SLOT(onProtocolNotificationRemoved(int)));
 	IPlugin *plugin = APluginManager->pluginInterface("ITrayManager").value(0,NULL);
 	if (plugin)
 	{
@@ -190,7 +209,153 @@ bool Notifications::startPlugin()
 	Shortcuts::setGlobalShortcut(SCT_GLOBAL_TOGGLESOUND,true);
 	Shortcuts::setGlobalShortcut(SCT_GLOBAL_ACTIVATELASTNOTIFICATION,true);
 	Shortcuts::setGlobalShortcut(SCT_GLOBAL_REMOVEALLNOTIFICATIONS,true);
+
+	INotificationType type;
+	type.order = NTO_PROTOCOL_NOTIFICATION;
+	type.icon = IconStorage::staticStorage(RSR_STORAGE_MENUICONS)->getIcon(MNI_NOTIFICATIONS);
+	type.title = tr("Protocol notifications");
+	type.kindMask = INotification::RosterNotify | INotification::PopupWindow |
+		INotification::TrayNotify | INotification::TrayAction | INotification::SoundPlay;
+	type.kindDefs = type.kindMask;
+	registerNotificationType(NNT_PROTOCOL_NOTIFICATION,type);
+	synchronizeProtocolNotifications();
 	return true;
+}
+
+void Notifications::onProtocolNotificationsChanged()
+{
+	synchronizeProtocolNotifications();
+}
+
+void Notifications::synchronizeProtocolNotifications()
+{
+	if (!FPluginManager)
+		return;
+	QSet<QString> activeKeys;
+	const QList<IPlugin *> plugins = FPluginManager->pluginInterface(QStringLiteral("IProtocolNotifications"));
+	for (IPlugin *plugin : plugins)
+	{
+		if (!plugin || !plugin->instance())
+			continue;
+		QObject *object = plugin->instance();
+		IProtocolNotifications *provider = qobject_cast<IProtocolNotifications *>(object);
+		if (!provider)
+			continue;
+		connect(object,SIGNAL(protocolNotificationsChanged()),
+			this,SLOT(onProtocolNotificationsChanged()),Qt::UniqueConnection);
+
+		for (const ProtocolNotification &source : provider->notifications())
+		{
+			ProtocolNotification notification = source;
+			if (notification.accountId.isEmpty())
+				notification.accountId = provider->accountId();
+			if (notification.protocol.isEmpty())
+				notification.protocol = provider->protocol();
+			if (notification.id.isEmpty() || notification.accountId.isEmpty())
+				continue;
+			const QString muteStreamId = notification.streamId.isEmpty()
+				? notification.accountId : notification.streamId;
+			if (!notification.conversationId.isEmpty() &&
+				messageNotificationMuted(muteStreamId,notification.conversationId))
+				continue;
+
+			const QString key = protocolNotificationKey(notification.accountId,notification.id);
+			activeKeys.insert(key);
+			if (FProtocolNotificationIds.contains(key) &&
+				FProtocolNotificationValues.contains(key) &&
+				sameProtocolNotification(FProtocolNotificationValues.value(key),notification))
+				continue;
+			if (FProtocolNotificationIds.contains(key))
+			{
+				const int oldId = FProtocolNotificationIds.take(key);
+				FProtocolNotificationKeys.remove(oldId);
+				FProtocolNotificationValues.remove(key);
+				removeNotification(oldId);
+			}
+
+			INotification bridged;
+			bridged.typeId = NNT_PROTOCOL_NOTIFICATION;
+			bridged.kinds = enabledTypeNotificationKinds(bridged.typeId);
+			bridged.data.insert(NDR_ACCOUNT_ID,notification.accountId);
+			bridged.data.insert(NDR_USER_ID,notification.title);
+			bridged.data.insert(NDR_CONVERSATION_ID,notification.conversationId);
+			bridged.data.insert(NDR_POPUP_CAPTION,notification.protocol.isEmpty()
+				? tr("Notification") : notification.protocol);
+			bridged.data.insert(NDR_POPUP_TITLE,notification.title);
+			bridged.data.insert(NDR_POPUP_HTML,notification.body.toHtmlEscaped());
+			bridged.data.insert(NDR_TOOLTIP,notification.title.isEmpty()
+				? notification.body : notification.title + QStringLiteral(": ") + notification.body);
+			bridged.data.insert(NDR_ICON,contactIconById(notification.accountId,notification.title));
+			bridged.data.insert(NDR_ROSTER_CREATE_INDEX,false);
+			if (notification.kind == ProtocolNotification::Message ||
+				notification.kind == ProtocolNotification::Mention)
+				bridged.data.insert(NDR_ROSTER_FLAGS, IRostersNotify::BlinkStatusIcon);
+			const int notifyId = appendNotification(bridged);
+			FProtocolNotificationIds.insert(key,notifyId);
+			FProtocolNotificationKeys.insert(notifyId,key);
+			FProtocolNotificationValues.insert(key,notification);
+		}
+	}
+
+	const QStringList existingKeys = FProtocolNotificationIds.keys();
+	for (const QString &key : existingKeys)
+	{
+		if (activeKeys.contains(key))
+			continue;
+		const int notifyId = FProtocolNotificationIds.take(key);
+		FProtocolNotificationKeys.remove(notifyId);
+		FProtocolNotificationValues.remove(key);
+		removeNotification(notifyId);
+	}
+}
+
+void Notifications::onProtocolNotificationActivated(int ANotifyId)
+{
+	const QString key = FProtocolNotificationKeys.value(ANotifyId);
+	if (key.isEmpty() || !FProtocolNotificationValues.contains(key))
+		return;
+	const ProtocolNotification notification = FProtocolNotificationValues.value(key);
+	for (IPlugin *plugin : FPluginManager->pluginInterface(QStringLiteral("IProtocolNotifications")))
+	{
+		if (!plugin || !plugin->instance())
+			continue;
+		QObject *object = plugin->instance();
+		IProtocolNotifications *provider = qobject_cast<IProtocolNotifications *>(object);
+		if (!provider || provider->accountId() != notification.accountId)
+			continue;
+		if (IProtocolMessaging *messaging = qobject_cast<IProtocolMessaging *>(object))
+		{
+			if (!notification.conversationId.isEmpty())
+			{
+				messaging->setActiveConversation(notification.conversationId);
+				if (notification.kind == ProtocolNotification::Message ||
+					notification.kind == ProtocolNotification::Mention)
+					messaging->markConversationRead(notification.conversationId,notification.id);
+			}
+		}
+		break;
+	}
+	removeNotification(ANotifyId);
+}
+
+void Notifications::onProtocolNotificationRemoved(int ANotifyId)
+{
+	const QString key = FProtocolNotificationKeys.take(ANotifyId);
+	if (key.isEmpty())
+		return;
+	const ProtocolNotification notification = FProtocolNotificationValues.take(key);
+	FProtocolNotificationIds.remove(key);
+	for (IPlugin *plugin : FPluginManager->pluginInterface(QStringLiteral("IProtocolNotifications")))
+	{
+		if (!plugin || !plugin->instance())
+			continue;
+		IProtocolNotifications *provider = qobject_cast<IProtocolNotifications *>(plugin->instance());
+		if (provider && provider->accountId() == notification.accountId)
+		{
+			provider->removeNotification(notification.id);
+			break;
+		}
+	}
 }
 
 QMultiMap<int, IOptionsWidget *> Notifications::optionsWidgets(const QString &ANodeId, QWidget *AParent)
@@ -233,15 +398,50 @@ int Notifications::appendNotification(const INotification &ANotification)
 		if (!showNotifyByHandler(INotification::RosterNotify,notifyId,record.notification))
 		{
 			bool createIndex = record.notification.data.value(NDR_ROSTER_CREATE_INDEX).toBool();
-			Jid streamJid = record.notification.data.value(NDR_STREAM_JID).toString();
-			Jid contactJid = record.notification.data.value(NDR_CONTACT_JID).toString();
-			QList<IRosterIndex *> indexes = FRostersModel->getContactIndexList(streamJid,contactJid,createIndex);
+			QList<IRosterIndex *> indexes;
+			QString accountId = record.notification.data.value(NDR_ACCOUNT_ID).toString();
+			QString conversationId = record.notification.data.value(NDR_CONVERSATION_ID).toString();
+			if (!accountId.isEmpty() && !conversationId.isEmpty())
+			{
+				QMultiMap<int, QVariant> findData;
+				findData.insert(RDR_CONVERSATION_ID, conversationId);
+				IRosterIndex *root = FRostersModel->protocolStreamRoot(accountId);
+				if (root)
+				{
+					indexes = root->findChilds(findData, true);
+				}
+				if (FRostersModel->rootIndex())
+				{
+					QMultiMap<int, QVariant> favoriteFindData = findData;
+					favoriteFindData.insert(RDR_ACCOUNT_ID, accountId);
+					QList<IRosterIndex *> matching = FRostersModel->rootIndex()->findChilds(favoriteFindData, true);
+					for (IRosterIndex *index : matching)
+						if (!indexes.contains(index))
+							indexes.append(index);
+				}
+			}
+			else
+			{
+				Jid streamJid = record.notification.data.value(NDR_STREAM_JID).toString();
+				Jid contactJid = record.notification.data.value(NDR_CONTACT_JID).toString();
+				indexes = FRostersModel->getContactIndexList(streamJid,contactJid,createIndex);
+				if (FRostersModel->rootIndex() && streamJid.isValid() && contactJid.isValid())
+				{
+					QMultiMap<int, QVariant> findData;
+					findData.insert(RDR_STREAM_JID, streamJid.pFull());
+					findData.insert(RDR_RECENT_REFERENCE, contactJid.pBare());
+					QList<IRosterIndex *> matching = FRostersModel->rootIndex()->findChilds(findData, true);
+					for (IRosterIndex *index : matching)
+						if (!indexes.contains(index))
+							indexes.append(index);
+				}
+			}
 			if (!indexes.isEmpty())
 			{
 				IRostersNotify rnotify;
-				rnotify.icon = icon;
 				rnotify.order = record.notification.data.value(NDR_ROSTER_ORDER).toInt();
 				rnotify.flags = record.notification.data.value(NDR_ROSTER_FLAGS).toInt();
+				rnotify.icon = (rnotify.flags & IRostersNotify::BlinkStatusIcon) > 0 ? QIcon() : icon;
 				if (Options::node(OPV_NOTIFICATIONS_EXPANDGROUP).value().toBool())
 					rnotify.flags |= IRostersNotify::ExpandParents;
 				rnotify.timeout = record.notification.data.value(NDR_ROSTER_TIMEOUT).toInt();
@@ -305,12 +505,10 @@ int Notifications::appendNotification(const INotification &ANotification)
 			QString soundFile = FileStorage::staticStorage(RSR_STORAGE_SOUNDS)->fileFullName(soundName);
 			if (!soundFile.isEmpty())
 			{
-#ifdef Q_WS_X11
+#ifdef Q_OS_LINUX
 				QProcess::startDetached(Options::node(OPV_NOTIFICATIONS_SOUNDCOMMAND).value().toString(),QStringList()<<soundFile);
 #else
-				delete FSound;
-				FSound = new QSound(soundFile);
-				FSound->play();
+				Q_UNUSED(soundFile);
 #endif
 			}
 		}
@@ -522,6 +720,24 @@ QImage Notifications::contactAvatar(const Jid &AContactJid) const
 	return FAvatars!=NULL ? FAvatars->loadAvatarImage(FAvatars->avatarHash(AContactJid), QSize(32,32)) : QImage();
 }
 
+QImage Notifications::contactAvatarById(const AccountId &AAccountId, const UserId &AUserId) const
+{
+	Q_UNUSED(AAccountId);
+	Q_UNUSED(AUserId);
+	return QImage();
+}
+
+QIcon Notifications::contactIconById(const AccountId &AAccountId, const UserId &AUserId) const
+{
+	return FStatusIcons!=NULL ? FStatusIcons->iconByIdentity(AAccountId,AUserId) : QIcon();
+}
+
+QString Notifications::contactNameById(const AccountId &AAccountId, const UserId &AUserId) const
+{
+	Q_UNUSED(AAccountId);
+	return AUserId;
+}
+
 QIcon Notifications::contactIcon(const Jid &AStreamJid, const Jid &AContactJid) const
 {
 	return FStatusIcons!=NULL ? FStatusIcons->iconByJid(AStreamJid,AContactJid) : QIcon();
@@ -707,7 +923,12 @@ void Notifications::onOptionsOpened()
 
 void Notifications::onOptionsChanged(const OptionsNode &ANode)
 {
-	if (Options::cleanNSpaces(ANode.path()) == OPV_NOTIFICATIONS_KINDENABLED_ITEM)
+	const QString path = Options::cleanNSpaces(ANode.path());
+	if (path == OPV_MESSAGES_MUTED_TARGETS)
+	{
+		synchronizeProtocolNotifications();
+	}
+	else if (path == OPV_NOTIFICATIONS_KINDENABLED_ITEM)
 	{
 		if (ANode.nspace().toInt() == INotification::SoundPlay)
 		{
@@ -739,4 +960,4 @@ void Notifications::onShortcutActivated(const QString &AId, QWidget *AWidget)
 	}
 }
 
-Q_EXPORT_PLUGIN2(plg_notifications, Notifications)
+

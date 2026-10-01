@@ -29,6 +29,7 @@ class ConnectionManager :
 	public IOptionsHolder
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.connectionmanager")
 	Q_INTERFACES(IPlugin IConnectionManager IOptionsHolder);
 public:
 	ConnectionManager();

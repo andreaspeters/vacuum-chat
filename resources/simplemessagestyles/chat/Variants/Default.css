@@ -2,26 +2,57 @@
 {
   border-style		:none;
   font-size		:medium;
-  margin-top		:5px;
+  margin-top		:8px;
+  text-align:left;
+  table-layout:fixed;
+}
+
+.xxxavatar
+{
+  width:32px;
+  max-width:32px;
+  padding:0 4px 0 0;
+}
+
+.xxxavatarSpacer
+{
+  width:36px;
+  max-width:36px;
+}
+
+.xxxavatar img
+{
+  width:32px;
+  height:32px;
+  max-width:32px;
+  display:block;
 }
 
 .xxxmessage
 {
   white-space		:pre-wrap;
-  padding-left		:10px;
+  padding:2px 10px 0 0;
+  text-align:left;
 }
 
 .xxxsender
 {
   white-space		:nowrap;
   font-weight		:bold;
+  text-align:left;
 }
 
-.xxxtime 
+.xxxtime
 {
   white-space		:nowrap;
-  font-size             :small;
-  color			:gray;
+  font-size             :x-small;
+  font-weight           :normal;
+  color			:#8b929a;
+}
+
+.status .xxxtime
+{
+  padding-left:8px;
 }
 
 .xxxtopic

@@ -8,6 +8,8 @@
 #include <QDomDocument>
 #include <QCoreApplication>
 #include <QTextDocumentFragment>
+#include <definitions/menuicons.h>
+#include <utils/iconstorage.h>
 
 #define SCROLL_TIMEOUT                      100
 #define SHARED_STYLE_PATH                   RESOURCES_DIR"/"RSR_STORAGE_SIMPLEMESSAGESTYLES"/"STORAGE_SHARED_DIR
@@ -143,7 +145,7 @@ bool SimpleMessageStyle::changeOptions(QWidget *AWidget, const IMessageStyleOpti
 		{
 			WidgetStatus &wstatus = FWidgetStatus[view];
 			wstatus.lastKind = -1;
-			wstatus.lastId = QString::null;
+			wstatus.lastId = QString();
 			wstatus.lastTime = QDateTime();
 			setVariant(AWidget, AOptions.extended.value(MSO_VARIANT).toString());
 			QString html = makeStyleTemplate();
@@ -279,7 +281,7 @@ void SimpleMessageStyle::setVariant(QWidget *AWidget, const QString &AVariant)
 	if (view)
 	{
 		QString variant = QString("Variants/%1.css").arg(!FVariants.contains(AVariant) ? FInfo.value(MSIV_DEFAULT_VARIANT,"main").toString() : AVariant);
-		view->document()->setDefaultStyleSheet(loadFileData(FStylePath+"/"+variant,QString::null));
+		view->document()->setDefaultStyleSheet(loadFileData(FStylePath+"/"+variant,QString()));
 	}
 }
 
@@ -289,7 +291,7 @@ QString SimpleMessageStyle::makeStyleTemplate() const
 	if (!QFile::exists(htmlFileName))
 		htmlFileName = qApp->applicationDirPath()+"/"SHARED_STYLE_PATH"/Template.html";
 
-	return loadFileData(htmlFileName,QString::null);
+	return loadFileData(htmlFileName,QString());
 }
 
 void SimpleMessageStyle::fillStyleKeywords(QString &AHtml, const IMessageStyleOptions &AOptions) const
@@ -407,12 +409,16 @@ void SimpleMessageStyle::fillContentKeywords(QString &AHtml, const IMessageConte
 	AHtml.replace("%messageClasses%", messageClasses.join(" "));
 
 	AHtml.replace("%senderStatusIcon%",AOptions.senderIcon);
-	AHtml.replace("%shortTime%", Qt::escape(AOptions.time.toString(tr("hh:mm"))));
+	const QString shortTimeFormat = AOptions.timeFormat.isEmpty()
+		? tr("hh:mm") : AOptions.timeFormat;
+	AHtml.replace("%shortTime%", AOptions.time.toString(shortTimeFormat).toHtmlEscaped());
 
 	QString avatar = AOptions.senderAvatar;
 	if (!QFile::exists(avatar))
 	{
-		avatar = FStylePath+(isDirectionIn ? "/Incoming/buddy_icon.png" : "/Outgoing/buddy_icon.png");
+		const QString emptyAvatar = IconStorage::staticStorage(RSR_STORAGE_MENUICONS)->fileFullName(MNI_AVATAR_EMPTY);
+		avatar = QFile::exists(emptyAvatar) ? emptyAvatar :
+			FStylePath+(isDirectionIn ? "/Incoming/buddy_icon.png" : "/Outgoing/buddy_icon.png");
 		if (!isDirectionIn && !QFile::exists(avatar))
 			avatar = FStylePath+"/Incoming/buddy_icon.png";
 		if (!QFile::exists(avatar))
@@ -421,7 +427,7 @@ void SimpleMessageStyle::fillContentKeywords(QString &AHtml, const IMessageConte
 	AHtml.replace("%userIconPath%",avatar);
 
 	QString timeFormat = !AOptions.timeFormat.isEmpty() ? AOptions.timeFormat : tr("hh:mm:ss");
-	QString time = Qt::escape(AOptions.time.toString(timeFormat));
+	QString time = AOptions.time.toString(timeFormat).toHtmlEscaped();
 	AHtml.replace("%time%", time);
 
 	QString sColor = !AOptions.senderColor.isEmpty() ? AOptions.senderColor : senderColor(AOptions.senderId);
@@ -461,22 +467,22 @@ QString SimpleMessageStyle::loadFileData(const QString &AFileName, const QString
 
 void SimpleMessageStyle::loadTemplates()
 {
-	FIn_ContentHTML =      loadFileData(FStylePath+"/Incoming/Content.html",QString::null);
+	FIn_ContentHTML =      loadFileData(FStylePath+"/Incoming/Content.html",QString());
 	FIn_NextContentHTML =  loadFileData(FStylePath+"/Incoming/NextContent.html",FIn_ContentHTML);
 
 	FOut_ContentHTML =     loadFileData(FStylePath+"/Outgoing/Content.html",FIn_ContentHTML);
 	FOut_NextContentHTML = loadFileData(FStylePath+"/Outgoing/NextContent.html",FOut_ContentHTML);
 
-	FTopicHTML =           loadFileData(FStylePath+"/Topic.html",QString::null);
+	FTopicHTML =           loadFileData(FStylePath+"/Topic.html",QString());
 	FStatusHTML =          loadFileData(FStylePath+"/Status.html",FIn_ContentHTML);
-	FMeCommandHTML =       loadFileData(FStylePath+"/MeCommand.html",QString::null);
+	FMeCommandHTML =       loadFileData(FStylePath+"/MeCommand.html",QString());
 }
 
 void SimpleMessageStyle::loadSenderColors()
 {
 	QFile colors(FStylePath+"/Incoming/SenderColors.txt");
 	if (colors.open(QFile::ReadOnly))
-		FSenderColors = QString::fromUtf8(colors.readAll()).split(':',QString::SkipEmptyParts);
+		FSenderColors = QString::fromUtf8(colors.readAll()).split(':',Qt::SkipEmptyParts);
 }
 
 void SimpleMessageStyle::initStyleSettings()

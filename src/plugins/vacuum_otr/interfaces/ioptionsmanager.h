@@ -8,7 +8,7 @@
 #include <QDomElement>
 #include <utils/options.h>
 
-#define OPTIONSMANAGER_UUID "{d29856c7-8f74-4e95-9aba-b95f4fb42f00}"
+#define OPTIONSMANAGER_UUID QUuid("{d29856c7-8f74-4e95-9aba-b95f4fb42f00}")
 
 struct IOptionsDialogNode
 {
@@ -65,7 +65,7 @@ public:
 	virtual IOptionsDialogNode optionsDialogNode(const QString &ANodeId) const =0;
 	virtual void insertOptionsDialogNode(const IOptionsDialogNode &ANode) =0;
 	virtual void removeOptionsDialogNode(const QString &ANodeId) =0;
-	virtual QDialog *showOptionsDialog(const QString &ANodeId = QString::null, QWidget *AParent = NULL) =0;
+	virtual QDialog *showOptionsDialog(const QString &ANodeId = QString(), QWidget *AParent = NULL) =0;
 	//OptionsWidgets
 	virtual IOptionsWidget *optionsHeaderWidget(const QString &ACaption, QWidget *AParent) const =0;
 	virtual IOptionsWidget *optionsNodeWidget(const OptionsNode &ANode, const QString &ACaption, QWidget *AParent) const =0;

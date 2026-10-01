@@ -1,5 +1,5 @@
 add_subdirectory(accountmanager)
-add_subdirectory(adiummessagestyle)
+
 add_subdirectory(annotations)
 add_subdirectory(autostatus)
 add_subdirectory(avatars)
@@ -64,5 +64,6 @@ add_subdirectory(traymanager)
 add_subdirectory(urlprocessor)
 add_subdirectory(vcard)
 #add_subdirectory(vacuum_otr)
+add_subdirectory(matrix)
 add_subdirectory(xmppstreams)
 add_subdirectory(xmppuriqueries)

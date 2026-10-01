@@ -43,7 +43,7 @@ QString ReceiversWidget::receiverName(const Jid &AReceiver) const
 	QTreeWidgetItem *contactItem = FContactItems.value(AReceiver,NULL);
 	if (contactItem)
 		return contactItem->data(0,RDR_NAME).toString();
-	return QString::null;
+	return QString();
 }
 
 void ReceiversWidget::addReceiversGroup(const QString &AGroup)
@@ -127,14 +127,14 @@ QTreeWidgetItem *ReceiversWidget::getReceiversGroup(const QString &AGroup)
 	QString curGroup;
 	QString groupDelim = FRoster->groupDelimiter();
 	QTreeWidgetItem *parentGroupItem = ui.trwReceivers->invisibleRootItem();
-	QStringList subGroups = AGroup.split(groupDelim,QString::SkipEmptyParts);
+	QStringList subGroups = AGroup.split(groupDelim,Qt::SkipEmptyParts);
 	foreach(QString subGroup,subGroups)
 	{
 		curGroup = curGroup.isEmpty() ? subGroup : curGroup+groupDelim+subGroup;
 		QTreeWidgetItem *groupItem = FGroupItems.value(curGroup,NULL);
 		if (groupItem == NULL)
 		{
-			QStringList columns = QStringList() << ' '+subGroup << QString::null;
+			QStringList columns = QStringList() << ' '+subGroup << QString();
 			groupItem = new QTreeWidgetItem(parentGroupItem,columns);
 			groupItem->setCheckState(0,parentGroupItem->checkState(0));
 			groupItem->setForeground(0,palette().color(QPalette::Active, QPalette::Highlight));
@@ -229,7 +229,7 @@ void ReceiversWidget::createRosterTree()
 
 	ui.trwReceivers->expandAll();
 	ui.trwReceivers->sortItems(0,Qt::AscendingOrder);
-	ui.trwReceivers->header()->setResizeMode(0,QHeaderView::ResizeToContents);
+	ui.trwReceivers->header()->setSectionResizeMode(0,QHeaderView::ResizeToContents);
 	ui.trwReceivers->setSelectionMode(QAbstractItemView::NoSelection);
 	ui.trwReceivers->setSelectionBehavior(QAbstractItemView::SelectRows);
 	connect(ui.trwReceivers,SIGNAL(itemChanged(QTreeWidgetItem *,int)),SLOT(onReceiversItemChanged(QTreeWidgetItem *,int)));

@@ -7,7 +7,7 @@
 #include <definitions/optionvalues.h>
 #include <interfaces/idatastreamsmanager.h>
 #include <interfaces/ioptionsmanager.h>
-#include "ui_datastreamsoptions.h"
+#include <ui_datastreamsoptions.h>
 
 class DataStreamsOptions :
 			public QWidget,

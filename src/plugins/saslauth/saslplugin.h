@@ -15,7 +15,7 @@
 #include "saslbind.h"
 #include "saslsession.h"
 
-#define SASLAUTH_UUID "{E583F155-BE87-4919-8769-5C87088F0F57}"
+#define SASLAUTH_UUID QUuid("{E583F155-BE87-4919-8769-5C87088F0F57}")
 
 class SASLPlugin :
 	public QObject,
@@ -24,6 +24,7 @@ class SASLPlugin :
 	public IXmppStanzaHadler
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.saslauth")
 	Q_INTERFACES(IPlugin IXmppFeaturesPlugin IXmppStanzaHadler);
 public:
 	SASLPlugin();

@@ -90,6 +90,7 @@ class MessageArchiver :
 	public ISessionNegotiator
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.messagearchiver")
 	Q_INTERFACES(IPlugin IMessageArchiver IStanzaHandler IStanzaRequestOwner IOptionsHolder ISessionNegotiator);
 public:
 	MessageArchiver();
@@ -123,14 +124,14 @@ public:
   //Preferences
 	virtual QString prefsNamespace(const Jid &AStreamJid) const;
 	virtual IArchiveStreamPrefs archivePrefs(const Jid &AStreamJid) const;
-	virtual IArchiveItemPrefs archiveItemPrefs(const Jid &AStreamJid, const Jid &AItemJid, const QString &AThreadId = QString::null) const;
+	virtual IArchiveItemPrefs archiveItemPrefs(const Jid &AStreamJid, const Jid &AItemJid, const QString &AThreadId = QString()) const;
 	virtual QString setArchiveAutoSave(const Jid &AStreamJid, bool AAuto);
 	virtual QString setArchivePrefs(const Jid &AStreamJid, const IArchiveStreamPrefs &APrefs);
 	virtual QString removeArchiveItemPrefs(const Jid &AStreamJid, const Jid &AItemJid);
 	virtual QString removeArchiveSessionPrefs(const Jid &AStreamJid, const QString &AThreadId);
 	//Direct Archiving
 	virtual bool saveMessage(const Jid &AStreamJid, const Jid &AItemJid, const Message &AMessage);
-	virtual bool saveNote(const Jid &AStreamJid, const Jid &AItemJid, const QString &ANote, const QString &AThreadId = QString::null);
+	virtual bool saveNote(const Jid &AStreamJid, const Jid &AItemJid, const QString &ANote, const QString &AThreadId = QString());
 	//Archive Management
 	virtual QString loadMessages(const Jid &AStreamJid, const IArchiveRequest &ARequest);
 	virtual QString loadHeaders(const Jid &AStreamJid, const IArchiveRequest &ARequest);
@@ -184,7 +185,7 @@ protected:
 	bool isOTRStanzaSession(const Jid &AStreamJid, const Jid &AContactJid) const;
 	QString stanzaSessionDirPath(const Jid &AStreamJid) const;
 	void saveStanzaSessionContext(const Jid &AStreamJid, const Jid &AContactJid) const;
-	void restoreStanzaSessionContext(const Jid &AStreamJid, const QString &ASessionId = QString::null);
+	void restoreStanzaSessionContext(const Jid &AStreamJid, const QString &ASessionId = QString());
 	void removeStanzaSessionContext(const Jid &AStreamJid, const QString &ASessionId) const;
 	void startSuspendedStanzaSession(const Jid &AStreamJid, const QString &ARequestId);
 	void cancelSuspendedStanzaSession(const Jid &AStreamJid, const QString &ARequestId, const XmppStanzaError &AError);

@@ -146,13 +146,13 @@ StatusOptionsWidget::StatusOptionsWidget(IAutoStatus *AAutoStatus, IStatusChange
 	ui.tbwRules->setItemDelegate(new Delegate(FStatusChanger,ui.tbwRules));
 
 	ui.tbwRules->setColumnCount(4);
-	ui.tbwRules->setHorizontalHeaderLabels(QStringList() << QString::null << tr("Time") << tr("Status") << tr("Text"));
+	ui.tbwRules->setHorizontalHeaderLabels(QStringList() << QString() << tr("Time") << tr("Status") << tr("Text"));
 
 	ui.tbwRules->sortItems(COL_TIME);
-	ui.tbwRules->horizontalHeader()->setResizeMode(COL_ENABLED,QHeaderView::ResizeToContents);
-	ui.tbwRules->horizontalHeader()->setResizeMode(COL_TIME,QHeaderView::ResizeToContents);
-	ui.tbwRules->horizontalHeader()->setResizeMode(COL_SHOW,QHeaderView::ResizeToContents);
-	ui.tbwRules->horizontalHeader()->setResizeMode(COL_TEXT,QHeaderView::Stretch);
+	ui.tbwRules->horizontalHeader()->setSectionResizeMode(COL_ENABLED,QHeaderView::ResizeToContents);
+	ui.tbwRules->horizontalHeader()->setSectionResizeMode(COL_TIME,QHeaderView::ResizeToContents);
+	ui.tbwRules->horizontalHeader()->setSectionResizeMode(COL_SHOW,QHeaderView::ResizeToContents);
+	ui.tbwRules->horizontalHeader()->setSectionResizeMode(COL_TEXT,QHeaderView::Stretch);
 	ui.tbwRules->horizontalHeader()->setSortIndicatorShown(false);
 	ui.tbwRules->horizontalHeader()->setHighlightSections(false);
 	ui.tbwRules->verticalHeader()->hide();
@@ -180,7 +180,7 @@ void StatusOptionsWidget::apply()
 		rule.show = ui.tbwRules->item(i,COL_SHOW)->data(SDR_VALUE).toInt();
 		rule.text = ui.tbwRules->item(i,COL_TEXT)->data(SDR_VALUE).toString();
 
-		QUuid ruleId = ui.tbwRules->item(i,COL_ENABLED)->data(SDR_VALUE).toString();
+		QUuid ruleId = QUuid::fromString(ui.tbwRules->item(i,COL_ENABLED)->data(SDR_VALUE).toString());
 		if (!ruleId.isNull())
 		{
 			IAutoStatusRule oldRule = FAutoStatus->ruleValue(ruleId);

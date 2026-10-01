@@ -22,6 +22,22 @@ InfoWidget::InfoWidget(IMessageWidgets *AMessageWidgets, const Jid& AStreamJid, 
 	initialize();
 }
 
+InfoWidget::InfoWidget(IMessageWidgets *AMessageWidgets, const AccountId &AAccountId, const ConversationId &AConversationId, QWidget *AParent) : QWidget(AParent)
+{
+	ui.setupUi(this);
+	FAccount = NULL;
+	FRoster = NULL;
+	FPresence = NULL;
+	FAvatars = NULL;
+	FStatusChanger = NULL;
+	FMessageWidgets = AMessageWidgets;
+	FAccountId = AAccountId;
+	FConversationId = AConversationId;
+	FAutoFields = 0xFFFFFFFF;
+	FVisibleFields = AccountName|ContactName|ContactStatus|ContactAvatar;
+	initialize();
+}
+
 InfoWidget::~InfoWidget()
 {
 
@@ -80,13 +96,15 @@ void InfoWidget::autoUpdateField(InfoField AField)
 	{
 	case AccountName:
 	{
-		setField(AField, FAccount!=NULL ? FAccount->name() : FStreamJid.uFull());
+		setField(AField, !FAccountId.isEmpty() ? FAccountId : (FAccount!=NULL ? FAccount->name() : FStreamJid.uFull()));
 		break;
 	}
 	case ContactName:
 	{
 		QString name;
-		if (!(FStreamJid && FContactJid))
+		if (!FConversationId.isEmpty())
+			name = FConversationId;
+		else if (!(FStreamJid && FContactJid))
 		{
 			IRosterItem ritem = FRoster ? FRoster->rosterItem(FContactJid) : IRosterItem();
 			name = ritem.isValid && !ritem.name.isEmpty() ? ritem.name : (!FContactJid.node().isEmpty() ? FContactJid.uNode() : FContactJid.domain());
@@ -98,17 +116,22 @@ void InfoWidget::autoUpdateField(InfoField AField)
 	}
 	case ContactShow:
 	{
-		setField(AField,FPresence!=NULL ? FPresence->presenceItem(FContactJid).show : IPresence::Offline);
+		int show = !FConversationId.isEmpty() ? IPresence::Online
+			: (protocolConversationOnline() ? IPresence::Online
+			: (FPresence!=NULL ? FPresence->presenceItem(FContactJid).show : IPresence::Offline));
+		setField(AField,show);
 		break;
 	}
 	case ContactStatus:
 	{
-		setField(AField,FPresence!=NULL ? FPresence->presenceItem(FContactJid).status : QString::null);
+		setField(AField,!FConversationId.isEmpty() ? QStringLiteral("Room available")
+			: (protocolConversationOnline() ? QStringLiteral("Room available")
+			: (FPresence!=NULL ? FPresence->presenceItem(FContactJid).status : QString())));
 		break;
 	}
 	case ContactAvatar:
 	{
-		setField(AField, FAvatars!=NULL ? FAvatars->avatarFileName(FAvatars->avatarHash(FContactJid)) : QString::null);
+		setField(AField,!FConversationId.isEmpty() ? QString() : (FAvatars!=NULL ? FAvatars->avatarFileName(FAvatars->avatarHash(FContactJid)) : QString()));
 		break;
 	}
 	}
@@ -234,6 +257,13 @@ void InfoWidget::initialize()
 		}
 	}
 
+	foreach (IPlugin *messagingPlugin, FMessageWidgets->pluginManager()->pluginInterface("IProtocolMessaging"))
+	{
+		IProtocolMessaging *messaging = qobject_cast<IProtocolMessaging *>(messagingPlugin->instance());
+		if (messaging && !FProtocolMessaging.contains(messaging))
+			FProtocolMessaging.append(messaging);
+	}
+
 	plugin = FMessageWidgets->pluginManager()->pluginInterface("IAvatars").value(0,NULL);
 	if (plugin)
 	{
@@ -249,6 +279,14 @@ void InfoWidget::initialize()
 	{
 		FStatusChanger = qobject_cast<IStatusChanger *>(plugin->instance());
 	}
+}
+
+bool InfoWidget::protocolConversationOnline() const
+{
+	foreach (IProtocolMessaging *messaging, FProtocolMessaging)
+		if (messaging->streamId() == FStreamJid.full() && messaging->conversationOnline(FContactJid))
+			return true;
+	return false;
 }
 
 void InfoWidget::updateFieldLabel(IInfoWidget::InfoField AField)
@@ -268,9 +306,9 @@ void InfoWidget::updateFieldLabel(IInfoWidget::InfoField AField)
 
 		IRosterItem ritem = FRoster ? FRoster->rosterItem(FContactJid) : IRosterItem();
 		if (isFiledAutoUpdated(AField) && ritem.name.isEmpty())
-			ui.lblName->setText(Qt::escape(FContactJid.uFull()));
+			ui.lblName->setText(FContactJid.uFull().toHtmlEscaped());
 		else
-			ui.lblName->setText(QString("<big><b>%1</b></big> - %2").arg(Qt::escape(name)).arg(Qt::escape(FContactJid.uFull())));
+			ui.lblName->setText(QString("<big><b>%1</b></big> - %2").arg(name.toHtmlEscaped()).arg(FContactJid.uFull().toHtmlEscaped()));
 
 		ui.lblName->setVisible(isFieldVisible(AField));
 		break;
@@ -304,7 +342,7 @@ void InfoWidget::updateFieldLabel(IInfoWidget::InfoField AField)
 		{
 			QMovie *movie = new QMovie(fileName,QByteArray(),ui.lblAvatar);
 			QSize size = QImageReader(fileName).size();
-			size.scale(QSize(32,32),Qt::KeepAspectRatio);
+			size.scale(QSize(64,64),Qt::KeepAspectRatio);
 			movie->setScaledSize(size);
 			ui.lblAvatar->setMovie(movie);
 			movie->start();

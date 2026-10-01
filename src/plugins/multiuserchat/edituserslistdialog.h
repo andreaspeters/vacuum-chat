@@ -6,7 +6,7 @@
 #include <definitions/menuicons.h>
 #include <interfaces/imultiuserchat.h>
 #include <utils/iconstorage.h>
-#include "ui_edituserslistdialog.h"
+#include <ui_edituserslistdialog.h>
 
 class EditUsersListDialog :
 			public QDialog

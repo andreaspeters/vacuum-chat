@@ -11,10 +11,10 @@ QDomElement findChildElement(const QDomElement &AParent, const QString &APath, c
 {
 	int dotIndex = APath.indexOf('.');
 	ChildName = dotIndex>0 ? APath.left(dotIndex) : APath;
-	SubPath = dotIndex>0 ? APath.mid(dotIndex+1) : QString::null;
+	SubPath = dotIndex>0 ? APath.mid(dotIndex+1) : QString();
 
 	int nsStart = ChildName.indexOf('[');
-	NSpace = nsStart>0 ? ChildName.mid(nsStart+1, ChildName.lastIndexOf(']')-nsStart-1) : QString::null;
+	NSpace = nsStart>0 ? ChildName.mid(nsStart+1, ChildName.lastIndexOf(']')-nsStart-1) : QString();
 	NSpace = dotIndex>0 ? NSpace : (ANSpace.isNull() ? NSpace : ANSpace);
 	ChildName = nsStart>0 ? ChildName.left(nsStart) : ChildName;
 
@@ -45,7 +45,7 @@ QString fullOptionsPath(const QString &APath, const QString &ASubPath)
 
 QString fullFileName(const QString &APath, const QString &ANSpace)
 {
-	QString fileKey = APath + (!ANSpace.isEmpty() ? "["+ANSpace+"]" : QString::null);
+	QString fileKey = APath + (!ANSpace.isEmpty() ? "["+ANSpace+"]" : QString());
 	return Options::filesPath() + "/" + QCryptographicHash::hash(fileKey.toUtf8(), QCryptographicHash::Sha1).toHex();
 }
 
@@ -85,19 +85,19 @@ QVariant stringToVariant(const QString &AString, QVariant::Type AType)
 {
 	if (AType == QVariant::Rect)
 	{
-		QList<QString> parts = AString.split(";",QString::SkipEmptyParts);
+		QList<QString> parts = AString.split(";",Qt::SkipEmptyParts);
 		if (parts.count() == 4)
 			return QRect(parts.at(0).toInt(),parts.at(1).toInt(),parts.at(2).toInt(),parts.at(3).toInt());
 	}
 	else if (AType == QVariant::Point)
 	{
-		QList<QString> parts = AString.split(";",QString::SkipEmptyParts);
+		QList<QString> parts = AString.split(";",Qt::SkipEmptyParts);
 		if (parts.count() == 2)
 			return QPoint(parts.at(0).toInt(),parts.at(1).toInt());
 	}
 	else if (AType == QVariant::Size)
 	{
-		QList<QString> parts = AString.split(";",QString::SkipEmptyParts);
+		QList<QString> parts = AString.split(";",Qt::SkipEmptyParts);
 		if (parts.count() == 2)
 			return QSize(parts.at(0).toInt(),parts.at(1).toInt());
 	}
@@ -271,7 +271,7 @@ bool OptionsNode::isNull() const
 QString OptionsNode::path() const
 {
 	if (d->path.isEmpty())
-		d->path = Options::node(QString::null).childPath(*this);
+		d->path = Options::node(QString()).childPath(*this);
 	return d->path;
 }
 
@@ -352,7 +352,7 @@ QString OptionsNode::childPath(const OptionsNode &ANode) const
 			result.prepend(pathItem + ".");
 		childElem = childElem.parentNode().toElement();
 	}
-	return childElem==d->node ? result : QString::null;
+	return childElem==d->node ? result : QString();
 }
 
 void OptionsNode::removeChilds(const QString &AName, const QString &ANSpace)
@@ -655,7 +655,11 @@ QVariant Options::decrypt(const QByteArray &AData, const QByteArray &AKey)
 			for (int i = 0; i<cryptData.size(); i+=16)
 				xtea2_decipher(XTEA_ITERATIONS,(quint32 *)(cryptData.data()+i),(const quint32 *)cryptKey.constData());
 
-			return stringToVariant(QString::fromUtf8(cryptData),valType);
+			QByteArray unpadded = cryptData;
+			if (valType == QVariant::String)
+				while (!unpadded.isEmpty() && unpadded.endsWith('\0'))
+					unpadded.chop(1);
+			return stringToVariant(QString::fromUtf8(unpadded),valType);
 		}
 	}
 	return QVariant();
@@ -670,7 +674,7 @@ void Options::exportNode(const QString &APath, QDomElement &AToElem)
 		QDomElement nodeElem = AToElem;
 		while (!path.isEmpty())
 		{
-			QDomElement childElem = findChildElement(nodeElem,path,QString::null,cname,spath,nspace);
+			QDomElement childElem = findChildElement(nodeElem,path,QString(),cname,spath,nspace);
 			if (childElem.isNull())
 			{
 				childElem = nodeElem.appendChild(nodeElem.ownerDocument().createElement(cname)).toElement();
@@ -691,7 +695,7 @@ void Options::importNode(const QString &APath, const QDomElement &AFromElem)
 	QDomElement nodeElem = AFromElem;
 	while (!nodeElem.isNull() && !path.isEmpty())
 	{
-		QDomElement childElem = findChildElement(nodeElem,path,QString::null,cname,spath,nspace);
+		QDomElement childElem = findChildElement(nodeElem,path,QString(),cname,spath,nspace);
 		path = spath;
 		nodeElem = childElem;
 	}

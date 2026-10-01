@@ -16,6 +16,7 @@ class TrayManager :
 			public ITrayManager
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.traymanager")
 	Q_INTERFACES(IPlugin ITrayManager);
 public:
 	TrayManager();

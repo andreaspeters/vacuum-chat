@@ -2,6 +2,9 @@
 
 #include <QVariant>
 #include <QTextCursor>
+#include <QRegularExpression>
+#include <QByteArray>
+#include <QTimer>
 
 #define SHC_MESSAGE         "/message"
 
@@ -10,6 +13,7 @@ MessageProcessor::MessageProcessor()
 	FXmppStreams = NULL;
 	FStanzaProcessor = NULL;
 	FNotifications = NULL;
+	FPluginManager = NULL;
 }
 
 MessageProcessor::~MessageProcessor()
@@ -30,6 +34,7 @@ void MessageProcessor::pluginInfo(IPluginInfo *APluginInfo)
 
 bool MessageProcessor::initConnections(IPluginManager *APluginManager, int &/*AInitOrder*/)
 {
+	FPluginManager = APluginManager;
 	IPlugin *plugin = APluginManager->pluginInterface("IXmppStreams").value(0,NULL);
 	if (plugin)
 	{
@@ -57,13 +62,39 @@ bool MessageProcessor::initConnections(IPluginManager *APluginManager, int &/*AI
 		}
 	}
 
+	bindProtocolMessaging();
+	QTimer::singleShot(0, this, [this]() { bindProtocolMessaging(); });
+
 	return FStanzaProcessor!=NULL && FXmppStreams!=NULL;
+}
+
+void MessageProcessor::bindProtocolMessaging()
+{
+	if (!FPluginManager)
+		return;
+	foreach (IPlugin *protocolPlugin, FPluginManager->pluginInterface("IProtocolMessaging"))
+	{
+		IProtocolMessaging *messaging = qobject_cast<IProtocolMessaging *>(protocolPlugin->instance());
+		if (messaging && !FProtocolMessaging.contains(messaging))
+		{
+			FProtocolMessaging.append(messaging);
+		}
+	}
 }
 
 bool MessageProcessor::initObjects()
 {
 	insertMessageWriter(MWO_MESSAGEPROCESSOR,this);
 	insertMessageWriter(MWO_MESSAGEPROCESSOR_ANCHORS,this);
+	return true;
+}
+
+bool MessageProcessor::startPlugin()
+{
+	// Protocol plugins can be loaded after initConnections(). Bind once more
+	// after the complete plugin graph has started, like the room-manager
+	// boundary used by Matrix clients such as Nheko.
+	bindProtocolMessaging();
 	return true;
 }
 
@@ -94,8 +125,7 @@ void MessageProcessor::writeMessageToText(int AOrder, Message &AMessage, QTextDo
 	}
 	else if (AOrder == MWO_MESSAGEPROCESSOR_ANCHORS)
 	{
-		QRegExp regexp("\\b((https?|ftp)://|www\\.|xmpp:|magnet:)\\S+");
-		regexp.setCaseSensitivity(Qt::CaseInsensitive);
+		QRegularExpression regexp("\\b((https?|ftp)://|www\\.|xmpp:|magnet:)\\S+", QRegularExpression::CaseInsensitiveOption);
 		for (QTextCursor cursor = ADocument->find(regexp); !cursor.isNull();  cursor = ADocument->find(regexp,cursor))
 		{
 			QUrl link = cursor.selectedText();
@@ -111,7 +141,33 @@ void MessageProcessor::writeMessageToText(int AOrder, Message &AMessage, QTextDo
 
 bool MessageProcessor::sendMessage(const Jid &AStreamJid, Message &AMessage, int ADirection)
 {
-	if (processMessage(AStreamJid,AMessage,ADirection))
+	bool processed = false;
+	if (ADirection == IMessageProcessor::MessageOut)
+	{
+		processed = processMessage(AStreamJid, AMessage, ADirection);
+		if (!processed)
+			return false;
+	}
+	if (ADirection == IMessageProcessor::MessageOut)
+	{
+		for (IProtocolMessaging *messaging : FProtocolMessaging)
+		{
+			if (Jid::fromUserInput(messaging->streamId()).bare() != AStreamJid.bare())
+				continue;
+			QString conversationId;
+			if (!messaging->conversationIdForAddress(Jid::fromUserInput(AMessage.to()), conversationId))
+				continue;
+			BasicMessage message(AMessage.id(), conversationId, AStreamJid.full(),
+				AMessage.to(), AMessage.body(), AMessage.dateTime(), QString(), BasicMessage::Outgoing);
+			if (messaging->sendMessage(message))
+			{
+				displayMessage(AStreamJid, AMessage, ADirection);
+				emit messageSent(AMessage);
+				return true;
+			}
+		}
+	}
+	if ((ADirection == IMessageProcessor::MessageOut ? processed : processMessage(AStreamJid,AMessage,ADirection)))
 	{
 		if (ADirection == IMessageProcessor::MessageOut)
 		{
@@ -133,6 +189,34 @@ bool MessageProcessor::sendMessage(const Jid &AStreamJid, Message &AMessage, int
 	return false;
 }
 
+void MessageProcessor::processProtocolMessage(const BasicMessage &AMessage)
+{
+	onProtocolMessageReceived(AMessage);
+}
+
+void MessageProcessor::onProtocolMessageReceived(const BasicMessage &message)
+{
+	for (IProtocolMessaging *messaging : FProtocolMessaging)
+	{
+		if (messaging->streamId().isEmpty())
+			continue;
+		const Jid stream = Jid::fromUserInput(messaging->streamId());
+		const Jid contact = messaging->addressForConversation(message.conversationId());
+		QString body = message.body();
+		if (body.isEmpty())
+			body = message.metadata().value(QStringLiteral("body")).toString();
+		if (body.isEmpty())
+			body = message.metadata().value(QStringLiteral("filename")).toString();
+		Message converted;
+		converted.setId(message.messageId()).setFrom(contact.full()).setTo(stream.full())
+			.setType(Message::Chat).setBody(body).setDateTime(message.timestamp());
+		converted.setData(MDR_MESSAGE_DIRECTION + 1,
+			message.metadata().value(QStringLiteral("historical")).toBool());
+		sendMessage(stream, converted, IMessageProcessor::MessageIn);
+		return;
+	}
+}
+
 bool MessageProcessor::processMessage(const Jid &AStreamJid, Message &AMessage, int ADirection)
 {
 	if (ADirection == IMessageProcessor::MessageIn)
@@ -141,7 +225,7 @@ bool MessageProcessor::processMessage(const Jid &AStreamJid, Message &AMessage, 
 		AMessage.setFrom(AStreamJid.full());
 
 	bool hooked = false;
-	QMapIterator<int,IMessageEditor *> it(FMessageEditors);
+	QMultiMapIterator<int,IMessageEditor *> it(FMessageEditors);
 	ADirection == MessageIn ? it.toFront() : it.toBack();
 	while (!hooked && (ADirection == MessageIn ? it.hasNext() : it.hasPrevious()))
 	{
@@ -168,13 +252,34 @@ bool MessageProcessor::displayMessage(const Jid &AStreamJid, Message &AMessage, 
 
 		if (handler->messageDisplay(AMessage,ADirection))
 		{
-			notifyMessage(handler,AMessage,ADirection);
+			if (!AMessage.data(MDR_MESSAGE_DIRECTION + 1).toBool())
+				notifyMessage(handler,AMessage,ADirection);
 			return true;
 		}
 	}
 	return false;
 }
 
+void MessageProcessor::displayConversationHistory(const Jid &AStreamJid, const Jid &AContactJid)
+{
+	for (IProtocolMessaging *messaging : FProtocolMessaging) {
+		if (Jid::fromUserInput(messaging->streamId()).bare() != AStreamJid.bare())
+			continue;
+		QString conversationId;
+		if (!messaging->conversationIdForAddress(AContactJid, conversationId))
+			return;
+		for (const BasicMessage &basic : messaging->conversationHistory(conversationId)) {
+			if (basic.body().isEmpty())
+				continue;
+			Message message;
+			message.setId(basic.messageId()).setFrom(AContactJid.full()).setTo(AStreamJid.full())
+				.setType(Message::Chat).setBody(basic.body()).setDateTime(basic.timestamp());
+			message.setData(MDR_MESSAGE_DIRECTION + 1, true);
+			displayMessage(AStreamJid, message, IMessageProcessor::MessageIn);
+		}
+		return;
+	}
+}
 QList<int> MessageProcessor::notifiedMessages() const
 {
 	return FNotifiedMessages.keys();
@@ -218,7 +323,7 @@ void MessageProcessor::removeMessageNotify(int AMessageId)
 void MessageProcessor::textToMessage(Message &AMessage, const QTextDocument *ADocument, const QString &ALang) const
 {
 	QTextDocument *documentCopy = ADocument->clone();
-	QMapIterator<int,IMessageWriter *> it(FMessageWriters);
+	QMultiMapIterator<int,IMessageWriter *> it(FMessageWriters);
 	it.toBack();
 	while (it.hasPrevious())
 	{
@@ -231,7 +336,7 @@ void MessageProcessor::textToMessage(Message &AMessage, const QTextDocument *ADo
 void MessageProcessor::messageToText(QTextDocument *ADocument, const Message &AMessage, const QString &ALang) const
 {
 	Message messageCopy = AMessage;
-	QMapIterator<int,IMessageWriter *> it(FMessageWriters);
+	QMultiMapIterator<int,IMessageWriter *> it(FMessageWriters);
 	it.toFront();
 	while (it.hasNext())
 	{
@@ -343,7 +448,7 @@ QString MessageProcessor::prepareBodyForSend(const QString &AString) const
 
 QString MessageProcessor::prepareBodyForReceive(const QString &AString) const
 {
-	QString result = Qt::escape(AString);
+	QString result = AString.toHtmlEscaped();
 	result.replace('\n',"<br>");
 	result.replace("  ","&nbsp; ");
 	result.replace('\t',"&nbsp; &nbsp; ");
@@ -394,4 +499,4 @@ void MessageProcessor::onNotificationRemoved(int ANotifyId)
 		removeMessageNotify(FNotifyId2MessageId.value(ANotifyId));
 }
 
-Q_EXPORT_PLUGIN2(plg_messageprocessor, MessageProcessor)
+

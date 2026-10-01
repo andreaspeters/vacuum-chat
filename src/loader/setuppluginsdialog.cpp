@@ -25,8 +25,8 @@ SetupPluginsDialog::SetupPluginsDialog(IPluginManager *APluginManager, QDomDocum
 	connect(ui.cmbLanguage,SIGNAL(currentIndexChanged(int)),SLOT(onCurrentLanguageChanged(int)));
 
 	updatePlugins();
-	ui.twtPlugins->horizontalHeader()->setResizeMode(COL_NAME,QHeaderView::Stretch);
-	ui.twtPlugins->horizontalHeader()->setResizeMode(COL_FILE,QHeaderView::ResizeToContents);
+	ui.twtPlugins->horizontalHeader()->setSectionResizeMode(COL_NAME,QHeaderView::Stretch);
+	ui.twtPlugins->horizontalHeader()->setSectionResizeMode(COL_FILE,QHeaderView::ResizeToContents);
 	connect(ui.twtPlugins,SIGNAL(currentItemChanged(QTableWidgetItem *, QTableWidgetItem *)),SLOT(onCurrentPluginChanged(QTableWidgetItem *, QTableWidgetItem *)));
 
 	connect(ui.dbbButtons,SIGNAL(clicked(QAbstractButton *)),SLOT(onDialogButtonClicked(QAbstractButton *)));
@@ -69,7 +69,7 @@ void SetupPluginsDialog::updatePlugins()
 		QTableWidgetItem *nameItem = new QTableWidgetItem(name);
 		if (pluginElem.attribute("enabled","true")=="true")
 		{
-			if (FPluginManager->pluginInstance(pluginElem.attribute("uuid"))==NULL)
+			if (FPluginManager->pluginInstance(QUuid::fromString(pluginElem.attribute("uuid")))==NULL)
 				nameItem->setForeground(Qt::red);
 			nameItem->setCheckState(Qt::Checked);
 		}
@@ -110,7 +110,7 @@ void SetupPluginsDialog::saveSettings()
 QDomElement SetupPluginsDialog::getPluginElement(const QUuid &AUuid) const
 {
 	QDomElement pluginElem = FPluginsSetup.documentElement().firstChildElement();
-	while (!pluginElem.isNull() && AUuid!=pluginElem.attribute("uuid"))
+	while (!pluginElem.isNull() && AUuid!=QUuid::fromString(pluginElem.attribute("uuid")))
 		pluginElem = pluginElem.nextSiblingElement();
 	return pluginElem;
 }
@@ -142,7 +142,7 @@ void SetupPluginsDialog::onCurrentPluginChanged(QTableWidgetItem *ACurrent, QTab
 		QDomElement pluginElem = FItemElement.value(nameItem);
 
 		QString name = pluginElem.firstChildElement("name").text().isEmpty() ? pluginElem.tagName() : pluginElem.firstChildElement("name").text();
-		ui.lblName->setText(QString("<b>%1</b> %2").arg(Qt::escape(name)).arg(Qt::escape(pluginElem.firstChildElement("version").text())));
+		ui.lblName->setText(QString("<b>%1</b> %2").arg(name.toHtmlEscaped()).arg(pluginElem.firstChildElement("version").text().toHtmlEscaped()));
 		ui.lblDescription->setText(pluginElem.firstChildElement("desc").text());
 		ui.lblError->setText(pluginElem.firstChildElement("error").text());
 		ui.lblError->setVisible(!ui.lblError->text().isEmpty());
@@ -152,9 +152,9 @@ void SetupPluginsDialog::onCurrentPluginChanged(QTableWidgetItem *ACurrent, QTab
 		QDomElement dependsElem = pluginElem.firstChildElement("depends").firstChildElement("uuid");
 		while (!dependsElem.isNull())
 		{
-			QDomElement dpluginElem = getPluginElement(dependsElem.text());
+			QDomElement dpluginElem = getPluginElement(QUuid::fromString(dependsElem.text()));
 			QListWidgetItem *dItem = new QListWidgetItem(!dpluginElem.isNull() ? dpluginElem.firstChildElement("name").text() : dependsElem.text());
-			QPalette::ColorGroup cg = FPluginManager->pluginInstance(dependsElem.text())!=NULL ? QPalette::Active : QPalette::Disabled;
+			QPalette::ColorGroup cg = FPluginManager->pluginInstance(QUuid::fromString(dependsElem.text()))!=NULL ? QPalette::Active : QPalette::Disabled;
 			dItem->setForeground(ui.ltwDepends->palette().color(cg, QPalette::Text));
 			ui.ltwDepends->addItem(dItem);
 			dependsElem = dependsElem.nextSiblingElement("uuid");
@@ -177,9 +177,9 @@ void SetupPluginsDialog::onCurrentPluginChanged(QTableWidgetItem *ACurrent, QTab
 			dpluginElem = dpluginElem.nextSiblingElement();
 		}
 
-		const IPluginInfo *info = FPluginManager->pluginInfo(pluginElem.attribute("uuid"));
+		const IPluginInfo *info = FPluginManager->pluginInfo(QUuid::fromString(pluginElem.attribute("uuid")));
 		if (info)
-			ui.lblHomePage->setText(QString("<a href='%1'>%2</a>").arg(info->homePage.toString()).arg(Qt::escape(info->homePage.toString())));
+			ui.lblHomePage->setText(QString("<a href='%1'>%2</a>").arg(info->homePage.toString()).arg(info->homePage.toString().toHtmlEscaped()));
 	}
 }
 

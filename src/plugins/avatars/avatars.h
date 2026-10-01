@@ -40,6 +40,7 @@ class Avatars :
 	public IOptionsHolder
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.avatars")
 	Q_INTERFACES(IPlugin IAvatars IStanzaHandler IRosterDataHolder IRostersLabelHolder IStanzaRequestOwner IOptionsHolder);
 public:
 	Avatars();
@@ -75,6 +76,9 @@ public:
 	virtual QByteArray loadAvatarData(const QString &AHash) const;
 	virtual bool setAvatar(const Jid &AStreamJid, const QByteArray &AData);
 	virtual QString setCustomPictire(const Jid &AContactJid, const QByteArray &AData);
+	virtual QString avatarHashByKey(const QString &AKey) const;
+	virtual QString setCustomPictureByKey(const QString &AKey, const QByteArray &AData);
+	virtual void setCustomImageByKey(const QString &AKey, const QImage &AImage);
 	virtual QImage loadAvatarImage(const QString &AHash, const QSize &AMaxSize = QSize(), bool AGray = false) const;
 signals:
 	void avatarChanged(const Jid &AContactJid);
@@ -130,6 +134,8 @@ private:
 	bool FShowEmptyAvatars;
 	bool FShowGrayAvatars;
 	QMap<Jid, QString> FCustomPictures;
+	QMap<QString, QString> FCustomPicturesByKey;
+	QMap<QString, QImage> FCustomImagesByKey;
 private:
 	quint32 FAvatarLabelId;
 	QDir FAvatarsDir;

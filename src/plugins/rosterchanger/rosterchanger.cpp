@@ -7,6 +7,7 @@
 #include <QDragMoveEvent>
 #include <QDragEnterEvent>
 #include <QDragLeaveEvent>
+#include <QMimeData>
 #include <QItemEditorFactory>
 
 #define ADR_STREAM_JID      Action::DR_StreamJid
@@ -394,7 +395,7 @@ bool RosterChanger::xmppUriOpen(const Jid &AStreamJid, const Jid &AContactJid, c
 			{
 				dialog->setContactJid(AContactJid);
 				dialog->setNickName(AParams.contains("name") ? AParams.value("name") : AContactJid.uNode());
-				dialog->setGroup(AParams.contains("group") ? AParams.value("group") : QString::null);
+				dialog->setGroup(AParams.contains("group") ? AParams.value("group") : QString());
 				dialog->instance()->show();
 			}
 		}
@@ -406,7 +407,7 @@ bool RosterChanger::xmppUriOpen(const Jid &AStreamJid, const Jid &AContactJid, c
 		if (roster && roster->isOpen() && roster->rosterItem(AContactJid).isValid)
 		{
 			if (QMessageBox::question(NULL, tr("Remove contact"),
-				tr("You are assured that wish to remove a contact <b>%1</b> from roster?").arg(Qt::escape(AContactJid.uBare())),
+				tr("You are assured that wish to remove a contact <b>%1</b> from roster?").arg(AContactJid.uBare().toHtmlEscaped()),
 				QMessageBox::Yes | QMessageBox::No) == QMessageBox::Yes)
 			{
 				roster->removeItem(AContactJid);
@@ -421,7 +422,7 @@ bool RosterChanger::xmppUriOpen(const Jid &AStreamJid, const Jid &AContactJid, c
 		if (roster && roster->isOpen() && ritem.subscription!=SUBSCRIPTION_BOTH && ritem.subscription!=SUBSCRIPTION_TO)
 		{
 			if (QMessageBox::question(NULL, tr("Subscribe for contact presence"),
-				tr("You are assured that wish to subscribe for a contact <b>%1</b> presence?").arg(Qt::escape(AContactJid.uBare())),
+				tr("You are assured that wish to subscribe for a contact <b>%1</b> presence?").arg(AContactJid.uBare().toHtmlEscaped()),
 				QMessageBox::Yes | QMessageBox::No) == QMessageBox::Yes)
 			{
 				roster->sendSubscription(AContactJid, IRoster::Subscribe);
@@ -436,7 +437,7 @@ bool RosterChanger::xmppUriOpen(const Jid &AStreamJid, const Jid &AContactJid, c
 		if (roster && roster->isOpen() && ritem.subscription!=SUBSCRIPTION_NONE && ritem.subscription!=SUBSCRIPTION_FROM)
 		{
 			if (QMessageBox::question(NULL, tr("Unsubscribe from contact presence"),
-				tr("You are assured that wish to unsubscribe from a contact <b>%1</b> presence?").arg(Qt::escape(AContactJid.uBare())),
+				tr("You are assured that wish to unsubscribe from a contact <b>%1</b> presence?").arg(AContactJid.uBare().toHtmlEscaped()),
 				QMessageBox::Yes | QMessageBox::No) == QMessageBox::Yes)
 			{
 				roster->sendSubscription(AContactJid, IRoster::Unsubscribe);
@@ -540,7 +541,7 @@ QString RosterChanger::subscriptionNotify(int ASubsType, const Jid &AContactJid)
 	case IRoster::Unsubscribed:
 		return tr("You are now unsubscribed from %1 presence.").arg(AContactJid.uBare());
 	}
-	return QString::null;
+	return QString();
 }
 
 QList<int> RosterChanger::findNotifies(const Jid &AStreamJid, const Jid &AContactJid) const
@@ -608,7 +609,7 @@ Menu *RosterChanger::createGroupMenu(const QHash<int,QVariant> &AData, const QSe
 		foreach(group,allGroups)
 		{
 			Menu *parentMenu = menu;
-			QList<QString> groupTree = group.split(groupDelim,QString::SkipEmptyParts);
+			QList<QString> groupTree = group.split(groupDelim,Qt::SkipEmptyParts);
 			QString groupName;
 			int index = 0;
 			while (index < groupTree.count())
@@ -969,9 +970,9 @@ void RosterChanger::onRosterIndexContextMenu(const QList<IRosterIndex *> &AIndex
 						break;
 					}
 					exceptGroups = !exceptGroups.isEmpty() ? (exceptGroups & ritem.groups) : ritem.groups;
-					exceptGroups += QString::null;
+					exceptGroups += QString();
 				}
-				exceptGroups -= QString::null;
+				exceptGroups -= QString();
 
 				if (isAllItemsValid)
 				{
@@ -1046,7 +1047,9 @@ void RosterChanger::onRosterIndexContextMenu(const QList<IRosterIndex *> &AIndex
 					AMenu->addAction(action,AG_RVCM_RCHANGER);
 				}
 
-				QSet<QString> exceptGroups = rolesMap.value(RDR_GROUP).toSet();
+				QSet<QString> exceptGroups;
+				for (const QString &group : rolesMap.value(RDR_GROUP))
+					exceptGroups.insert(group);
 
 				Menu *copyGroup = createGroupMenu(data,exceptGroups,true,true,false,SLOT(onCopyGroupsToGroup(bool)),AMenu);
 				copyGroup->setTitle(tr("Copy to group"));
@@ -1130,7 +1133,7 @@ void RosterChanger::addContactToGroup(const Jid &AStreamJid, const Jid &AContact
 	{
 		IRosterItem ritem = roster->rosterItem(AContactJid);
 		if (!ritem.isValid)
-			roster->setItem(AContactJid,QString::null,QSet<QString>()<<AGroup);
+			roster->setItem(AContactJid,QString(),QSet<QString>()<<AGroup);
 		else
 			roster->copyItemToGroup(AContactJid,AGroup);
 	}
@@ -1141,7 +1144,7 @@ void RosterChanger::renameContact(const Jid &AStreamJid, const Jid &AContactJid,
 	IRoster *roster = FRosterPlugin!=NULL ? FRosterPlugin->findRoster(AStreamJid) : NULL;
 	if (roster && roster->isOpen() && roster->rosterItem(AContactJid).isValid)
 	{
-		QString newName = QInputDialog::getText(NULL,tr("Rename contact"),tr("Enter name for: <b>%1</b>").arg(Qt::escape(AContactJid.uBare())),QLineEdit::Normal,AOldName);
+		QString newName = QInputDialog::getText(NULL,tr("Rename contact"),tr("Enter name for: <b>%1</b>").arg(AContactJid.uBare().toHtmlEscaped()),QLineEdit::Normal,AOldName);
 		if (!newName.isEmpty() && newName != AOldName)
 			roster->renameItem(AContactJid,newName);
 	}
@@ -1211,7 +1214,7 @@ void RosterChanger::removeContactsFromRoster(const Jid &AStreamJid, const QStrin
 			if (ritem.isValid)
 			{
 				button = QMessageBox::question(NULL,tr("Remove contact"),
-					tr("You are assured that wish to remove a contact <b>%1</b> from roster?").arg(Qt::escape(name)),
+					tr("You are assured that wish to remove a contact <b>%1</b> from roster?").arg(name.toHtmlEscaped()),
 					QMessageBox::Yes | QMessageBox::No);
 			}
 		}
@@ -1258,7 +1261,7 @@ void RosterChanger::addGroupToGroup(const Jid &AToStreamJid, const Jid &AFromStr
 	{
 		QList<IRosterItem> toItems;
 		QList<IRosterItem> fromItems = fromRoster->groupItems(AGroup);
-		QString fromGroupLast = AGroup.split(fromRoster->groupDelimiter(),QString::SkipEmptyParts).last();
+		QString fromGroupLast = AGroup.split(fromRoster->groupDelimiter(),Qt::SkipEmptyParts).last();
 		foreach(IRosterItem fromItem, fromItems)
 		{
 			QSet<QString> newGroups;
@@ -1299,7 +1302,7 @@ void RosterChanger::renameGroup(const Jid &AStreamJid, const QString &AGroup) co
 	if (roster && roster->isOpen() && roster->groups().contains(AGroup))
 	{
 		QString groupDelim = roster->groupDelimiter();
-		QList<QString> groupTree = AGroup.split(groupDelim,QString::SkipEmptyParts);
+		QList<QString> groupTree = AGroup.split(groupDelim,Qt::SkipEmptyParts);
 		QString newGroupPart = QInputDialog::getText(NULL,tr("Rename group"),tr("Enter new group name:"),QLineEdit::Normal,groupTree.last());
 		if (!newGroupPart.isEmpty())
 		{
@@ -1435,7 +1438,7 @@ void RosterChanger::onSubscriptionReceived(IRoster *ARoster, const Jid &AItemJid
 		notify.data.insert(NDR_POPUP_CAPTION, tr("Subscription message"));
 		notify.data.insert(NDR_POPUP_TITLE,FNotifications->contactName(ARoster->streamJid(),AItemJid));
 		notify.data.insert(NDR_POPUP_IMAGE, FNotifications->contactAvatar(AItemJid));
-		notify.data.insert(NDR_POPUP_HTML,Qt::escape(subscriptionNotify(ASubsType,AItemJid)));
+		notify.data.insert(NDR_POPUP_HTML,subscriptionNotify(ASubsType,AItemJid).toHtmlEscaped());
 		notify.data.insert(NDR_SOUND_FILE,SDF_RCHANGER_SUBSCRIPTION);
 	}
 
@@ -1703,4 +1706,3 @@ void RosterChanger::onSubscriptionDialogDestroyed()
 	}
 }
 
-Q_EXPORT_PLUGIN2(plg_rosterchanger, RosterChanger)

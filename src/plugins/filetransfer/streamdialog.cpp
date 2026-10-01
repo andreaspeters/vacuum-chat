@@ -14,7 +14,7 @@ StreamDialog::StreamDialog(IDataStreamsManager *ADataManager, IFileStreamsManage
 	setAttribute(Qt::WA_DeleteOnClose,true);
 
 	ui.wdtMethods->setLayout(new QVBoxLayout);
-	ui.wdtMethods->layout()->setMargin(0);
+	ui.wdtMethods->layout()->setContentsMargins(0,0,0,0);
 
 	FFileStream = AFileStream;
 	FFileTransfer = AFileTransfer;
@@ -35,7 +35,7 @@ StreamDialog::StreamDialog(IDataStreamsManager *ADataManager, IFileStreamsManage
 		ui.lblContactLabel->setText(tr("From:"));
 	}
 
-	ui.lblContact->setText(Qt::escape(FFileStream->contactJid().uFull()));
+	ui.lblContact->setText(FFileStream->contactJid().uFull().toHtmlEscaped());
 
 	if (AFileStream->streamState() == IFileStream::Creating)
 	{
@@ -284,7 +284,7 @@ void StreamDialog::onStreamSpeedChanged()
 	else
 	{
 		ui.pgbPrgress->setValue(0);
-		ui.lblProgress->setText(QString::null);
+		ui.lblProgress->setText(QString());
 	}
 }
 
@@ -309,7 +309,7 @@ void StreamDialog::onFileButtonClicked(bool)
 		QString file = QDir(lastSelectedPath).absoluteFilePath(FFileStream->fileName());
 
 		if (FFileStream->streamKind() == IFileStream::ReceiveFile)
-			file = QFileDialog::getSaveFileName(this,tr("Select file for receive"),file,QString::null,NULL,QFileDialog::DontConfirmOverwrite);
+			file = QFileDialog::getSaveFileName(this,tr("Select file for receive"),file,QString(),NULL,QFileDialog::DontConfirmOverwrite);
 		else
 			file = QFileDialog::getOpenFileName(this,tr("Select file to send"),file);
 
@@ -384,7 +384,7 @@ void StreamDialog::onDialogButtonClicked(QAbstractButton *AButton)
 
 void StreamDialog::onMethodSettingsChanged(int AIndex)
 {
-	FFileStream->setSettingsProfile(ui.cmbSettingsProfile->itemData(AIndex).toString());
+	FFileStream->setSettingsProfile(QUuid::fromString(ui.cmbSettingsProfile->itemData(AIndex).toString()));
 }
 
 void StreamDialog::onSettingsProfileInserted(const QUuid &AProfileId, const QString &AName)

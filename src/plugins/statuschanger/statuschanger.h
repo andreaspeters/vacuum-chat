@@ -21,6 +21,7 @@
 #include <interfaces/ipluginmanager.h>
 #include <interfaces/istatuschanger.h>
 #include <interfaces/ipresence.h>
+#include <interfaces/iprotocolpresence.h>
 #include <interfaces/iroster.h>
 #include <interfaces/imainwindow.h>
 #include <interfaces/irostersview.h>
@@ -56,6 +57,7 @@ class StatusChanger :
 	public IRostersLabelHolder
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.statuschanger")
 	Q_INTERFACES(IPlugin IStatusChanger IOptionsHolder IRostersLabelHolder);
 public:
 	StatusChanger();
@@ -81,6 +83,9 @@ public:
 	virtual QList<Jid> statusStreams(int AStatusId) const;
 	virtual int streamStatus(const Jid &AStreamJid) const;
 	virtual void setStreamStatus(const Jid &AStreamJid, int AStatusId);
+	virtual QList<AccountId> statusAccounts(int AStatusId) const;
+	virtual int accountStatus(const AccountId &AAccountId) const;
+	virtual void setAccountStatus(const AccountId &AAccountId, int AStatusId);
 	virtual QString statusItemName(int AStatusId) const;
 	virtual int statusItemShow(int AStatusId) const;
 	virtual QString statusItemText(int AStatusId) const;
@@ -145,6 +150,8 @@ protected slots:
 	void onModifyStatusAction(bool);
 	void onAccountOptionsChanged(IAccount *AAccount, const OptionsNode &ANode);
 	void onNotificationActivated(int ANotifyId);
+	void onProtocolPresenceChanged(const QString &AStreamId, int AShow, const QString &AStatus);
+	void onProtocolPresenceClosed(const QString &AStreamId);
 private:
 	IPluginManager *FPluginManager;
 	IPresencePlugin *FPresencePlugin;
@@ -158,6 +165,7 @@ private:
 	IAccountManager *FAccountManager;
 	IStatusIcons *FStatusIcons;
 	INotifications *FNotifications;
+	IProtocolPresence *FProtocolPresence;
 private:
 	Menu *FMainMenu;
 	Action *FModifyStatus;
@@ -177,6 +185,7 @@ private:
 	QMap<IPresence *, int> FTempStatus;
 	QMap<IPresence *, int> FNotifyId;
 	QMap<IPresence *, QPair<QDateTime,int> > FPendingReconnect;
+	QMap<QString, int> FProtocolStatuses;
 	QPointer<EditStatusDialog> FEditStatusDialog;
 	QPointer<ModifyStatusDialog> FModifyStatusDialog;
 };

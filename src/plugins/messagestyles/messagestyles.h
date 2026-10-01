@@ -15,6 +15,7 @@
 #include <interfaces/iroster.h>
 #include <interfaces/ipresence.h>
 #include <interfaces/istatusicons.h>
+#include <interfaces/iprotocolmessaging.h>
 #include <utils/message.h>
 #include <utils/options.h>
 #include "styleoptionswidget.h"
@@ -26,6 +27,7 @@ class MessageStyles :
 			public IOptionsHolder
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.messagestyles")
 	Q_INTERFACES(IPlugin IMessageStyles IOptionsHolder);
 public:
 	MessageStyles();
@@ -45,12 +47,15 @@ public:
 	virtual IMessageStylePlugin *pluginById(const QString &APluginId) const;
 	virtual IMessageStyle *styleForOptions(const IMessageStyleOptions &AOptions) const;
 	virtual IMessageStyleOptions styleOptions(const OptionsNode &ANode, int AMessageType) const;
-	virtual IMessageStyleOptions styleOptions(int AMessageType, const QString &AContext = QString::null) const;
+	virtual IMessageStyleOptions styleOptions(int AMessageType, const QString &AContext = QString()) const;
 	//Other functions
 	virtual QString contactAvatar(const Jid &AContactJid) const;
 	virtual QString contactName(const Jid &AStreamJid, const Jid &AContactJid = Jid::null) const;
 	virtual QString contactIcon(const Jid &AStreamJid, const Jid &AContactJid = Jid::null) const;
 	virtual QString contactIcon(const Jid &AContactJid, int AShow, const QString &ASubscription, bool AAsk) const;
+	virtual QString contactAvatarById(const AccountId &AAccountId, const UserId &AUserId) const;
+	virtual QString contactNameById(const AccountId &AAccountId, const UserId &AUserId) const;
+	virtual QString contactIconById(const AccountId &AAccountId, const UserId &AUserId) const;
 	virtual QString dateSeparator(const QDate &ADate, const QDate &ACurDate = QDate::currentDate()) const;
 	virtual QString timeFormat(const QDateTime &ATime, const QDateTime &ACurTime = QDateTime::currentDateTime()) const;
 signals:
@@ -66,6 +71,8 @@ private:
 	IStatusIcons *FStatusIcons;
 	IVCardPlugin *FVCardPlugin;
 	IRosterPlugin *FRosterPlugin;
+	IPluginManager *FPluginManager;
+	QList<IProtocolMessaging *> FProtocolMessaging;
 	IOptionsManager *FOptionsManager;
 private:
 	mutable QMap<Jid, QString> FStreamNames;

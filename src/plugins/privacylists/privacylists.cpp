@@ -1,4 +1,5 @@
 #include "privacylists.h"
+#include <algorithm>
 
 #define SHC_PRIVACY         "/iq[@type='set']/query[@xmlns='"NS_JABBER_PRIVACY"']"
 #define SHC_ROSTER          "/iq/query[@xmlns='"NS_JABBER_ROSTER"']"
@@ -174,7 +175,7 @@ bool PrivacyLists::stanzaReadWrite(int AHandlerId, const Jid &AStreamJid, Stanza
 					bool denied = (stanzas & IPrivacyRule::PresencesOut)>0;
 					if (denied && !FOfflinePresences.value(AStreamJid).contains(ritem.itemJid))
 					{
-						presence->sendPresence(ritem.itemJid,IPresence::Offline,QString::null,0);
+						presence->sendPresence(ritem.itemJid,IPresence::Offline,QString(),0);
 						FOfflinePresences[AStreamJid]+=ritem.itemJid;
 					}
 					else if (!denied && directionIn && FOfflinePresences.value(AStreamJid).contains(ritem.itemJid))
@@ -240,7 +241,7 @@ void PrivacyLists::stanzaRequestResult(const Jid &AStreamJid, const Stanza &ASta
 					list.rules.append(rule);
 					ruleElem = ruleElem.nextSiblingElement("item");
 				}
-				qSort(list.rules);
+				std::sort(list.rules.begin(),list.rules.end());
 
 				if (!list.rules.isEmpty())
 					emit listLoaded(AStreamJid,list.name);
@@ -433,9 +434,18 @@ void PrivacyLists::setAutoListed(const Jid &AStreamJid, const QString &AGroup, c
 			}
 
 			IRoster *roster = FRosterPlugin!=NULL ? FRosterPlugin->findRoster(AStreamJid) : NULL;
-			QStringList groups = roster!=NULL ? (roster->groups()<<AGroup).toList() : QStringList(AGroup);
+			QStringList groups;
+			if (roster!=NULL)
+			{
+				QSet<QString> rosterGroups = roster->groups();
+				rosterGroups.insert(AGroup);
+				for (const QString &group : rosterGroups)
+					groups.append(group);
+			}
+			else
+				groups.append(AGroup);
 			QString groupWithDelim = roster!=NULL ? AGroup + roster->groupDelimiter() : AGroup;
-			qSort(groups);
+			std::sort(groups.begin(),groups.end());
 			foreach(QString group, groups)
 			{
 				if (group==AGroup || group.startsWith(groupWithDelim))
@@ -530,8 +540,8 @@ void PrivacyLists::setAutoPrivacy(const Jid &AStreamJid, const QString &AAutoLis
 		else
 		{
 			FApplyAutoLists.remove(AStreamJid);
-			setDefaultList(AStreamJid,QString::null);
-			setActiveList(AStreamJid,QString::null);
+			setDefaultList(AStreamJid,QString());
+			setActiveList(AStreamJid,QString());
 		}
 	}
 }
@@ -617,7 +627,7 @@ QString PrivacyLists::setActiveList(const Jid &AStreamJid, const QString &AList)
 			return set.id();
 		}
 	}
-	return QString::null;
+	return QString();
 }
 
 QString PrivacyLists::defaultList(const Jid &AStreamJid, bool APending) const
@@ -650,7 +660,7 @@ QString PrivacyLists::setDefaultList(const Jid &AStreamJid, const QString &AList
 			return set.id();
 		}
 	}
-	return QString::null;
+	return QString();
 }
 
 IPrivacyList PrivacyLists::privacyList(const Jid &AStreamJid, const QString &AList, bool APending) const
@@ -704,7 +714,7 @@ QString PrivacyLists::loadPrivacyList(const Jid &AStreamJid, const QString &ALis
 			return load.id();
 		}
 	}
-	return QString::null;
+	return QString();
 }
 
 QString PrivacyLists::savePrivacyList(const Jid &AStreamJid, const IPrivacyList &AList)
@@ -752,7 +762,7 @@ QString PrivacyLists::savePrivacyList(const Jid &AStreamJid, const IPrivacyList 
 		else
 			return QString("");
 	}
-	return QString::null;
+	return QString();
 }
 
 QString PrivacyLists::removePrivacyList(const Jid &AStreamJid, const QString &AList)
@@ -770,7 +780,7 @@ QString PrivacyLists::removePrivacyList(const Jid &AStreamJid, const QString &AL
 			return remove.id();
 		}
 	}
-	return QString::null;
+	return QString();
 }
 
 QDialog *PrivacyLists::showEditListsDialog(const Jid &AStreamJid, QWidget *AParent)
@@ -798,11 +808,11 @@ QString PrivacyLists::loadPrivacyLists(const Jid &AStreamJid)
 		load.addElement("query",NS_JABBER_PRIVACY);
 		if (FStanzaProcessor->sendStanzaRequest(this,AStreamJid,load,PRIVACY_TIMEOUT))
 		{
-			FLoadRequests.insert(load.id(),QString::null);
+			FLoadRequests.insert(load.id(),QString());
 			return load.id();
 		}
 	}
-	return QString::null;
+	return QString();
 }
 
 Menu *PrivacyLists::createPrivacyMenu(Menu *AMenu) const
@@ -1033,7 +1043,9 @@ void PrivacyLists::sendOnlinePresences(const Jid &AStreamJid, const IPrivacyList
 	IPresence *presence = FPresencePlugin!=NULL ? FPresencePlugin->findPresence(AStreamJid) : NULL;
 	if (presence)
 	{
-		QSet<Jid> denied = denyedContacts(AStreamJid,AAutoList,IPrivacyRule::PresencesOut).keys().toSet();
+		QSet<Jid> denied;
+		for (const Jid &jid : denyedContacts(AStreamJid,AAutoList,IPrivacyRule::PresencesOut).keys())
+			denied.insert(jid);
 		QSet<Jid> online = FOfflinePresences.value(AStreamJid) - denied;
 		if (presence->isOpen())
 		{
@@ -1054,12 +1066,14 @@ void PrivacyLists::sendOfflinePresences(const Jid &AStreamJid, const IPrivacyLis
 	IPresence *presence = FPresencePlugin!=NULL ? FPresencePlugin->findPresence(AStreamJid) : NULL;
 	if (presence)
 	{
-		QSet<Jid> denied = denyedContacts(AStreamJid,AAutoList,IPrivacyRule::PresencesOut).keys().toSet();
+		QSet<Jid> denied;
+		for (const Jid &jid : denyedContacts(AStreamJid,AAutoList,IPrivacyRule::PresencesOut).keys())
+			denied.insert(jid);
 		QSet<Jid> offline = denied - FOfflinePresences.value(AStreamJid);
 		if (presence->isOpen())
 		{
 			foreach(Jid contactJid, offline)
-				presence->sendPresence(contactJid,IPresence::Offline,QString::null,0);
+				presence->sendPresence(contactJid,IPresence::Offline,QString(),0);
 		}
 		FOfflinePresences[AStreamJid] += offline;
 	}
@@ -1090,7 +1104,9 @@ void PrivacyLists::updatePrivacyLabels(const Jid &AStreamJid)
 {
 	if (FRostersModel)
 	{
-		QSet<Jid> denied = denyedContacts(AStreamJid,privacyList(AStreamJid,activeList(AStreamJid))).keys().toSet();
+		QSet<Jid> denied;
+	for (const Jid &jid : denyedContacts(AStreamJid,privacyList(AStreamJid,activeList(AStreamJid))).keys())
+		denied.insert(jid);
 		QSet<Jid> deny = denied - FLabeledContacts.value(AStreamJid);
 		QSet<Jid> allow = FLabeledContacts.value(AStreamJid) - denied;
 
@@ -1101,7 +1117,7 @@ void PrivacyLists::updatePrivacyLabels(const Jid &AStreamJid)
 			setPrivacyLabel(AStreamJid,contactJid,false); }
 
 		IRosterIndex *streamIndex = FRostersModel->streamRoot(AStreamJid);
-		IRosterIndex *groupIndex = FRostersModel->findGroupIndex(RIT_GROUP_NOT_IN_ROSTER,QString::null,QString("::"),streamIndex);
+		IRosterIndex *groupIndex = FRostersModel->findGroupIndex(RIT_GROUP_NOT_IN_ROSTER,QString(),QString("::"),streamIndex);
 		if (groupIndex)
 		{
 			for (int i=0;i<groupIndex->childCount();i++)
@@ -1472,4 +1488,4 @@ void PrivacyLists::onMultiUserChatCreated(IMultiUserChat *AMultiChat)
 	setAutoListed(AMultiChat->streamJid(),AMultiChat->roomJid(),PRIVACY_LIST_CONFERENCES,true);
 }
 
-Q_EXPORT_PLUGIN2(plg_privacylists, PrivacyLists)
+

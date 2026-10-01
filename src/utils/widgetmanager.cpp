@@ -2,10 +2,9 @@
 
 #include <QStyle>
 #include <QApplication>
-#include <QDesktopWidget>
+#include <QScreen>
 
-#ifdef Q_WS_X11
-	#include <QX11Info>
+#ifdef Q_OS_LINUX
 	#include <X11/Xutil.h>
 	#include <X11/Xlib.h>
 	#include <X11/Xatom.h>
@@ -13,12 +12,30 @@
 	#define MESSAGE_SOURCE_OLD            0
 	#define MESSAGE_SOURCE_APPLICATION    1
 	#define MESSAGE_SOURCE_PAGER          2
-#endif //Q_WS_X11
+
+	static Display *x11Display()
+	{
+		static Display *display = XOpenDisplay(NULL);
+		return display;
+	}
+
+	static Window x11RootWindow()
+	{
+		Display *display = x11Display();
+		return display ? DefaultRootWindow(display) : 0;
+	}
+#endif //Q_OS_LINUX
 
 namespace WidgetManagerData 
 {
 	static bool isAlertEnabled = true;
 };
+
+static QRect availableGeometryFor(const QWidget *AWidget = NULL)
+{
+	QScreen *screen = AWidget ? AWidget->screen() : QGuiApplication::primaryScreen();
+	return screen ? screen->availableGeometry() : QRect();
+}
 
 class WindowSticker : 
 	public QObject
@@ -93,7 +110,7 @@ bool WindowSticker::eventFilter(QObject *AWatched, QEvent *AEvent)
 		const int delta = 15;
 		QPoint cursorPos = QCursor::pos();
 		QRect windowRect = FCurWindow->frameGeometry();
-		QRect desckRect = QApplication::desktop()->availableGeometry(FCurWindow);
+		QRect desckRect = availableGeometryFor(FCurWindow);
 
 		int borderTop = cursorPos.y() - windowRect.y();
 		int borderLeft = cursorPos.x() - windowRect.x();
@@ -134,13 +151,15 @@ bool WindowSticker::eventFilter(QObject *AWatched, QEvent *AEvent)
 
 void WidgetManager::raiseWidget(QWidget *AWidget)
 {
-#ifdef Q_WS_X11
+#ifdef Q_OS_LINUX
+	Display *dpy = x11Display();
+	if (!dpy)
+		return;
 	static Atom         NET_ACTIVE_WINDOW = 0;
 	XClientMessageEvent xev;
 
 	if (NET_ACTIVE_WINDOW == 0)
 	{
-		Display *dpy      = QX11Info::display();
 		NET_ACTIVE_WINDOW = XInternAtom(dpy, "_NET_ACTIVE_WINDOW", False);
 	}
 
@@ -149,11 +168,11 @@ void WidgetManager::raiseWidget(QWidget *AWidget)
 	xev.message_type = NET_ACTIVE_WINDOW;
 	xev.format       = 32;
 	xev.data.l[0]    = MESSAGE_SOURCE_PAGER;
-	xev.data.l[1]    = QX11Info::appUserTime();
+	xev.data.l[1]    = CurrentTime;
 	xev.data.l[2]    = xev.data.l[3] = xev.data.l[4] = 0;
 
-	XSendEvent(QX11Info::display(), QX11Info::appRootWindow(), False, SubstructureNotifyMask | SubstructureRedirectMask, (XEvent*)&xev);
-#endif //Q_WS_X11
+	XSendEvent(dpy, x11RootWindow(), False, SubstructureNotifyMask | SubstructureRedirectMask, (XEvent*)&xev);
+#endif //Q_OS_LINUX
 
 	AWidget->raise();
 }
@@ -186,7 +205,7 @@ void WidgetManager::showActivateRaiseWindow(QWidget *AWindow)
 
 void WidgetManager::setWindowSticky( QWidget *AWindow, bool ASticky )
 {
-#ifdef Q_WS_WIN
+#ifdef Q_OS_WIN
 	if (ASticky)
 		WindowSticker::instance()->insertWindow(AWindow);
 	else
@@ -215,9 +234,9 @@ void WidgetManager::setWidgetAlertEnabled(bool AEnabled)
 
 Qt::Alignment WidgetManager::windowAlignment(const QWidget *AWindow)
 {
-	Qt::Alignment align = 0;
+	Qt::Alignment align = Qt::Alignment();
 	QRect windowRect = AWindow->frameGeometry();
-	QRect screenRect = QApplication::desktop()->availableGeometry(AWindow);
+	QRect screenRect = availableGeometryFor(AWindow);
 	if (!screenRect.isEmpty() && !windowRect.isEmpty())
 	{
 		static const int delta = 4;
@@ -241,7 +260,7 @@ bool WidgetManager::alignWindow(QWidget *AWindow, Qt::Alignment AAlign)
 		QRect windowRect = AWindow->geometry();
 		if (!frameRect.isEmpty() && !windowRect.isEmpty() && frameRect.contains(windowRect))
 		{
-			QRect availRect = QApplication::desktop()->availableGeometry(AWindow);
+			QRect availRect = availableGeometryFor(AWindow);
 			QRect rect = alignRect(frameRect,availRect,AAlign);
 			rect.adjust(windowRect.left()-frameRect.left(),windowRect.top()-frameRect.top(),windowRect.right()-frameRect.right(),windowRect.bottom()-frameRect.bottom());
 			AWindow->setGeometry(rect);
@@ -275,6 +294,6 @@ QRect WidgetManager::alignRect(const QRect &ARect, const QRect &ABoundary, Qt::A
 
 QRect WidgetManager::alignGeometry(const QSize &ASize, const QWidget *AWidget, Qt::Alignment AAlign)
 {
-	QRect availRect = AWidget!=NULL ? QApplication::desktop()->availableGeometry(AWidget) : QApplication::desktop()->availableGeometry();
+	QRect availRect = availableGeometryFor(AWidget);
 	return QStyle::alignedRect(Qt::LeftToRight,AAlign,ASize.boundedTo(availRect.size()),availRect);
 }

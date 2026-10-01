@@ -44,6 +44,7 @@ class RosterItemExchange :
 	public IRostersDragDropHandler
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.rosteritemexchange")
 	Q_INTERFACES(IPlugin IRosterItemExchange IOptionsHolder IStanzaHandler IStanzaRequestOwner IViewDropHandler IRostersDragDropHandler);
 public:
 	RosterItemExchange();

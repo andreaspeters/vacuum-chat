@@ -15,6 +15,7 @@ class PEPManager :
 	public IStanzaHandler
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.pepmanager")
 	Q_INTERFACES(IPlugin IPEPManager IStanzaHandler);
 public:
 	PEPManager();

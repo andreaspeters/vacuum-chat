@@ -58,7 +58,7 @@ TabWindow::TabWindow(IMessageWidgets *AMessageWidgets, const QUuid &AWindowId)
 	Shortcuts::insertWidgetShortcut(SCT_TABWINDOW_DETACHTAB,this);
 	connect(Shortcuts::instance(),SIGNAL(shortcutActivated(const QString &, QWidget *)),SLOT(onShortcutActivated(const QString &, QWidget *)));
 
-	FOptionsNode = Options::node(OPV_MESSAGES_TABWINDOW_ITEM,FWindowId);
+	FOptionsNode = Options::node(OPV_MESSAGES_TABWINDOW_ITEM,FWindowId.toString());
 	onOptionsChanged(FOptionsNode.node("tabs-closable"));
 	onOptionsChanged(FOptionsNode.node("tabs-bottom"));
 	onOptionsChanged(FOptionsNode.node("show-indices"));
@@ -98,7 +98,7 @@ QString TabWindow::centralPageCaption() const
 	ITabPage *page = currentTabPage();
 	if (page)
 		return page->tabPageCaption();
-	return QString::null;
+	return QString();
 }
 
 void TabWindow::showWindow()
@@ -599,7 +599,7 @@ void TabWindow::onOptionsChanged(const OptionsNode &ANode)
 {
 	if (ANode.path() == OPV_MESSAGES_TABWINDOWS_DEFAULT)
 	{
-		FSetAsDefault->setChecked(FWindowId==ANode.value().toString());
+		FSetAsDefault->setChecked(FWindowId==QUuid::fromString(ANode.value().toString()));
 		FDeleteWindow->setVisible(!FSetAsDefault->isChecked());
 	}
 	else if (ANode.path() == OPV_MESSAGES_COMBINEWITHROSTER)
@@ -720,7 +720,7 @@ void TabWindow::onTabMenuActionTriggered(bool)
 		}
 		else if (tabAction == JoinTabAction)
 		{
-			ITabWindow *window = FMessageWidgets->getTabWindow(action->data(ADR_TABWINDOWID).toString());
+			ITabWindow *window = FMessageWidgets->getTabWindow(QUuid::fromString(action->data(ADR_TABWINDOWID).toString()));
 			removeTabPage(page);
 			window->addTabPage(page);
 			window->showWindow();

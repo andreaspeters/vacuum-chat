@@ -153,7 +153,7 @@ QString PrivateStorage::saveData(const Jid &AStreamJid, const QDomElement &AElem
 			return stanza.id();
 		}
 	}
-	return QString::null;
+	return QString();
 }
 
 QString PrivateStorage::loadData(const Jid &AStreamJid, const QString &ATagName, const QString &ANamespace)
@@ -170,7 +170,7 @@ QString PrivateStorage::loadData(const Jid &AStreamJid, const QString &ATagName,
 			return stanza.id();
 		}
 	}
-	return QString::null;
+	return QString();
 }
 
 QString PrivateStorage::removeData(const Jid &AStreamJid, const QString &ATagName, const QString &ANamespace)
@@ -192,7 +192,7 @@ QString PrivateStorage::removeData(const Jid &AStreamJid, const QString &ATagNam
 			return stanza.id();
 		}
 	}
-	return QString::null;
+	return QString();
 }
 
 void PrivateStorage::notifyDataChanged(const Jid &AStreamJid, const QString &ATagName, const QString &ANamespace)
@@ -289,4 +289,4 @@ void PrivateStorage::onPresenceAboutToClose(IPresence *APresence, int AShow, con
 	emit storageNotifyAboutToClose(APresence->streamJid());
 }
 
-Q_EXPORT_PLUGIN2(plg_privatestorage, PrivateStorage)
+

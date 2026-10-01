@@ -123,11 +123,13 @@ void EditProxyDialog::onDialogButtonBoxAccepted()
 {
 	updateProxyItem(ui.ltwProxyList->currentItem());
 
-	QSet<QUuid> oldProxy = FManager->proxyList().toSet();
+	QSet<QUuid> oldProxy;
+	for (const QUuid &proxyId : FManager->proxyList())
+		oldProxy.insert(proxyId);
 	for (int row = 0; row < ui.ltwProxyList->count(); row++)
 	{
 		QListWidgetItem *proxyItem = ui.ltwProxyList->item(row);
-		QUuid id = proxyItem->data(PDR_UUID).toString();
+		QUuid id = QUuid::fromString(proxyItem->data(PDR_UUID).toString());
 		if (!id.isNull())
 		{
 			IConnectionProxy proxy;
@@ -142,7 +144,7 @@ void EditProxyDialog::onDialogButtonBoxAccepted()
 		oldProxy -= id;
 	}
 
-	FManager->setDefaultProxy(ui.cmbDefault->itemData(ui.cmbDefault->currentIndex()).toString());
+	FManager->setDefaultProxy(QUuid::fromString(ui.cmbDefault->itemData(ui.cmbDefault->currentIndex()).toString()));
 
 	foreach(QUuid id, oldProxy)
 		FManager->removeProxy(id);

@@ -5,14 +5,17 @@
 #include <QList>
 #include <QDateTime>
 #include <interfaces/irostersmodel.h>
+#include <interfaces/identity.h>
 #include <utils/jid.h>
 #include <utils/menu.h>
 
-#define RECENTCONTACTS_UUID "{8AD56476-F9FC-4967-B196-78B616DDFD21}"
+#define RECENTCONTACTS_UUID QUuid("{8AD56476-F9FC-4967-B196-78B616DDFD21}")
 
 struct IRecentItem
 {
 	QString type;
+	AccountId accountId;
+	ConversationId conversationId;
 	Jid streamJid;
 	QString reference;
 	QDateTime activeTime;
@@ -21,12 +24,17 @@ struct IRecentItem
 	bool operator<(const IRecentItem &AOther) const {
 		if (type != AOther.type)
 			return type < AOther.type;
-		if (streamJid != AOther.streamJid)
+		if (accountId != AOther.accountId)
+			return accountId < AOther.accountId;
+		if (conversationId != AOther.conversationId)
+			return conversationId < AOther.conversationId;
+		if (accountId.isEmpty() && conversationId.isEmpty() && streamJid != AOther.streamJid)
 			return streamJid < AOther.streamJid;
 		return reference < AOther.reference;
 	}
 	bool operator==(const IRecentItem &AOther) const {
-		return type==AOther.type && streamJid==AOther.streamJid && reference==AOther.reference;
+		return type==AOther.type && accountId==AOther.accountId && conversationId==AOther.conversationId &&
+			(accountId.isEmpty() && conversationId.isEmpty() ? streamJid==AOther.streamJid : true) && reference==AOther.reference;
 	}
 };
 

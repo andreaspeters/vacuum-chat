@@ -14,7 +14,7 @@
 #define ADR_CONTACT_JID           Action::DR_Parametr1
 #define ADR_GROUP                 Action::DR_Parametr3
 
-Q_EXPORT_PLUGIN2(plg_otre2e, OtrE2E)
+
 
 	OtrE2E::OtrE2E()
 	: m_otr(0),

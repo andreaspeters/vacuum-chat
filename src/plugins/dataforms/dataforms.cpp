@@ -1,5 +1,6 @@
 #include "dataforms.h"
 
+#include <QRegularExpressionValidator>
 #include <QImageReader>
 
 DataForms::DataForms()
@@ -105,7 +106,7 @@ IDataMedia DataForms::dataMedia(const QDomElement &AMediaElem) const
 			uri.url = uriElem.text().trimmed();
 			if (!uri.url.isEmpty())
 			{
-				QStringList params = uriElem.attribute("type").split(';',QString::SkipEmptyParts);
+				QStringList params = uriElem.attribute("type").split(';',Qt::SkipEmptyParts);
 				foreach(QString param, params)
 				{
 					if (param.startsWith("codecs="))
@@ -204,7 +205,7 @@ IDataTable DataForms::dataTable(const QDomElement &ATableElem) const
 		{
 			QStringList rowValues;
 			for (int i=0; i<columnVars.count(); i++)
-				rowValues.append(QString::null);
+				rowValues.append(QString());
 			QDomElement fieldElem = itemElem.firstChildElement("field");
 			while (!fieldElem.isNull())
 			{
@@ -527,7 +528,7 @@ bool DataForms::isDataValid(const IDataValidate &AValidate, const QString &AValu
 		}
 		else if (valid && AValidate.method == DATAVALIDATE_METHOD_REGEXP)
 		{
-			valid &= AValidate.regexp.indexIn(AValue) >= 0;
+			valid &= AValidate.regexp.match(AValue).hasMatch();
 		}
 	}
 	else if (AValidate.type == DATAVALIDATE_TYPE_TIME)
@@ -541,7 +542,7 @@ bool DataForms::isDataValid(const IDataValidate &AValidate, const QString &AValu
 		}
 		else if (valid && AValidate.method == DATAVALIDATE_METHOD_REGEXP)
 		{
-			valid &= AValidate.regexp.indexIn(AValue) >= 0;
+			valid &= AValidate.regexp.match(AValue).hasMatch();
 		}
 	}
 	else if (AValidate.type == DATAVALIDATE_TYPE_DATETIME)
@@ -555,7 +556,7 @@ bool DataForms::isDataValid(const IDataValidate &AValidate, const QString &AValu
 		}
 		else if (valid && AValidate.method == DATAVALIDATE_METHOD_REGEXP)
 		{
-			valid &= AValidate.regexp.indexIn(AValue) >= 0;
+			valid &= AValidate.regexp.match(AValue).hasMatch();
 		}
 	}
 	else if (AValidate.type == DATAVALIDATE_TYPE_URI)
@@ -563,14 +564,14 @@ bool DataForms::isDataValid(const IDataValidate &AValidate, const QString &AValu
 		valid = QUrl(AValue).isValid();
 		if (valid && AValidate.method == DATAVALIDATE_METHOD_REGEXP)
 		{
-			valid &= AValidate.regexp.indexIn(AValue) >= 0;
+			valid &= AValidate.regexp.match(AValue).hasMatch();
 		}
 	}
 	else
 	{
 		if (AValidate.method == DATAVALIDATE_METHOD_REGEXP)
 		{
-			valid &= AValidate.regexp.indexIn(AValue) >= 0;
+			valid &= AValidate.regexp.match(AValue).hasMatch();
 		}
 	}
 	return valid;
@@ -944,8 +945,7 @@ QValidator *DataForms::dataValidator(const IDataValidate &AValidate, QObject *AP
 	}
 	else if (AValidate.method == DATAVALIDATE_METHOD_REGEXP)
 	{
-		QRegExpValidator *regexpValidator = new QRegExpValidator(AParent);
-		regexpValidator->setRegExp(AValidate.regexp);
+		QRegularExpressionValidator *regexpValidator = new QRegularExpressionValidator(AValidate.regexp,AParent);
 		validator = regexpValidator;
 	}
 	return validator;
@@ -1097,4 +1097,4 @@ uint qHash(const QUrl &key)
 }
 #endif
 
-Q_EXPORT_PLUGIN2(plg_dataforms, DataForms);
+

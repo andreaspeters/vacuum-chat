@@ -4,10 +4,11 @@
 #include <QTextDocument>
 #include <interfaces/irostersmodel.h>
 #include <interfaces/inotifications.h>
+#include <interfaces/iprotocolmessaging.h>
 #include <utils/jid.h>
 #include <utils/message.h>
 
-#define MESSAGEPROCESSOR_UUID "{1282bedb-f58f-48e8-96f6-62abb15dc6e1}"
+#define MESSAGEPROCESSOR_UUID QUuid("{1282bedb-f58f-48e8-96f6-62abb15dc6e1}")
 
 class IMessageHandler
 {
@@ -48,16 +49,18 @@ public:
 public:
 	virtual QObject *instance() = 0;
 	virtual bool sendMessage(const Jid &AStreamJid, Message &AMessage, int ADirection) =0;
+	virtual void processProtocolMessage(const BasicMessage &AMessage) =0;
 	virtual bool processMessage(const Jid &AStreamJid, Message &AMessage, int ADirection) =0;
 	virtual bool displayMessage(const Jid &AStreamJid, Message &AMessage, int ADirection) =0;
+	virtual void displayConversationHistory(const Jid &AStreamJid, const Jid &AContactJid) =0;
 	virtual QList<int> notifiedMessages() const =0;
 	virtual Message notifiedMessage(int AMesssageId) const =0;
 	virtual int notifyByMessage(int AMessageId) const =0;
 	virtual int messageByNotify(int ANotifyId) const =0;
 	virtual void showNotifiedMessage(int AMessageId) =0;
 	virtual void removeMessageNotify(int AMessageId) =0;
-	virtual void textToMessage(Message &AMessage, const QTextDocument *ADocument, const QString &ALang = QString::null) const =0;
-	virtual void messageToText(QTextDocument *ADocument, const Message &AMessage, const QString &ALang = QString::null) const =0;
+	virtual void textToMessage(Message &AMessage, const QTextDocument *ADocument, const QString &ALang = QString()) const =0;
+	virtual void messageToText(QTextDocument *ADocument, const Message &AMessage, const QString &ALang = QString()) const =0;
 	virtual bool createMessageWindow(const Jid &AStreamJid, const Jid &AContactJid, Message::MessageType AType, int AShowMode) const =0;
 	virtual void insertMessageHandler(int AOrder, IMessageHandler *AHandler) =0;
 	virtual void removeMessageHandler(int AOrder, IMessageHandler *AHandler) =0;

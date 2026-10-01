@@ -15,5 +15,6 @@
 #define NNT_BIRTHDAY                  "Birthday"
 #define NNT_CHATSTATE_TYPING          "ChatStateTyping"
 #define NNT_ROSTEREXCHANGE_REQUEST    "RosterExchangeRequest"
+#define NNT_PROTOCOL_NOTIFICATION    "ProtocolNotification"
 
 #endif // DEF_NOTIFICATIONTYPES_H

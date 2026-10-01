@@ -24,6 +24,7 @@ class SocksStreams :
 	public ISocksStreams
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.socksstreams")
 	Q_INTERFACES(IPlugin ISocksStreams IDataStreamMethod);
 public:
 	SocksStreams();

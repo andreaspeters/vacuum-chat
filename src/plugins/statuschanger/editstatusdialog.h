@@ -9,7 +9,7 @@
 #include <interfaces/istatuschanger.h>
 #include <interfaces/ipresence.h>
 #include <utils/iconstorage.h>
-#include "ui_editstatusdialog.h"
+#include <ui_editstatusdialog.h>
 
 using namespace Ui;
 

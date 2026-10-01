@@ -15,5 +15,6 @@
 #define NTO_CAPTCHA_REQUEST                    600
 #define NTO_SESSION_NEGOTIATION                650
 #define NTO_CONNECTION_ERROR                   700
+#define NTO_PROTOCOL_NOTIFICATION              750
 
 #endif //  DEF_NOTIFICATIONTYPEORDERS_H

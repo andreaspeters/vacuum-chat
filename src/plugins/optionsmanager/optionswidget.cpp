@@ -5,7 +5,7 @@
 #include <QIntValidator>
 #include <QDoubleValidator>
 
-// фактор растяжения для текста выводимого рядом с элементом настроек
+// пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 #define CAPTION_STRATCH 3
 
 OptionsWidget::OptionsWidget(const OptionsNode &ANode, const QString &ACaption, QWidget *AParent) : QWidget(AParent)
@@ -88,7 +88,7 @@ OptionsWidget::OptionsWidget(const OptionsNode &ANode, const QString &ACaption, 
 	}
 
 	setLayout(FLayout);
-	layout()->setMargin(0);
+	layout()->setContentsMargins(0,0,0,0);
 }
 
 OptionsWidget::~OptionsWidget()

@@ -18,6 +18,7 @@ class FileMessageArchive :
 	public IFileMessageArchive
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.filemessagearchive")
 	Q_INTERFACES(IPlugin IArchiveEngine IFileMessageArchive);
 public:
 	FileMessageArchive();

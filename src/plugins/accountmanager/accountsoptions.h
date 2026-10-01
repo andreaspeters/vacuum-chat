@@ -7,7 +7,7 @@
 #include <interfaces/iaccountmanager.h>
 #include <interfaces/ioptionsmanager.h>
 #include <utils/options.h>
-#include "ui_accountsoptions.h"
+#include <ui_accountsoptions.h>
 #include "accountmanager.h"
 
 class AccountManager;
@@ -32,12 +32,14 @@ signals:
 protected:
 	QTreeWidgetItem *appendAccount(const QUuid &AAccountId, const QString &AName);
 	void removeAccount(const QUuid &AAccountId);
+	QString accountIdentifier(IAccount *AAccount) const;
 protected slots:
 	void onAddButtonClicked(bool);
 	void onRemoveButtonClicked(bool);
 	void onItemDoubleClicked(QTreeWidgetItem *AItem, int AColumn);
 	void onAccountOptionsChanged(IAccount *AAcount, const OptionsNode &ANode);
 private:
+	QString formatAccountAddress(IAccount *AAccount) const;
 	Ui::AccountsOptionsClass ui;
 private:
 	AccountManager *FManager;

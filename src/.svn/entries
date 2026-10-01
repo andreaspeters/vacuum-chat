@@ -1,129 +1,0 @@
-10
-
-dir
-2082
-http://vacuum-im.googlecode.com/svn/trunk/src
-http://vacuum-im.googlecode.com/svn
-
-
-
-2013-01-23T14:52:10.264484Z
-2082
-potapov.s.a
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-8ee3b2d0-dc07-11de-995a-ab19b33c1a40
-
-tools
-dir
-
-utils
-dir
-
-translations
-dir
-
-plugins
-dir
-
-interfaces
-dir
-
-loader
-dir
-
-src.pro
-file
-
-
-
-
-2013-01-25T21:50:06.000000Z
-b502be86f1bf6f3736319abb48212561
-2012-09-05T19:07:50.281498Z
-1912
-potapov.s.a
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-119
-
-libs
-dir
-
-thirdparty
-dir
-
-definitions
-dir
-
-make
-dir
-
-CMakeLists.txt
-file
-
-
-
-
-2013-01-25T21:50:06.000000Z
-d6d289a1e739459da65c22ea0f656949
-2012-09-05T19:07:50.281498Z
-1912
-potapov.s.a
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-186
-
-packages
-dir
-

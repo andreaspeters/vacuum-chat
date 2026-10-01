@@ -4,8 +4,8 @@
 
 bool SortFilterProxyModel::lessThan(const QModelIndex &ALeft, const QModelIndex &ARight) const
 {
-	bool leftHasChild = ALeft.child(0,0).isValid();
-	bool rightHasChild = ARight.child(0,0).isValid();
+	bool leftHasChild = ALeft.model()->index(0,0,ALeft).isValid();
+	bool rightHasChild = ARight.model()->index(0,0,ARight).isValid();
 	
 	if (leftHasChild && !rightHasChild)
 		return true;
@@ -32,8 +32,8 @@ ShortcutOptionsWidget::ShortcutOptionsWidget(QWidget *AParent) : QWidget(AParent
 	ui.trvShortcuts->setItemDelegate(new ShortcutOptionsDelegate(ui.trvShortcuts));
 	ui.trvShortcuts->setModel(&FSortModel);
 	ui.trvShortcuts->header()->setSortIndicatorShown(false);
-	ui.trvShortcuts->header()->setResizeMode(COL_NAME,QHeaderView::Stretch);
-	ui.trvShortcuts->header()->setResizeMode(COL_KEY,QHeaderView::ResizeToContents);
+	ui.trvShortcuts->header()->setSectionResizeMode(COL_NAME,QHeaderView::Stretch);
+	ui.trvShortcuts->header()->setSectionResizeMode(COL_KEY,QHeaderView::ResizeToContents);
 	ui.trvShortcuts->sortByColumn(COL_NAME,Qt::AscendingOrder);
 	ui.trvShortcuts->expandAll();
 
@@ -128,9 +128,9 @@ QStandardItem *ShortcutOptionsWidget::createTreeRow(const QString &AId, QStandar
 	{
 		int dotIndex = AId.lastIndexOf('.');
 		QString actionName = dotIndex>0 ? AId.mid(dotIndex+1) : AId;
-		QString actionPath = dotIndex>0 ? AId.left(dotIndex) : QString::null;
+		QString actionPath = dotIndex>0 ? AId.left(dotIndex) : QString();
 		
-		QString actionText = AGroup ? Shortcuts::groupDescription(AId) : QString::null;
+		QString actionText = AGroup ? Shortcuts::groupDescription(AId) : QString();
 		nameItem = new QStandardItem(!actionText.isEmpty() ? actionText : actionName);
 		nameItem->setFlags(Qt::ItemIsEnabled|Qt::ItemIsSelectable);
 		nameItem->setData(AGroup ? Shortcuts::groupOrder(AId) : 0, MDR_SORTROLE);
@@ -181,7 +181,7 @@ void ShortcutOptionsWidget::onClearClicked()
 	if (Shortcuts::shortcuts().contains(shortcut))
 	{
 		QStandardItem *keyItem = nameItem->parent()->child(nameItem->row(),COL_KEY);
-		keyItem->setText(QString::null);
+		keyItem->setText(QString());
 		keyItem->setData(QKeySequence(QKeySequence::UnknownKey),MDR_ACTIVE_KEYSEQUENCE);
 	}
 	ui.trvShortcuts->setFocus();
@@ -271,7 +271,7 @@ void ShortcutOptionsWidget::onModelItemChanged(QStandardItem *AItem)
 
 void ShortcutOptionsWidget::onIndexDoubleClicked(const QModelIndex &AIndex)
 {
-	QModelIndex editIndex = AIndex.parent().child(AIndex.row(),1);
+	QModelIndex editIndex = AIndex.model()->index(AIndex.row(),1,AIndex.parent());
 	if (editIndex.isValid() && (editIndex.flags() & Qt::ItemIsEditable)>0)
 		ui.trvShortcuts->edit(editIndex);
 }

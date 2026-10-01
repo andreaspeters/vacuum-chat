@@ -6,6 +6,7 @@
 #include <QTextBrowser>
 #include <QTextDocument>
 #include <interfaces/ipluginmanager.h>
+#include <interfaces/identity.h>
 #include <interfaces/imainwindow.h>
 #include <interfaces/imessagestyles.h>
 #include <utils/jid.h>
@@ -16,7 +17,7 @@
 #include <utils/toolbarchanger.h>
 #include <utils/statusbarchanger.h>
 
-#define MESSAGEWIDGETS_UUID "{89de35ee-bd44-49fc-8495-edd2cfebb685}"
+#define MESSAGEWIDGETS_UUID QUuid("{89de35ee-bd44-49fc-8495-edd2cfebb685}")
 
 class IInfoWidget
 {
@@ -64,6 +65,9 @@ public:
 	virtual void appendHtml(const QString &AHtml, const IMessageContentOptions &AOptions) =0;
 	virtual void appendText(const QString &AText, const IMessageContentOptions &AOptions) =0;
 	virtual void appendMessage(const Message &AMessage, const IMessageContentOptions &AOptions) =0;
+	virtual bool replaceMessage(const QString &AMessageId, const QString &AHtml) =0;
+	virtual bool setMessageDecoration(const QString &AMessageId, const QString &ADecorationId,
+		const QString &AHtml) =0;
 	virtual void contextMenuForView(const QPoint &APosition, const QTextDocumentFragment &AText, Menu *AMenu) =0;
 protected:
 	virtual void streamJidChanged(const Jid &ABefore) =0;
@@ -261,6 +265,8 @@ class IChatWindow :
 	public ITabPage
 {
 public:
+	virtual AccountId accountId() const =0;
+	virtual ConversationId conversationId() const =0;
 	virtual const Jid &streamJid() const =0;
 	virtual const Jid &contactJid() const =0;
 	virtual void setContactJid(const Jid &AContactJid) =0;
@@ -270,6 +276,7 @@ public:
 	virtual IMenuBarWidget *menuBarWidget() const =0;
 	virtual IToolBarWidget *toolBarWidget() const =0;
 	virtual IStatusBarWidget *statusBarWidget() const =0;
+	virtual void setSidebarWidget(QWidget *AWidget) =0;
 	virtual void updateWindow(const QIcon &AIcon, const QString &ACaption, const QString &ATitle, const QString &AToolTip) =0;
 protected:
 	virtual void messageReady() =0;
@@ -347,8 +354,11 @@ public:
 	virtual QObject *instance() = 0;
 	virtual IPluginManager *pluginManager() const =0;
 	virtual IInfoWidget *newInfoWidget(const Jid &AStreamJid, const Jid &AContactJid, QWidget *AParent) =0;
+	virtual IInfoWidget *newInfoWidget(const AccountId &AAccountId, const ConversationId &AConversationId, QWidget *AParent) =0;
 	virtual IViewWidget *newViewWidget(const Jid &AStreamJid, const Jid &AContactJid, QWidget *AParent) =0;
+	virtual IViewWidget *newViewWidget(const AccountId &AAccountId, const ConversationId &AConversationId, QWidget *AParent) =0;
 	virtual IEditWidget *newEditWidget(const Jid &AStreamJid, const Jid &AContactJid, QWidget *AParent) =0;
+	virtual IEditWidget *newEditWidget(const AccountId &AAccountId, const ConversationId &AConversationId, QWidget *AParent) =0;
 	virtual IReceiversWidget *newReceiversWidget(const Jid &AStreamJid, QWidget *AParent) =0;
 	virtual IMenuBarWidget *newMenuBarWidget(IInfoWidget *AInfo, IViewWidget *AView, IEditWidget *AEdit, IReceiversWidget *AReceivers, QWidget *AParent) =0;
 	virtual IToolBarWidget *newToolBarWidget(IInfoWidget *AInfo, IViewWidget *AView, IEditWidget *AEdit, IReceiversWidget *AReceivers, QWidget *AParent) =0;
@@ -358,6 +368,8 @@ public:
 	virtual IMessageWindow *getMessageWindow(const Jid &AStreamJid, const Jid &AContactJid, IMessageWindow::Mode AMode) =0;
 	virtual IMessageWindow *findMessageWindow(const Jid &AStreamJid, const Jid &AContactJid) const =0;
 	virtual QList<IChatWindow *> chatWindows() const =0;
+	virtual IChatWindow *getConversationWindow(const AccountId &AAccountId, const ConversationId &AConversationId) =0;
+	virtual IChatWindow *findConversationWindow(const AccountId &AAccountId, const ConversationId &AConversationId) const =0;
 	virtual IChatWindow *getChatWindow(const Jid &AStreamJid, const Jid &AContactJid) =0;
 	virtual IChatWindow *findChatWindow(const Jid &AStreamJid, const Jid &AContactJid) const =0;
 	virtual QList<QUuid> tabWindowList() const =0;

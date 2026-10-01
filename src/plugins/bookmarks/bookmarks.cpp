@@ -3,6 +3,7 @@
 #include <QInputDialog>
 #include <QDesktopServices>
 #include <QItemEditorFactory>
+#include <QUrlQuery>
 
 #define PST_BOOKMARKS                    "storage"
 
@@ -156,7 +157,7 @@ bool Bookmarks::initSettings()
 QMultiMap<int, IOptionsWidget *> Bookmarks::optionsWidgets(const QString &ANodeId, QWidget *AParent)
 {
 	QMultiMap<int, IOptionsWidget *> widgets;
-	QStringList nodeTree = ANodeId.split(".",QString::SkipEmptyParts);
+	QStringList nodeTree = ANodeId.split(".",Qt::SkipEmptyParts);
 	if (FOptionsManager)
 	{
 		if (nodeTree.count()==2 && nodeTree.at(0)==OPN_ACCOUNTS)
@@ -328,8 +329,12 @@ void Bookmarks::updateConferenceIndexes(const Jid &AStreamJid)
 {
 	if (FMultiChatPlugin)
 	{
-		QSet<IBookmark> newBookmarks = FBookmarks.value(AStreamJid).toSet();
-		QSet<IBookmark> curBookarks = FBookmarkIndexes.value(AStreamJid).values().toSet();
+		QSet<IBookmark> newBookmarks;
+		for (const IBookmark &bookmark : FBookmarks.value(AStreamJid))
+			newBookmarks.insert(bookmark);
+		QSet<IBookmark> curBookarks;
+		for (const IBookmark &bookmark : FBookmarkIndexes.value(AStreamJid).values())
+			curBookarks.insert(bookmark);
 		QSet<IBookmark> removeBookmarks = curBookarks - newBookmarks;
 
 		foreach(IBookmark bookmark, newBookmarks)
@@ -905,21 +910,23 @@ void Bookmarks::onDiscoWindowAddBookmarkActionTriggered(bool)
 		{
 			QUrl url;
 			url.setScheme("xmpp");
-			url.setQueryDelimiters('=',';');
+			QUrlQuery query;
+			query.setQueryDelimiters('=',';');
 			url.setPath(discoJid);
 
-			QList< QPair<QString, QString> > queryItems;
-			queryItems << qMakePair(QString("disco"),QString()) << qMakePair(QString("type"),QString("get")) << qMakePair(QString("request"),QString("items"));
+			query.addQueryItem("disco",QString());
+			query.addQueryItem("type","get");
+			query.addQueryItem("request","items");
 			if (!discoNode.isEmpty())
-				queryItems << qMakePair(QString("node"),discoNode);
-			url.setQueryItems(queryItems);
+				query.addQueryItem("node",discoNode);
+			url.setQuery(query);
 
 			IBookmark bookmark;
 			bookmark.type = IBookmark::Url;
 			bookmark.name = "XMPP: ";
-			bookmark.name += !discoName.isEmpty() ? discoName + " | " : QString::null;
+			bookmark.name += !discoName.isEmpty() ? discoName + " | " : QString();
 			bookmark.name += discoJid;
-			bookmark.name += !discoNode.isEmpty() ? " | " + discoNode : QString::null;
+			bookmark.name += !discoNode.isEmpty() ? " | " + discoNode : QString();
 			bookmark.url.url = url.toString().replace("?disco=;","?disco;");
 
 			if (execEditBookmarkDialog(&bookmark,NULL) == QDialog::Accepted)
@@ -965,8 +972,8 @@ uint qHash(const IBookmark &AKey)
 	case IBookmark::Conference:
 		return qHash(AKey.conference.roomJid);
 	default:
-		return qHash(QString::null);
+		return qHash(QString());
 	}
 }
 
-Q_EXPORT_PLUGIN2(plg_bookmarks, Bookmarks)
+

@@ -7,7 +7,7 @@
 #include <definitions/menuicons.h>
 #include <interfaces/ioptionsmanager.h>
 #include <utils/iconstorage.h>
-#include "ui_editprofilesdialog.h"
+#include <ui_editprofilesdialog.h>
 
 class EditProfilesDialog :
 			public QDialog

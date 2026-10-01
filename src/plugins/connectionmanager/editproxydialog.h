@@ -3,7 +3,7 @@
 
 #include <QDialog>
 #include <interfaces/iconnectionmanager.h>
-#include "ui_editproxydialog.h"
+#include <ui_editproxydialog.h>
 
 class EditProxyDialog :
 			public QDialog

@@ -19,6 +19,7 @@ class DefaultConnectionPlugin :
 			public IDefaultConnectionPlugin
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.defaultconnection")
 	Q_INTERFACES(IPlugin IConnectionPlugin IDefaultConnectionPlugin);
 public:
 	DefaultConnectionPlugin();

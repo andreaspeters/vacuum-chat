@@ -29,7 +29,10 @@
 
 struct OptionsFormItem
 {
-	OptionsFormItem(QString ANode = QString::null, QString ALabel = QString::null) {
+	OptionsFormItem(QString ANode = QString(), QString ALabel = QString()) { {
+		node = ANode;
+		label = ALabel;
+	}
 		node = ANode;
 		label = ALabel;
 	}
@@ -221,7 +224,7 @@ QString RemoteControl::commandName(const QString &ANode) const
 		return tr("Set options");
 	if (ANode == COMMAND_NODE_FORWARD_MESSAGES)
 		return tr("Forward unread messages");
-	return QString::null;
+	return QString();
 }
 
 bool RemoteControl::receiveCommandRequest(const ICommandRequest &ARequest)
@@ -661,7 +664,7 @@ bool RemoteControl::processForwardMessages(const ICommandRequest &ARequest)
 				foreach(Message message, notifiedMessages(ARequest.streamJid,senderJid))
 				{
 					message.detach();
-					message.setFrom(QString::null);
+					message.setFrom(QString());
 					message.setTo(ARequest.contactJid.full());
 					message.setDateTime(message.dateTime(),true);
 					
@@ -713,4 +716,3 @@ QList<Message> RemoteControl::notifiedMessages(const Jid &AStreamJid, const Jid 
 	return messages;
 }
 
-Q_EXPORT_PLUGIN2(plg_remotecontrol, RemoteControl)

@@ -3,9 +3,10 @@
 
 #include <QIcon>
 #include <QString>
+#include <interfaces/identity.h>
 #include <utils/jid.h>
 
-#define STATUSICONS_UUID "{E477B0F3-5683-4a4f-883D-7E7D1ADF25FE}"
+#define STATUSICONS_UUID QUuid("{E477B0F3-5683-4a4f-883D-7E7D1ADF25FE}")
 
 class IStatusIcons
 {
@@ -21,6 +22,8 @@ public:
 	virtual void insertRule(const QString &APattern, const QString &ASubStorage, RuleType ARuleType) =0;
 	virtual void removeRule(const QString &APattern, RuleType ARuleType) =0;
 	virtual QIcon iconByJid(const Jid &AStreamJid, const Jid &AContactJid) const =0;
+	virtual QIcon iconByIdentity(const AccountId &AAccountId, const UserId &AUserId) const =0;
+	virtual QString iconKeyByIdentity(const AccountId &AAccountId, const UserId &AUserId) const =0;
 	virtual QIcon iconByStatus(int AShow, const QString &ASubscription, bool AAsk) const =0;
 	virtual QIcon iconByJidStatus(const Jid &AContactJid, int AShow, const QString &ASubscription, bool AAsk) const =0;
 	virtual QString iconsetByJid(const Jid &AContactJid) const =0;

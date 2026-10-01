@@ -26,7 +26,6 @@
 #define QXTGLOBALSHORTCUT_P_H
 
 #include "qxtglobalshortcut.h"
-#include <QAbstractEventDispatcher>
 #include <QKeySequence>
 #include <QHash>
 
@@ -45,11 +44,9 @@ public:
     bool unsetShortcut();
 
     static bool error;
-#ifndef Q_WS_MAC
-    static int ref;
-    static QAbstractEventDispatcher::EventFilter prevEventFilter;
+#ifndef Q_OS_MACOS
     static bool eventFilter(void* message);
-#endif // Q_WS_MAC
+#endif // Q_OS_MACOS
 
     static void activateShortcut(quint32 nativeKey, quint32 nativeMods);
 

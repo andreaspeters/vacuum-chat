@@ -4,7 +4,7 @@
 It's dirty port of psi OTR plugin to vacuum IM performed by Naoji Minami
 */
 
-#define OTRE2E_UUID "{8592e3c3-ef5e-42a9-91c9-faf1ed9a91c5}"
+#define OTRE2E_UUID QUuid("{8592e3c3-ef5e-42a9-91c9-faf1ed9a91c5}")
 
 #include <QMultiMap>
 
@@ -53,6 +53,7 @@ class OtrE2E
 	public IOTRDataSource
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.vacuum_otr")
 
 	Q_INTERFACES(IPlugin IOptionsHolder IArchiveHandler);
 public:

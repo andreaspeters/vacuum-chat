@@ -8,7 +8,7 @@
 #include <interfaces/imessagewidgets.h>
 #include <interfaces/imessageprocessor.h>
 #include <utils/textmanager.h>
-#include "ui_viewwidget.h"
+#include <ui_viewwidget.h>
 
 class ViewWidget :
 			public QWidget,
@@ -18,6 +18,7 @@ class ViewWidget :
 	Q_INTERFACES(IViewWidget);
 public:
 	ViewWidget(IMessageWidgets *AMessageWidgets, const Jid &AStreamJid, const Jid &AContactJid, QWidget *AParent);
+	ViewWidget(IMessageWidgets *AMessageWidgets, const AccountId &AAccountId, const ConversationId &AConversationId, QWidget *AParent);
 	~ViewWidget();
 	virtual QWidget *instance() { return this; }
 	virtual const Jid &streamJid() const { return FStreamJid; }
@@ -30,6 +31,9 @@ public:
 	virtual void appendHtml(const QString &AHtml, const IMessageContentOptions &AOptions);
 	virtual void appendText(const QString &AText, const IMessageContentOptions &AOptions);
 	virtual void appendMessage(const Message &AMessage, const IMessageContentOptions &AOptions);
+	virtual bool replaceMessage(const QString &AMessageId, const QString &AHtml);
+	virtual bool setMessageDecoration(const QString &AMessageId, const QString &ADecorationId,
+		const QString &AHtml);
 	virtual void contextMenuForView(const QPoint &APosition, const QTextDocumentFragment &ASelection, Menu *AMenu);
 signals:
 	void streamJidChanged(const Jid &ABefore);
@@ -58,8 +62,12 @@ private:
 private:
 	Jid FStreamJid;
 	Jid FContactJid;
+	AccountId FAccountId;
+	ConversationId FConversationId;
 	QWidget *FStyleWidget;
 	QList<IViewDropHandler *> FActiveDropHandlers;
+	QMap<QString, QPair<int, int> > FMessageRanges;
+	QMap<QString, QMap<QString, QPair<int, int> > > FMessageDecorations;
 };
 
 #endif // VIEWWIDGET_H

@@ -11,7 +11,7 @@ DataFieldWidget::DataFieldWidget(IDataForms *ADataForms, const IDataField &AFiel
 	FMediaWidget = NULL;
 
 	setLayout(new QVBoxLayout(this));
-	layout()->setMargin(0);
+	layout()->setContentsMargins(0,0,0,0);
 
 	if (FDataForms->isMediaValid(AField.media))
 	{
@@ -20,7 +20,7 @@ DataFieldWidget::DataFieldWidget(IDataForms *ADataForms, const IDataField &AFiel
 	}
 
 	QString label = !FField.label.isEmpty() ? FField.label : FField.desc;
-	QString desc = !FField.desc.isEmpty() ? QString("<span>%1</span>").arg(Qt::escape(FField.desc)) : QString::null;
+	QString desc = !FField.desc.isEmpty() ? QString("<span>%1</span>").arg(FField.desc.toHtmlEscaped()) : QString();
 	if (!FReadOnly && FField.type == DATAFIELD_TYPE_BOOLEAN)
 	{
 		FCheckBox = new QCheckBox(this);
@@ -174,7 +174,7 @@ QVariant DataFieldWidget::value() const
 	}
 	else if (FField.type == DATAFIELD_TYPE_JIDMULTI)
 	{
-		QStringList values = FTextEdit->toPlainText().split("\n", QString::SkipEmptyParts);
+		QStringList values = FTextEdit->toPlainText().split("\n", Qt::SkipEmptyParts);
 		for (int i = 0; i < values.count(); i++)
 			values[i] = Jid::fromUserInput(values.at(i)).full();
 		return values;
@@ -202,7 +202,7 @@ QVariant DataFieldWidget::value() const
 	{
 		QStringList values;
 		if (!FTextEdit->document()->isEmpty())
-			values = FTextEdit->toPlainText().split("\n", QString::KeepEmptyParts);
+			values = FTextEdit->toPlainText().split("\n", Qt::KeepEmptyParts);
 		return values;
 	}
 	else if (FField.validate.type == DATAVALIDATE_TYPE_DATE)

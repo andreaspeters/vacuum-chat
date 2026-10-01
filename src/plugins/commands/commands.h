@@ -29,6 +29,7 @@ class Commands :
 			public IDiscoFeatureHandler
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.commands")
 	Q_INTERFACES(IPlugin ICommands IStanzaHandler IStanzaRequestOwner IXmppUriHandler IDiscoHandler IDiscoFeatureHandler);
 public:
 	Commands();

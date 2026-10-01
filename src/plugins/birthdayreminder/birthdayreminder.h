@@ -33,6 +33,7 @@ class BirthdayReminder :
 	public IBirthdayReminder
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.birthdayreminder")
 	Q_INTERFACES(IPlugin IBirthdayReminder);
 public:
 	BirthdayReminder();

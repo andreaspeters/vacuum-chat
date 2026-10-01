@@ -10,7 +10,7 @@
 #include <utils/options.h>
 #include <utils/shortcuts.h>
 #include <utils/toolbarchanger.h>
-#include "ui_editwidget.h"
+#include <ui_editwidget.h>
 
 class EditWidget :
 			public QWidget,
@@ -20,6 +20,7 @@ class EditWidget :
 	Q_INTERFACES(IEditWidget);
 public:
 	EditWidget(IMessageWidgets *AMessageWidgets, const Jid &AStreamJid, const Jid &AContactJid, QWidget *AParent);
+	EditWidget(IMessageWidgets *AMessageWidgets, const AccountId &AAccountId, const ConversationId &AConversationId, QWidget *AParent);
 	~EditWidget();
 	virtual QWidget *instance() { return this; }
 	virtual const Jid &streamJid() const;
@@ -88,6 +89,8 @@ private:
 	int FBufferPos;
 	Jid FStreamJid;
 	Jid FContactJid;
+	AccountId FAccountId;
+	ConversationId FConversationId;
 	QList<QString> FBuffer;
 	QString FSendShortcutId;
 	QKeySequence FSendShortcut;

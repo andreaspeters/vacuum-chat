@@ -38,6 +38,14 @@ void EmoticonsOptions::reset()
 {
 	ui.lwtEmoticons->clear();
 	QStringList storages = Options::node(OPV_MESSAGES_EMOTICONS).value().toStringList();
+	{
+		QListWidgetItem *item = new QListWidgetItem(tr("Unicode Emoji"), ui.lwtEmoticons);
+		item->setData(IDR_STORAGE_NAME, QStringLiteral("unicode"));
+		item->setData(IDR_STORAGE_SUBDIR, QStringLiteral("unicode"));
+		item->setData(IDR_ICON_ROWS, 2);
+		item->setFlags(Qt::ItemIsUserCheckable|Qt::ItemIsSelectable|Qt::ItemIsEnabled);
+		item->setCheckState(storages.contains(QStringLiteral("unicode")) ? Qt::Checked : Qt::Unchecked);
+	}
 	for (int i = 0; i < storages.count(); i++)
 	{
 		QListWidgetItem *item = new QListWidgetItem(RSR_STORAGE_EMOTICONS"/"+storages.at(i),ui.lwtEmoticons);

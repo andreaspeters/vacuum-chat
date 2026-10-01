@@ -10,7 +10,7 @@ CommandDialog::CommandDialog(ICommands *ACommands, IDataForms *ADataForms, const
 	IconStorage::staticStorage(RSR_STORAGE_MENUICONS)->insertAutoIcon(this,MNI_COMMANDS,0,0,"windowIcon");
 
 	ui.wdtForm->setLayout(new QVBoxLayout);
-	ui.wdtForm->layout()->setMargin(0);
+	ui.wdtForm->layout()->setContentsMargins(0,0,0,0);
 
 	FCommands = ACommands;
 	FDataForms = ADataForms;
@@ -125,7 +125,7 @@ void CommandDialog::executeCommand()
 void CommandDialog::resetDialog()
 {
 	setWindowTitle(tr("Executing command '%1' at %2").arg(FNode).arg(FCommandJid.uFull()));
-	ui.lblInfo->setText(QString::null);
+	ui.lblInfo->setText(QString());
 	ui.lblInfo->setVisible(true);
 	if (FCurrentForm)
 	{

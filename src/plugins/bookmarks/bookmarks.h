@@ -42,6 +42,7 @@ class Bookmarks :
 	public AdvancedDelegateEditProxy
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.bookmarks")
 	Q_INTERFACES(IPlugin IBookmarks IOptionsHolder IRosterDataHolder IRostersEditHandler);
 public:
 	Bookmarks();

@@ -99,8 +99,8 @@ void UrlProcessor::onOptionsChanged(const OptionsNode &ANode)
 	if(ANode.path() == OPV_MISC_URLPROXY) // Proxy
 	{
 		if (FConnectionManager)
-			setProxy(FConnectionManager->proxyById(ANode.value().toString()).proxy);
+			setProxy(FConnectionManager->proxyById(QUuid(ANode.value().toString())).proxy);
 	}
 }
 
-Q_EXPORT_PLUGIN2(plg_urlprocessor, UrlProcessor)
+

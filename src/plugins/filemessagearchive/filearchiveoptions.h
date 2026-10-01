@@ -5,7 +5,7 @@
 #include <interfaces/ipluginmanager.h>
 #include <interfaces/ioptionsmanager.h>
 #include <utils/options.h>
-#include "ui_filearchiveoptions.h"
+#include <ui_filearchiveoptions.h>
 
 class FileArchiveOptions : 
 	public QWidget,

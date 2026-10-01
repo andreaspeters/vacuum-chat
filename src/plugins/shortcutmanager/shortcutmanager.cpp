@@ -145,7 +145,7 @@ void ShortcutManager::showHiddenWidgets(bool ACheckPassword)
 		blocked = true;
 
 		QString password;
-		QString profile = FOptionsManager!=NULL ? FOptionsManager->currentProfile() : QString::null;
+		QString profile = FOptionsManager!=NULL ? FOptionsManager->currentProfile() : QString();
 		QString title = QString("%1 - %2").arg(CLIENT_NAME).arg(profile);
 
 		if (ACheckPassword && FOptionsManager!=NULL && FOptionsManager->isOpened() && !FOptionsManager->checkProfilePassword(profile,password))
@@ -240,4 +240,4 @@ void ShortcutManager::onShortcutActivated(const QString &AId, QWidget *AWidget)
 	}
 }
 
-Q_EXPORT_PLUGIN2(plg_shortcutmanager, ShortcutManager)
+

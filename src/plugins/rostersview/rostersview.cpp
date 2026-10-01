@@ -14,6 +14,9 @@
 #include <QDragEnterEvent>
 #include <QDragLeaveEvent>
 #include <QContextMenuEvent>
+#include <QDrag>
+#include <QMimeData>
+#include <QRandomGenerator>
 
 #define BLINK_VISIBLE_TIME      750
 #define BLINK_INVISIBLE_TIME    250
@@ -80,7 +83,7 @@ QString RostersView::tabPageCaption() const
 
 QString RostersView::tabPageToolTip() const
 {
-	return QString::null;
+	return QString();
 }
 
 int RostersView::rosterDataOrder() const
@@ -90,7 +93,7 @@ int RostersView::rosterDataOrder() const
 
 QList<int> RostersView::rosterDataRoles() const
 {
-	static QList<int> dataRoles = QList<int>() << RDR_LABEL_ITEMS << RDR_ALLWAYS_VISIBLE << Qt::DecorationRole << Qt::BackgroundColorRole;
+	static QList<int> dataRoles = QList<int>() << RDR_LABEL_ITEMS << RDR_ALLWAYS_VISIBLE << Qt::DecorationRole << Qt::BackgroundRole;
 	return dataRoles;
 }
 
@@ -142,7 +145,7 @@ QVariant RostersView::rosterData(const IRosterIndex *AIndex, int ARole) const
 		{
 			data = !notify.icon.isNull() ? notify.icon : data;
 		}
-		else if (ARole == Qt::BackgroundColorRole)
+		else if (ARole == Qt::BackgroundRole)
 		{
 			data = notify.background;
 		}
@@ -174,7 +177,7 @@ QList<quint32> RostersView::rosterLabels(int AOrder, const IRosterIndex *AIndex)
 		const IRostersNotify &notify = FNotifyItems.value(FActiveNotifies.value(index));
 		if (!notify.footer.isEmpty())
 			labels.append(RLID_SCHANGER_STATUS);
-		if (!notify.icon.isNull())
+		if ((notify.flags & IRostersNotify::BlinkStatusIcon) > 0 || !notify.icon.isNull())
 			labels.append(AdvancedDelegateItem::DecorationId);
 	}
 	return labels;
@@ -199,7 +202,9 @@ AdvancedDelegateItem RostersView::rosterLabel(int AOrder, quint32 ALabelId, cons
 		label.d->id = AdvancedDelegateItem::DecorationId;
 		label.d->kind = AdvancedDelegateItem::Decoration;
 		label.d->flags = AdvancedDelegateItem::Blink;
-		label.d->data = FNotifyItems.value(FActiveNotifies.value(index)).icon;
+		const IRostersNotify &notify = FNotifyItems.value(FActiveNotifies.value(index));
+		label.d->data = (notify.flags & IRostersNotify::BlinkStatusIcon) > 0
+			? AIndex->data(Qt::DecorationRole) : notify.icon;
 	}
 	else if (AOrder==RLHO_ROSTERSVIEW_NOTIFY && ALabelId==RLID_SCHANGER_STATUS)
 	{
@@ -509,9 +514,14 @@ bool RostersView::setSelectedRosterIndexes(const QList<IRosterIndex *> &AIndexes
 		bool accepted = APartial || isSelectionAcceptable(AIndexes);
 		if (accepted)
 		{
-			QSet<IRosterIndex *> curSelected = selectedRosterIndexes().toSet();
-			QSet<IRosterIndex *> newSelected = AIndexes.toSet() - curSelected;
-			QSet<IRosterIndex *> oldSelected = curSelected - AIndexes.toSet();
+			QSet<IRosterIndex *> curSelected;
+			for (IRosterIndex *index : selectedRosterIndexes())
+				curSelected.insert(index);
+			QSet<IRosterIndex *> requestedSelected;
+			for (IRosterIndex *index : AIndexes)
+				requestedSelected.insert(index);
+			QSet<IRosterIndex *> newSelected = requestedSelected - curSelected;
+			QSet<IRosterIndex *> oldSelected = curSelected - requestedSelected;
 
 			foreach(IRosterIndex *index, oldSelected)
 			{
@@ -662,7 +672,7 @@ QModelIndex RostersView::mapToModel(const QModelIndex &AProxyIndex) const
 	QModelIndex index = AProxyIndex;
 	if (!FProxyModels.isEmpty())
 	{
-		QMap<int, QAbstractProxyModel *>::const_iterator it = FProxyModels.constEnd();
+		QMultiMap<int, QAbstractProxyModel *>::const_iterator it = FProxyModels.constEnd();
 		do
 		{
 			--it;
@@ -677,7 +687,7 @@ QModelIndex RostersView::mapFromModel(const QModelIndex &AModelIndex) const
 	QModelIndex index = AModelIndex;
 	if (!FProxyModels.isEmpty())
 	{
-		QMap<int, QAbstractProxyModel *>::const_iterator it = FProxyModels.constBegin();
+		QMultiMap<int, QAbstractProxyModel *>::const_iterator it = FProxyModels.constBegin();
 		while (it != FProxyModels.constEnd())
 		{
 			index = it.value()->mapFromSource(index);
@@ -692,7 +702,7 @@ QModelIndex RostersView::mapToProxy(QAbstractProxyModel *AProxyModel, const QMod
 	QModelIndex index = AModelIndex;
 	if (!FProxyModels.isEmpty())
 	{
-		QMap<int,QAbstractProxyModel *>::const_iterator it = FProxyModels.constBegin();
+		QMultiMap<int,QAbstractProxyModel *>::const_iterator it = FProxyModels.constBegin();
 		while (it!=FProxyModels.constEnd())
 		{
 			index = it.value()->mapFromSource(index);
@@ -710,7 +720,7 @@ QModelIndex RostersView::mapFromProxy(QAbstractProxyModel *AProxyModel, const QM
 	if (!FProxyModels.isEmpty())
 	{
 		bool doMap = false;
-		QMap<int, QAbstractProxyModel *>::const_iterator it = FProxyModels.constEnd();
+		QMultiMap<int, QAbstractProxyModel *>::const_iterator it = FProxyModels.constEnd();
 		do
 		{
 			--it;
@@ -767,12 +777,16 @@ void RostersView::removeLabel(quint32 ALabelId, IRosterIndex *AIndex)
 
 quint32 RostersView::labelAt(const QPoint &APoint, const QModelIndex &AIndex) const
 {
-	return FAdvancedItemDelegate->itemAt(APoint,indexOption(viewOptions(),AIndex),AIndex);
+	QStyleOptionViewItem option;
+	option.initFrom(this);
+	return FAdvancedItemDelegate->itemAt(APoint,indexOption(option,AIndex),AIndex);
 }
 
 QRect RostersView::labelRect(quint32 ALabeld, const QModelIndex &AIndex) const
 {
-	return FAdvancedItemDelegate->itemRect(ALabeld,indexOption(viewOptions(),AIndex),AIndex);
+	QStyleOptionViewItem option;
+	option.initFrom(this);
+	return FAdvancedItemDelegate->itemRect(ALabeld,indexOption(option,AIndex),AIndex);
 }
 
 int RostersView::activeNotify(IRosterIndex *AIndex) const
@@ -802,7 +816,7 @@ int RostersView::insertNotify(const IRostersNotify &ANotify, const QList<IRoster
 {
 	int notifyId = -1;
 	while(notifyId<=0 || FNotifyItems.contains(notifyId))
-		notifyId = qrand();
+		notifyId = int(QRandomGenerator::global()->generate());
 
 	foreach(IRosterIndex *index, AIndexes)
 	{
@@ -980,12 +994,12 @@ void RostersView::setDropIndicatorRect(const QRect &ARect)
 	}
 }
 
-QStyleOptionViewItemV4 RostersView::indexOption(const QStyleOptionViewItem &AOption, const QModelIndex &AIndex) const
+QStyleOptionViewItem RostersView::indexOption(const QStyleOptionViewItem &AOption, const QModelIndex &AIndex) const
 {
-	QStyleOptionViewItemV4 option = AOption;
+	QStyleOptionViewItem option = AOption;
 	
 	if (wordWrap())
-		option.features = QStyleOptionViewItemV2::WrapText;
+		option.features = QStyleOptionViewItem::WrapText;
 	option.widget = this;
 	option.locale = locale();
 	option.locale.setNumberOptions(QLocale::OmitGroupSeparator);
@@ -1068,7 +1082,7 @@ void RostersView::paintEvent(QPaintEvent *AEvent)
 	if (!FDropIndicatorRect.isNull())
 	{
 		QStyleOption option;
-		option.init(this);
+		option.initFrom(this);
 		option.rect = FDropIndicatorRect.adjusted(0,0,-1,-1);
 		QPainter painter(viewport());
 		style()->drawPrimitive(QStyle::PE_IndicatorItemViewItemDrop, &option, &painter, this);
@@ -1162,7 +1176,9 @@ void RostersView::mouseMoveEvent(QMouseEvent *AEvent)
 			QAbstractItemDelegate *itemDeletage = itemDelegate(FPressedIndex);
 			if (itemDeletage)
 			{
-				QStyleOptionViewItemV4 option = indexOption(viewOptions(),FPressedIndex);
+				QStyleOptionViewItem option;
+				option.initFrom(this);
+				option = indexOption(option,FPressedIndex);
 				QPoint indexPos = option.rect.topLeft();
 				option.state &= ~QStyle::State_Selected;
 				option.state &= ~QStyle::State_MouseOver;
@@ -1322,11 +1338,11 @@ void RostersView::onRosterIndexToolTips(IRosterIndex *AIndex, quint32 ALabelId, 
 	{
 		QString name = AIndex->data(RDR_NAME).toString();
 		if (!name.isEmpty())
-			AToolTips.insert(RTTO_CONTACT_NAME, Qt::escape(name));
+			AToolTips.insert(RTTO_CONTACT_NAME, name.toHtmlEscaped());
 
 		Jid jid = AIndex->data(RDR_FULL_JID).toString();
 		if (!jid.isEmpty())
-			AToolTips.insert(RTTO_CONTACT_JID, Qt::escape(jid.uFull()));
+			AToolTips.insert(RTTO_CONTACT_JID, jid.uFull().toHtmlEscaped());
 
 		QString priority = AIndex->data(RDR_PRIORITY).toString();
 		if (!priority.isEmpty())
@@ -1335,11 +1351,11 @@ void RostersView::onRosterIndexToolTips(IRosterIndex *AIndex, quint32 ALabelId, 
 		QString ask = AIndex->data(RDR_ASK).toString();
 		QString subscription = AIndex->data(RDR_SUBSCRIBTION).toString();
 		if (!subscription.isEmpty())
-			AToolTips.insert(RTTO_CONTACT_SUBSCRIPTION, tr("Subscription: %1 %2").arg(Qt::escape(subscription)).arg(Qt::escape(ask)));
+			AToolTips.insert(RTTO_CONTACT_SUBSCRIPTION, tr("Subscription: %1 %2").arg(subscription.toHtmlEscaped()).arg(ask.toHtmlEscaped()));
 
 		QString status = AIndex->data(RDR_STATUS).toString();
 		if (!status.isEmpty())
-			AToolTips.insert(RTTO_CONTACT_STATUS, QString("%1 <div style='margin-left:10px;'>%2</div>").arg(tr("Status:")).arg(Qt::escape(status).replace("\n","<br>")));
+			AToolTips.insert(RTTO_CONTACT_STATUS, QString("%1 <div style='margin-left:10px;'>%2</div>").arg(tr("Status:")).arg(status.toHtmlEscaped().replace("\n","<br>")));
 	}
 }
 

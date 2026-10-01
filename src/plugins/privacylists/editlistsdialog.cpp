@@ -216,19 +216,19 @@ QString EditListsDialog::ruleName(const IPrivacyRule &ARule)
 	{
 		return tr("%1: if %2 = '%3' then %4 [%5 ]")
 		       .arg(ARule.order)
-		       .arg(tr(ARule.type.toAscii()))
+		       .arg(tr(ARule.type.toLatin1()))
 		       .arg(ARule.value)
-		       .arg(!ARule.action.isEmpty() ? tr(ARule.action.toAscii()) : tr("<action>"))
+		       .arg(!ARule.action.isEmpty() ? tr(ARule.action.toLatin1()) : tr("<action>"))
 		       .arg(stanzas);
 	}
 	else
 	{
 		return tr("%1: always %2 [%3 ]")
 		       .arg(ARule.order)
-		       .arg(!ARule.action.isEmpty() ? tr(ARule.action.toAscii()) : tr("<action>"))
+		       .arg(!ARule.action.isEmpty() ? tr(ARule.action.toLatin1()) : tr("<action>"))
 		       .arg(stanzas);
 	}
-	return QString::null;
+	return QString();
 }
 
 void EditListsDialog::updateListRules()
@@ -365,21 +365,21 @@ void EditListsDialog::onRequestFailed(const QString &AId, const XmppError &AErro
 	QString warning;
 	if (FActiveRequests.contains(AId))
 	{
-		warning = tr("Privacy list '%1' could not be active: %2").arg(Qt::escape(FActiveRequests.take(AId))).arg(Qt::escape(AError.errorMessage()));
+		warning = tr("Privacy list '%1' could not be active: %2").arg(FActiveRequests.take(AId).toHtmlEscaped()).arg(AError.errorMessage().toHtmlEscaped());
 		onActiveListChanged(FStreamJid,FPrivacyLists->activeList(FStreamJid));
 	}
 	else if (FDefaultRequests.contains(AId))
 	{
-		warning = tr("Privacy list '%1' could not be default: %2").arg(Qt::escape(FDefaultRequests.take(AId))).arg(Qt::escape(AError.errorMessage()));
+		warning = tr("Privacy list '%1' could not be default: %2").arg(FDefaultRequests.take(AId).toHtmlEscaped()).arg(AError.errorMessage().toHtmlEscaped());
 		onDefaultListChanged(FStreamJid,FPrivacyLists->defaultList(FStreamJid));
 	}
 	else if (FSaveRequests.contains(AId))
 	{
-		warning = tr("Privacy list '%1' could not be saved: %2").arg(Qt::escape(FSaveRequests.take(AId))).arg(Qt::escape(AError.errorMessage()));
+		warning = tr("Privacy list '%1' could not be saved: %2").arg(FSaveRequests.take(AId).toHtmlEscaped()).arg(AError.errorMessage().toHtmlEscaped());
 	}
 	else if (FRemoveRequests.contains(AId))
 	{
-		warning = tr("Privacy list '%1' could not be removed: %2").arg(Qt::escape(FRemoveRequests.take(AId))).arg(Qt::escape(AError.errorMessage()));
+		warning = tr("Privacy list '%1' could not be removed: %2").arg(FRemoveRequests.take(AId).toHtmlEscaped()).arg(AError.errorMessage().toHtmlEscaped());
 	}
 	if (!warning.isEmpty())
 		FWarnings.append(warning);
@@ -540,14 +540,14 @@ void EditListsDialog::onRuleConditionTypeChanged(int AIndex)
 		}
 		ui.cmbValue->setEditable(true);
 		ui.cmbValue->blockSignals(false);
-		ui.cmbValue->setEditText(QString::null);
+		ui.cmbValue->setEditText(QString());
 	}
 }
 
 void EditListsDialog::onCurrentListItemChanged(QListWidgetItem *ACurrent, QListWidgetItem *APrevious)
 {
 	Q_UNUSED(APrevious);
-	FListName = ACurrent!=NULL ? ACurrent->data(DR_NAME).toString() : QString::null;
+	FListName = ACurrent!=NULL ? ACurrent->data(DR_NAME).toString() : QString();
 	updateListRules();
 }
 

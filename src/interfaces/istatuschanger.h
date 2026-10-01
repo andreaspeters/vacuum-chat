@@ -2,9 +2,10 @@
 #define ISTATUSCHANGER_H
 
 #include <utils/jid.h>
+#include <interfaces/identity.h>
 #include <utils/menu.h>
 
-#define STATUSCHANGER_UUID "{F0D57BD2-0CD4-4606-9CEE-15977423F8DC}"
+#define STATUSCHANGER_UUID QUuid("{F0D57BD2-0CD4-4606-9CEE-15977423F8DC}")
 
 #define STATUS_NULL_ID                      0
 #define STATUS_CONNECTING_ID                -3
@@ -31,6 +32,9 @@ public:
 	virtual QList<Jid> statusStreams(int AStatusId) const =0;
 	virtual int streamStatus(const Jid &AStreamJid) const =0;
 	virtual void setStreamStatus(const Jid &AStreamJid, int AStatusId) =0;
+	virtual QList<AccountId> statusAccounts(int AStatusId) const =0;
+	virtual int accountStatus(const AccountId &AAccountId) const =0;
+	virtual void setAccountStatus(const AccountId &AAccountId, int AStatusId) =0;
 	virtual QString statusItemName(int AStatusId) const =0;
 	virtual int statusItemShow(int AStatusId) const =0;
 	virtual QString statusItemText(int AStatusId) const =0;

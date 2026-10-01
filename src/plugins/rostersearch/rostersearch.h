@@ -30,6 +30,7 @@ class RosterSearch :
 			public IRostersKeyHooker
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.rostersearch")
 	Q_INTERFACES(IPlugin IRosterSearch IRostersClickHooker IRostersKeyHooker);
 public:
 	RosterSearch();

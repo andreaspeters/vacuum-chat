@@ -7,7 +7,7 @@
 #include <interfaces/iregistraton.h>
 #include <interfaces/idataforms.h>
 #include <utils/iconstorage.h>
-#include "ui_registerdialog.h"
+#include <ui_registerdialog.h>
 
 class RegisterDialog :
 			public QDialog

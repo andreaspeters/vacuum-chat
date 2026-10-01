@@ -1,4 +1,5 @@
 #include "servicediscovery.h"
+#include <algorithm>
 
 #include <QDir>
 #include <QFile>
@@ -314,7 +315,7 @@ bool ServiceDiscovery::stanzaReadWrite(int AHandlerId, const Jid &AStreamJid, St
 					DiscoveryRequest request;
 					request.streamJid = AStreamJid;
 					request.contactJid = contactJid;
-					//request.node = !newCaps.hash.isEmpty() ? newCaps.node+"#"+newCaps.ver : QString::null;
+					//request.node = !newCaps.hash.isEmpty() ? newCaps.node+"#"+newCaps.ver : QString();
 					appendQueuedRequest(QUEUE_REQUEST_START,request);
 				}
 				if (!capsElem.isNull() && !newCaps.node.isEmpty() && !newCaps.ver.isEmpty())
@@ -399,7 +400,7 @@ bool ServiceDiscovery::rosterIndexDoubleClicked(int AOrder, IRosterIndex *AIndex
 	Jid streamJid = AIndex->data(RDR_STREAM_JID).toString();
 	if (AIndex->type()==RIT_AGENT && FSelfCaps.contains(streamJid))
 	{
-		showDiscoItems(streamJid,AIndex->data(RDR_FULL_JID).toString(),QString::null);
+		showDiscoItems(streamJid,AIndex->data(RDR_FULL_JID).toString(),QString());
 	}
 	return false;
 }
@@ -412,7 +413,7 @@ IDiscoInfo ServiceDiscovery::selfDiscoInfo(const Jid &AStreamJid, const QString 
 
 	const EntityCapabilities myCaps = FSelfCaps.value(AStreamJid);
 	QString capsNode = QString("%1#%2").arg(myCaps.node).arg(myCaps.ver);
-	dinfo.node = ANode!=capsNode ? ANode : QString::null;
+	dinfo.node = ANode!=capsNode ? ANode : QString();
 
 	foreach(IDiscoHandler *handler, FDiscoHandlers)
 		handler->fillDiscoInfo(dinfo);
@@ -908,7 +909,7 @@ QString ServiceDiscovery::capsFileName(const EntityCapabilities &ACaps, bool AFo
 	}
 
 	QString hashString = ACaps.hash.isEmpty() ? ACaps.node+ACaps.ver : ACaps.ver+ACaps.hash;
-	hashString += AForJid ? ACaps.entityJid.pFull() : QString::null;
+	hashString += AForJid ? ACaps.entityJid.pFull() : QString();
 	QString fileName = QCryptographicHash::hash(hashString.toUtf8(),QCryptographicHash::Md5).toHex().toLower() + ".xml";
 	return dir.absoluteFilePath(fileName);
 }
@@ -986,11 +987,11 @@ QString ServiceDiscovery::calcCapsHash(const IDiscoInfo &AInfo, const QString &A
 
 		foreach(IDiscoIdentity identity, AInfo.identity)
 			sortList.append(identity.category+"/"+identity.type+"/"+identity.lang+"/"+identity.name);
-		qSort(sortList);
+		std::sort(sortList.begin(),sortList.end());
 		hashList += sortList;
 
 		sortList = AInfo.features;
-		qSort(sortList);
+		std::sort(sortList.begin(),sortList.end());
 		hashList += sortList;
 
 		if (FDataForms && !AInfo.extensions.isEmpty())
@@ -1015,7 +1016,7 @@ QString ServiceDiscovery::calcCapsHash(const IDiscoInfo &AInfo, const QString &A
 							values +=(field.value.toBool() ? "1" : "0");
 						else
 							values += field.value.toString();
-						qSort(values);
+						std::sort(values.begin(),values.end());
 						sortFields.insertMulti(field.var,values);
 					}
 				}
@@ -1029,11 +1030,11 @@ QString ServiceDiscovery::calcCapsHash(const IDiscoInfo &AInfo, const QString &A
 				++iforms;
 			}
 		}
-		hashList.append(QString::null);
+		hashList.append(QString());
 		QByteArray hashData = hashList.join("<").toUtf8();
 		return QCryptographicHash::hash(hashData, AHash==CAPS_HASH_SHA1 ? QCryptographicHash::Sha1 : QCryptographicHash::Md5).toBase64();
 	}
-	return QString::null;
+	return QString();
 }
 
 bool ServiceDiscovery::compareIdentities(const QList<IDiscoIdentity> &AIdentities, const IDiscoIdentity &AWith) const
@@ -1269,7 +1270,7 @@ void ServiceDiscovery::onMultiUserChatCreated(IMultiUserChat *AMultiChat)
 
 void ServiceDiscovery::onMultiUserContextMenu(IMultiUserChatWindow *AWindow, IMultiUser *AUser, Menu *AMenu)
 {
-	Action *action = createDiscoInfoAction(AWindow->streamJid(), AUser->contactJid(), QString::null, AMenu);
+	Action *action = createDiscoInfoAction(AWindow->streamJid(), AUser->contactJid(), QString(), AMenu);
 	AMenu->addAction(action, AG_MUCM_DISCOVERY, true);
 }
 
@@ -1285,12 +1286,12 @@ void ServiceDiscovery::onRosterIndexContextMenu(const QList<IRosterIndex *> &AIn
 
 			if (FSelfCaps.contains(streamJid))
 			{
-				Action *action = createDiscoInfoAction(streamJid, contactJid, QString::null, AMenu);
+				Action *action = createDiscoInfoAction(streamJid, contactJid, QString(), AMenu);
 				AMenu->addAction(action,AG_RVCM_DISCOVERY,true);
 
 				if (indexType == RIT_STREAM_ROOT || indexType == RIT_AGENT)
 				{
-					action = createDiscoItemsAction(streamJid, contactJid, QString::null, AMenu);
+					action = createDiscoItemsAction(streamJid, contactJid, QString(), AMenu);
 					AMenu->addAction(action,AG_RVCM_DISCOVERY,true);
 				}
 			}
@@ -1316,7 +1317,7 @@ void ServiceDiscovery::onRosterIndexToolTips(IRosterIndex *AIndex, quint32 ALabe
 			IDiscoInfo dinfo = discoInfo(streamJid,contactJid);
 			foreach(IDiscoIdentity identity, dinfo.identity)
 				if (identity.category != DIC_CLIENT)
-					AToolTips.insert(RTTO_DISCO_IDENTITY,tr("Category: %1; Type: %2").arg(Qt::escape(identity.category)).arg(Qt::escape(identity.type)));
+					AToolTips.insert(RTTO_DISCO_IDENTITY,tr("Category: %1; Type: %2").arg(identity.category.toHtmlEscaped()).arg(identity.type.toHtmlEscaped()));
 		}
 	}
 }
@@ -1395,4 +1396,4 @@ void ServiceDiscovery::onSelfCapsChanged()
 	FUpdateSelfCapsStarted = false;
 }
 
-Q_EXPORT_PLUGIN2(plg_servicediscovery, ServiceDiscovery)
+

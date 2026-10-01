@@ -81,7 +81,7 @@ bool ConnectionManager::initObjects()
 {
 	Options::setDefaultValue(OPV_ACCOUNT_CONNECTION_TYPE,QString("DefaultConnection"));
 
-	Options::setDefaultValue(OPV_PROXY_DEFAULT,QString(APPLICATION_PROXY_REF_UUID));
+	Options::setDefaultValue(OPV_PROXY_DEFAULT,APPLICATION_PROXY_REF_UUID.toString());
 	Options::setDefaultValue(OPV_PROXY_NAME,tr("New Proxy"));
 	Options::setDefaultValue(OPV_PROXY_TYPE,(int)QNetworkProxy::NoProxy);
 
@@ -109,10 +109,12 @@ bool ConnectionManager::initSettings()
 QMultiMap<int, IOptionsWidget *> ConnectionManager::optionsWidgets(const QString &ANodeId, QWidget *AParent)
 {
 	QMultiMap<int, IOptionsWidget *> widgets;
-	QStringList nodeTree = ANodeId.split(".",QString::SkipEmptyParts);
+	QStringList nodeTree = ANodeId.split(".",Qt::SkipEmptyParts);
 	if (nodeTree.count()==2 && nodeTree.at(0)==OPN_ACCOUNTS)
 	{
-		widgets.insertMulti(OWO_ACCOUNT_CONNECTION, new ConnectionOptionsWidget(this,Options::node(OPV_ACCOUNT_ITEM,nodeTree.at(1)),AParent));
+		const OptionsNode accountOptions = Options::node(OPV_ACCOUNT_ITEM,nodeTree.at(1));
+		if (accountOptions.value("type").toString().compare(QStringLiteral("matrix"), Qt::CaseInsensitive) != 0)
+			widgets.insertMulti(OWO_ACCOUNT_CONNECTION, new ConnectionOptionsWidget(this,accountOptions,AParent));
 	}
 	return widgets;
 }
@@ -131,7 +133,7 @@ QList<QUuid> ConnectionManager::proxyList() const
 {
 	QList<QUuid> plist;
 	foreach(QString proxyId, Options::node(OPV_PROXY_ROOT).childNSpaces("proxy")) {
-		plist.append(proxyId); }
+		plist.append(QUuid::fromString(proxyId)); }
 	return plist;
 }
 
@@ -191,7 +193,7 @@ void ConnectionManager::removeProxy(const QUuid &AProxyId)
 
 QUuid ConnectionManager::defaultProxy() const
 {
-	return Options::node(OPV_PROXY_DEFAULT).value().toString();
+	return QUuid::fromString(Options::node(OPV_PROXY_DEFAULT).value().toString());
 }
 
 void ConnectionManager::setDefaultProxy(const QUuid &AProxyId)
@@ -224,13 +226,17 @@ void ConnectionManager::saveProxySettings(IOptionsWidget *AWidget, OptionsNode A
 
 QUuid ConnectionManager::loadProxySettings(const OptionsNode &ANode) const
 {
-	return ANode.value().toString();
+	return QUuid::fromString(ANode.value().toString());
 }
 
 void ConnectionManager::updateAccountConnection(IAccount *AAccount) const
 {
-	if (AAccount->isActive())
+	if (AAccount && AAccount->isActive())
 	{
+		// Guard: skip if no XMPP stream (e.g., non-XMPP protocols like Matrix)
+		if (!AAccount->xmppStream())
+			return;
+
 		OptionsNode aoptions = AAccount->optionsNode();
 		QString pluginId = aoptions.value("connection-type").toString();
 		IConnectionPlugin *plugin = FPlugins.contains(pluginId) ? FPlugins.value(pluginId) : FPlugins.values().value(0);
@@ -254,6 +260,10 @@ void ConnectionManager::updateConnectionSettings(IAccount *AAccount) const
 	QList<IAccount *> accountList = AAccount==NULL ? (FAccountManager!=NULL ? FAccountManager->accounts() : QList<IAccount *>()) : QList<IAccount *>()<<AAccount;
 	foreach(IAccount *account, accountList)
 	{
+		// Guard: skip if no XMPP stream (e.g., non-XMPP protocols like Matrix)
+		if (!account->xmppStream())
+			continue;
+
 		if (account->isActive() && account->xmppStream()->connection())
 		{
 			const OptionsNode &aoptions = account->optionsNode();
@@ -315,7 +325,7 @@ void ConnectionManager::onOptionsChanged(const OptionsNode &ANode)
 {
 	if (ANode.path() == OPV_PROXY_DEFAULT)
 	{
-		QUuid proxyId = ANode.value().toString();
+		QUuid proxyId = QUuid::fromString(ANode.value().toString());
 		QNetworkProxy::setApplicationProxy(proxyById(proxyId).proxy);
 		emit defaultProxyChanged(proxyId);
 		updateConnectionSettings();
@@ -326,4 +336,4 @@ void ConnectionManager::onOptionsChanged(const OptionsNode &ANode)
 	}
 }
 
-Q_EXPORT_PLUGIN2(plg_connectionmanager, ConnectionManager)
+

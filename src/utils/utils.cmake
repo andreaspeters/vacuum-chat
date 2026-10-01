@@ -1,4 +1,5 @@
 file(GLOB SOURCES "*.cpp")
+list(FILTER SOURCES EXCLUDE REGEX "/moc_[^/]*\\.cpp$")
 
 set(HEADERS "action.h"
             "filestorage.h"
@@ -14,6 +15,7 @@ set(HEADERS "action.h"
             "closebutton.h"
             "searchlineedit.h"
             "imagemanager.h"
-            "advanceditemdelegate.h")
+            "advanceditemdelegate.h"
+            "matrixhtml.h")
 
-qt4_wrap_cpp(MOC_SOURCES ${HEADERS})
+# Qt6's CMake integration handles MOC through AUTOMOC.

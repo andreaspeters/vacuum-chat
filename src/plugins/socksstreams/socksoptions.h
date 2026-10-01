@@ -7,7 +7,7 @@
 #include <interfaces/iconnectionmanager.h>
 #include <interfaces/ioptionsmanager.h>
 #include <utils/options.h>
-#include "ui_socksoptions.h"
+#include <ui_socksoptions.h>
 
 class SocksOptions :
 			public QWidget,

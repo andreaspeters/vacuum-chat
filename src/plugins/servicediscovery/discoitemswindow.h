@@ -18,7 +18,7 @@
 #include <utils/options.h>
 #include <utils/widgetmanager.h>
 #include "discoitemsmodel.h"
-#include "ui_discoitemswindow.h"
+#include <ui_discoitemswindow.h>
 
 class SortFilterProxyModel :
 			public QSortFilterProxyModel

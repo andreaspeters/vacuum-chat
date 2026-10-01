@@ -9,7 +9,7 @@
 #include <utils/options.h>
 #include <utils/iconstorage.h>
 #include <utils/iconsetdelegate.h>
-#include "ui_iconsoptionswidget.h"
+#include <ui_iconsoptionswidget.h>
 
 class IconsetSelectableDelegate :
 			public IconsetDelegate

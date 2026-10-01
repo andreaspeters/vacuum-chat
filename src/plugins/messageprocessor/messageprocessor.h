@@ -6,6 +6,7 @@
 #include <definitions/notificationdataroles.h>
 #include <interfaces/ipluginmanager.h>
 #include <interfaces/imessageprocessor.h>
+#include <interfaces/iprotocolmessaging.h>
 #include <interfaces/ixmppstreams.h>
 #include <interfaces/inotifications.h>
 #include <interfaces/istanzaprocessor.h>
@@ -18,6 +19,7 @@ class MessageProcessor :
 	public IStanzaHandler
 {
 	Q_OBJECT
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.messageprocessor")
 	Q_INTERFACES(IPlugin IMessageProcessor IMessageWriter IStanzaHandler)
 public:
 	MessageProcessor();
@@ -29,7 +31,7 @@ public:
 	virtual bool initConnections(IPluginManager *APluginManager, int &AInitOrder);
 	virtual bool initObjects();
 	virtual bool initSettings() { return true; }
-	virtual bool startPlugin() { return true; }
+	virtual bool startPlugin();
 	//IStanzaHandler
 	virtual bool stanzaReadWrite(int AHandlerId, const Jid &AStreamJid, Stanza &AStanza, bool &AAccept);
 	//IMessageWriter
@@ -37,16 +39,18 @@ public:
 	virtual void writeMessageToText(int AOrder, Message &AMessage, QTextDocument *ADocument, const QString &ALang);
 	//IMessageProcessor
 	virtual bool sendMessage(const Jid &AStreamJid, Message &AMessage, int ADirection);
+	virtual void processProtocolMessage(const BasicMessage &AMessage);
 	virtual bool processMessage(const Jid &AStreamJid, Message &AMessage, int ADirection);
 	virtual bool displayMessage(const Jid &AStreamJid, Message &AMessage, int ADirection);
+	virtual void displayConversationHistory(const Jid &AStreamJid, const Jid &AContactJid);
 	virtual QList<int> notifiedMessages() const;
 	virtual Message notifiedMessage(int AMesssageId) const;
 	virtual int notifyByMessage(int AMessageId) const;
 	virtual int messageByNotify(int ANotifyId) const;
 	virtual void showNotifiedMessage(int AMessageId);
 	virtual void removeMessageNotify(int AMessageId);
-	virtual void textToMessage(Message &AMessage, const QTextDocument *ADocument, const QString &ALang = QString::null) const;
-	virtual void messageToText(QTextDocument *ADocument, const Message &AMessage, const QString &ALang = QString::null) const;
+	virtual void textToMessage(Message &AMessage, const QTextDocument *ADocument, const QString &ALang = QString()) const;
+	virtual void messageToText(QTextDocument *ADocument, const Message &AMessage, const QString &ALang = QString()) const;
 	virtual bool createMessageWindow(const Jid &AStreamJid, const Jid &AContactJid, Message::MessageType AType, int AShowMode) const;
 	virtual void insertMessageHandler(int AOrder, IMessageHandler *AHandler);
 	virtual void removeMessageHandler(int AOrder, IMessageHandler *AHandler);
@@ -77,10 +81,14 @@ protected slots:
 	void onStreamRemoved(IXmppStream *AXmppStream);
 	void onNotificationActivated(int ANotifyId);
 	void onNotificationRemoved(int ANotifyId);
+	void onProtocolMessageReceived(const BasicMessage &message);
 private:
 	IXmppStreams *FXmppStreams;
 	INotifications *FNotifications;
 	IStanzaProcessor *FStanzaProcessor;
+	IPluginManager *FPluginManager;
+	QList<IProtocolMessaging *> FProtocolMessaging;
+	void bindProtocolMessaging();
 private:
 	QMap<Jid, int> FSHIMessages;
 	QMap<int, IMessageHandler *> FHandlerForMessage;

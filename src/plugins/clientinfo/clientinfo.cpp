@@ -9,7 +9,7 @@
 # include <sys/utsname.h>
 #endif
 
-#if defined(Q_WS_HAIKU)
+#if defined(Q_OS_HAIKU)
 #include <Path.h>
 #include <AppFileInfo.h>
 #include <FindDirectory.h>
@@ -367,7 +367,7 @@ QString ClientInfo::osVersion() const
 	static QString osver;
 	if (osver.isEmpty())
 	{
-#if defined(Q_WS_MAC)
+#if defined(Q_OS_MACOS)
 		switch (QSysInfo::MacintoshVersion)
 		{
 		# if QT_VERSION >= 0x040803
@@ -407,7 +407,7 @@ QString ClientInfo::osVersion() const
 			osver = "MacOS (unknown)";
 			break;
 		}
-#elif defined(Q_WS_X11)
+#elif defined(Q_OS_LINUX)
 		QStringList path;
 		foreach(QString env, QProcess::systemEnvironment())
 			if (env.startsWith("PATH="))
@@ -454,7 +454,7 @@ QString ClientInfo::osVersion() const
 				osver = QLatin1String("Linux/Unix (unknown)");
 			}
 		}
-#elif defined(Q_WS_WIN) || defined(Q_OS_CYGWIN)
+#elif defined(Q_OS_WIN) || defined(Q_OS_CYGWIN)
 		switch (QSysInfo::WindowsVersion)
 		{
 		case QSysInfo::WV_CE_6:
@@ -508,7 +508,7 @@ QString ClientInfo::osVersion() const
 			osver = "Windows (unknown)";
 			break;
 		}
-#elif defined(Q_WS_HAIKU)
+#elif defined(Q_OS_HAIKU)
 		BPath path;
 		QString strVersion("Haiku");
 		if (find_directory(B_BEOS_LIB_DIRECTORY, &path) == B_OK) 
@@ -860,7 +860,7 @@ void ClientInfo::onRosterIndexToolTips(IRosterIndex *AIndex, quint32 ALabelId, Q
 		Jid contactJid = AIndex->data(RDR_FULL_JID).toString();
 
 		if (hasSoftwareInfo(contactJid))
-			AToolTips.insert(RTTO_SOFTWARE_INFO,tr("Software: %1 %2").arg(Qt::escape(softwareName(contactJid))).arg(Qt::escape(softwareVersion(contactJid))));
+			AToolTips.insert(RTTO_SOFTWARE_INFO,tr("Software: %1 %2").arg(softwareName(contactJid).toHtmlEscaped()).arg(softwareVersion(contactJid).toHtmlEscaped()));
 
 		if (hasEntityTime(contactJid))
 			AToolTips.insert(RTTO_ENTITY_TIME,tr("Entity time: %1").arg(entityTime(contactJid).time().toString()));
@@ -918,4 +918,4 @@ void ClientInfo::onOptionsChanged(const OptionsNode &ANode)
 	}
 }
 
-Q_EXPORT_PLUGIN2(plg_clientinfo, ClientInfo)
+

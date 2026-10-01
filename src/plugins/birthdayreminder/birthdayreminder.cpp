@@ -255,7 +255,11 @@ void BirthdayReminder::onShowNotificationTimer()
 			{
 				updateBirthdaysStates();
 				notify.typeId = NNT_BIRTHDAY;
-				QSet<Jid> notifyList = FUpcomingBirthdays.keys().toSet() - FNotifiedContacts.toSet();
+				QSet<Jid> notifyList;
+				for (const Jid &jid : FUpcomingBirthdays.keys())
+					notifyList.insert(jid);
+				for (const Jid &jid : FNotifiedContacts)
+					notifyList.remove(jid);
 				foreach(Jid contactJid, notifyList)
 				{
 					Jid streamJid = findContactStream(contactJid);
@@ -269,7 +273,7 @@ void BirthdayReminder::onShowNotificationTimer()
 
 					QDate	birthday = contactBithday(contactJid);
 					int daysLeft = FUpcomingBirthdays.value(contactJid);
-					QString text = daysLeft>0 ? tr("Birthday in %n day(s),<br> %1","",daysLeft).arg(birthday.toString(Qt::SystemLocaleLongDate)) : tr("Birthday today!");
+					QString text = daysLeft>0 ? tr("Birthday in %n day(s),<br> %1","",daysLeft).arg(QLocale().toString(birthday,QLocale::LongFormat)) : tr("Birthday today!");
 					notify.data.insert(NDR_POPUP_HTML,text);
 
 					if (daysLeft == 0)
@@ -331,7 +335,7 @@ void BirthdayReminder::onRosterIndexToolTips(IRosterIndex *AIndex, quint32 ALabe
 			if (ALabelId == FBirthdayLabelId)
 			{
 				QDate birthday = contactBithday(contactJid);
-				QString tip = tr("%1 marks %n years","",QDate::currentDate().year() - birthday.year()).arg(QDate::currentDate().addDays(daysLeft).toString(Qt::DefaultLocaleLongDate));
+				QString tip = tr("%1 marks %n years","",QDate::currentDate().year() - birthday.year()).arg(QLocale().toString(QDate::currentDate().addDays(daysLeft),QLocale::LongFormat));
 				AToolTips.insert(RTTO_BIRTHDAY_NOTIFY,tip);
 			}
 			QString tip = daysLeft>0 ? tr("Birthday in %n day(s)!","",daysLeft) : tr("Birthday today!");
@@ -383,4 +387,4 @@ void BirthdayReminder::onOptionsClosed()
 	Options::setFileValue(notified,"birthdays.notify.notified");
 }
 
-Q_EXPORT_PLUGIN2(plg_birthdayreminder, BirthdayReminder)
+

@@ -9,7 +9,7 @@
 #include <interfaces/irosterchanger.h>
 #include <interfaces/iroster.h>
 #include <interfaces/ivcard.h>
-#include "ui_subscriptiondialog.h"
+#include <ui_subscriptiondialog.h>
 
 class SubscriptionDialog :
 			public QDialog,

@@ -8,7 +8,7 @@
 #include <definitions/menuicons.h>
 #include <interfaces/icommands.h>
 #include <interfaces/idataforms.h>
-#include "ui_commanddialog.h"
+#include <ui_commanddialog.h>
 
 class CommandDialog :
 			public QDialog,

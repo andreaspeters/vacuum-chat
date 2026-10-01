@@ -7,7 +7,7 @@
 #include <interfaces/iautostatus.h>
 #include <interfaces/istatuschanger.h>
 #include <interfaces/ioptionsmanager.h>
-#include "ui_statusoptionswidget.h"
+#include <ui_statusoptionswidget.h>
 
 class Delegate :
 			public QItemDelegate

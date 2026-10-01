@@ -9,7 +9,7 @@ SelectIconWidget::SelectIconWidget(IconStorage *AStorage, QWidget *AParent) : QW
 	FStorage = AStorage;
 
 	FLayout = new QGridLayout(this);
-	FLayout->setMargin(2);
+	FLayout->setContentsMargins(2,2,2,2);
 	FLayout->setHorizontalSpacing(3);
 	FLayout->setVerticalSpacing(3);
 
@@ -34,7 +34,7 @@ void SelectIconWidget::createLabels()
 	foreach(QString key, keys)
 	{
 		QLabel *label = new QLabel(this);
-		label->setMargin(2);
+		label->setContentsMargins(2,2,2,2);
 		label->setAlignment(Qt::AlignCenter);
 		label->setFrameShape(QFrame::Box);
 		label->setFrameShadow(QFrame::Sunken);

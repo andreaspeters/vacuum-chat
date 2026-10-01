@@ -70,6 +70,7 @@ class MultiUserChatPlugin :
 	public IRecentItemHandler
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.multiuserchat")
 	Q_INTERFACES(IPlugin IMultiUserChatPlugin IXmppUriHandler IDiscoFeatureHandler IMessageHandler IDataLocalizer IOptionsHolder IRostersClickHooker IRecentItemHandler);
 public:
 	MultiUserChatPlugin();

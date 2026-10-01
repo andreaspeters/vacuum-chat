@@ -1,5 +1,7 @@
 #include "multiuserchatwindow.h"
 
+#include <utils/messagenotificationmute.h>
+
 
 #include <QTimer>
 #include <QKeyEvent>
@@ -7,6 +9,7 @@
 #include <QInputDialog>
 #include <QCoreApplication>
 #include <QContextMenuEvent>
+#include <QRegularExpression>
 
 #define ADR_STREAM_JID              Action::DR_StreamJid
 #define ADR_ROOM_JID                Action::DR_Parametr1
@@ -211,7 +214,7 @@ bool MultiUserChatWindow::messageDisplay(const Message &AMessage, int ADirection
 					displayed = true;
 					if (!AMessage.isDelayed())
 						updateRecentItemActiveTime();
-					if (FHistoryRequests.values().contains(NULL))
+					if (FHistoryRequests.values().contains(static_cast<IChatWindow *>(NULL)))
 						FPendingMessages[NULL].append(AMessage);
 					showUserMessage(AMessage,contactJid.resource());
 				}
@@ -255,6 +258,9 @@ INotification MultiUserChatWindow::messageNotify(INotifications *ANotifications,
 	if (ADirection==IMessageProcessor::MessageIn && AMessage.type()!=Message::Error)
 	{
 		Jid contactJid = AMessage.from();
+		if ((AMessage.type() == Message::GroupChat || AMessage.type() == Message::Chat)
+			&& messageNotificationMuted(streamJid(), contactJid.pBare()))
+			return notify;
 		int messageId = AMessage.data(MDR_MESSAGE_ID).toInt();
 		IconStorage *storage = IconStorage::staticStorage(RSR_STORAGE_MENUICONS);
 		if (!contactJid.resource().isEmpty())
@@ -324,7 +330,7 @@ INotification MultiUserChatWindow::messageNotify(INotifications *ANotifications,
 				}
 				else
 				{
-					notify.data.insert(NDR_POPUP_HTML,Qt::escape(AMessage.body()));
+					notify.data.insert(NDR_POPUP_HTML,AMessage.body().toHtmlEscaped());
 				}
 			}
 			if (page)
@@ -348,7 +354,7 @@ INotification MultiUserChatWindow::messageNotify(INotifications *ANotifications,
 				notify.data.insert(NDR_POPUP_CAPTION,tr("Data form received"));
 				notify.data.insert(NDR_POPUP_TITLE,ANotifications->contactName(FMultiChat->streamJid(),contactJid));
 				notify.data.insert(NDR_POPUP_IMAGE,ANotifications->contactAvatar(contactJid));
-				notify.data.insert(NDR_POPUP_HTML,Qt::escape(AMessage.stanza().firstElement("x",NS_JABBER_DATA).firstChildElement("instructions").text()));
+				notify.data.insert(NDR_POPUP_HTML,AMessage.stanza().firstElement("x",NS_JABBER_DATA).firstChildElement("instructions").text().toHtmlEscaped());
 				notify.data.insert(NDR_SOUND_FILE,SDF_MUC_DATA_MESSAGE);
 				notify.data.insert(NDR_ALERT_WIDGET,(qint64)dialog->instance());
 				notify.data.insert(NDR_SHOWMINIMIZED_WIDGET,(qint64)dialog->instance());
@@ -721,7 +727,7 @@ void MultiUserChatWindow::createMessageWidgets()
 	if (FMessageWidgets)
 	{
 		ui.wdtView->setLayout(new QVBoxLayout);
-		ui.wdtView->layout()->setMargin(0);
+		ui.wdtView->layout()->setContentsMargins(0,0,0,0);
 		FViewWidget = FMessageWidgets->newViewWidget(FMultiChat->streamJid(),FMultiChat->roomJid(),ui.wdtView);
 		connect(FViewWidget->instance(),SIGNAL(viewContextMenu(const QPoint &, const QTextDocumentFragment &, Menu *)),
 			SLOT(onViewWidgetContextMenu(const QPoint &, const QTextDocumentFragment &, Menu *)));
@@ -729,7 +735,7 @@ void MultiUserChatWindow::createMessageWidgets()
 		FWindowStatus[FViewWidget].createTime = QDateTime::currentDateTime();
 
 		ui.wdtEdit->setLayout(new QVBoxLayout);
-		ui.wdtEdit->layout()->setMargin(0);
+		ui.wdtEdit->layout()->setContentsMargins(0,0,0,0);
 		FEditWidget = FMessageWidgets->newEditWidget(FMultiChat->streamJid(),FMultiChat->roomJid(),ui.wdtEdit);
 		FEditWidget->setSendShortcut(SCT_MESSAGEWINDOWS_MUC_SENDMESSAGE);
 		ui.wdtEdit->layout()->addWidget(FEditWidget->instance());
@@ -738,7 +744,7 @@ void MultiUserChatWindow::createMessageWidgets()
 		connect(FEditWidget->instance(),SIGNAL(keyEventReceived(QKeyEvent *,bool &)),SLOT(onEditWidgetKeyEvent(QKeyEvent *,bool &)));
 
 		ui.wdtToolBar->setLayout(new QVBoxLayout);
-		ui.wdtToolBar->layout()->setMargin(0);
+		ui.wdtToolBar->layout()->setContentsMargins(0,0,0,0);
 		FToolBarWidget = FMessageWidgets->newToolBarWidget(NULL,FViewWidget,FEditWidget,NULL,ui.wdtToolBar);
 		ui.wdtToolBar->layout()->addWidget(FToolBarWidget->instance());
 		FToolBarWidget->toolBarChanger()->setSeparatorsVisible(false);
@@ -1134,23 +1140,23 @@ void MultiUserChatWindow::setToolTipForUser(IMultiUser *AUser)
 	if (userItem)
 	{
 		QStringList toolTips;
-		toolTips.append(Qt::escape(AUser->nickName()));
+		toolTips.append(AUser->nickName().toHtmlEscaped());
 
 		Jid realJid = AUser->data(MUDR_REAL_JID).toString();
 		if (!realJid.isEmpty())
-			toolTips.append(Qt::escape(realJid.uFull()));
+			toolTips.append(realJid.uFull().toHtmlEscaped());
 
 		QString role = AUser->data(MUDR_ROLE).toString();
 		if (!role.isEmpty())
-			toolTips.append(tr("Role: %1").arg(Qt::escape(role)));
+			toolTips.append(tr("Role: %1").arg(role.toHtmlEscaped()));
 
 		QString affiliation = AUser->data(MUDR_AFFILIATION).toString();
 		if (!affiliation.isEmpty())
-			toolTips.append(tr("Affiliation: %1").arg(Qt::escape(affiliation)));
+			toolTips.append(tr("Affiliation: %1").arg(affiliation.toHtmlEscaped()));
 
 		QString status = AUser->data(MUDR_STATUS).toString();
 		if (!status.isEmpty())
-			toolTips.append(QString("%1 <div style='margin-left:10px;'>%2</div>").arg(tr("Status:")).arg(Qt::escape(status).replace("\n","<br>")));
+			toolTips.append(QString("%1 <div style='margin-left:10px;'>%2</div>").arg(tr("Status:")).arg(status.toHtmlEscaped().replace("\n","<br>")));
 
 		userItem->setToolTip("<span>"+toolTips.join("<p/>")+"</span>");
 	}
@@ -1234,7 +1240,7 @@ bool MultiUserChatWindow::execShortcutCommand(const QString &AText)
 		parts.removeFirst();
 		QString status = parts.join(" ");
 		FMultiChat->sendPresence(IPresence::Offline,status);
-		exitAndDestroy(QString::null);
+		exitAndDestroy(QString());
 		hasCommand = true;
 	}
 	else if (AText.startsWith("/topic "))
@@ -1263,7 +1269,7 @@ bool MultiUserChatWindow::execShortcutCommand(const QString &AText)
 
 bool MultiUserChatWindow::isMentionMessage(const Message &AMessage) const
 {
-	QRegExp mention(QString("\\b%1\\b").arg(QRegExp::escape(FMultiChat->nickName())));
+	QRegularExpression mention(QString("\\b%1\\b").arg(QRegularExpression::escape(FMultiChat->nickName())));
 	return AMessage.body().indexOf(mention)>=0;
 }
 
@@ -1331,7 +1337,7 @@ void MultiUserChatWindow::showUserMessage(const Message &AMessage, const QString
 	else
 		options.timeFormat = FMessageStyles->timeFormat(options.time);
 
-	options.senderName = Qt::escape(ANick);
+	options.senderName = ANick.toHtmlEscaped();
 	options.senderId = options.senderName;
 
 	IMultiUser *user = FMultiChat->nickName()!=ANick ? FMultiChat->userByNick(ANick) : FMultiChat->mainUser();
@@ -1357,7 +1363,7 @@ void MultiUserChatWindow::showUserMessage(const Message &AMessage, const QString
 
 void MultiUserChatWindow::showHistory()
 {
-	if (FMessageArchiver && !FHistoryRequests.values().contains(NULL))
+	if (FMessageArchiver && !FHistoryRequests.values().contains(static_cast<IChatWindow *>(NULL)))
 	{
 		IArchiveRequest request;
 		request.with = FMultiChat->roomJid();
@@ -1389,7 +1395,7 @@ void MultiUserChatWindow::updateWindow()
 	setWindowIconText(roomName);
 	setWindowTitle(tr("%1 - Conference").arg(roomName));
 
-	ui.lblRoom->setText(QString("<big><b>%1</b></big> - %2").arg(Qt::escape(FMultiChat->roomJid().uBare())).arg(Qt::escape(FMultiChat->nickName())));
+	ui.lblRoom->setText(QString("<big><b>%1</b></big> - %2").arg(FMultiChat->roomJid().uBare().toHtmlEscaped()).arg(FMultiChat->nickName().toHtmlEscaped()));
 
 	emit tabPageChanged();
 }
@@ -1419,7 +1425,7 @@ void MultiUserChatWindow::updateListItem(const Jid &AContactJid)
 		if (FActiveChatMessages.contains(window))
 			userItem->setIcon(IconStorage::staticStorage(RSR_STORAGE_MENUICONS)->getIcon(MNI_MUC_PRIVATE_MESSAGE));
 		else if (FStatusIcons)
-			userItem->setIcon(FStatusIcons->iconByJidStatus(AContactJid,user->data(MUDR_SHOW).toInt(),QString::null,false));
+			userItem->setIcon(FStatusIcons->iconByJidStatus(AContactJid,user->data(MUDR_SHOW).toInt(),QString(),false));
 	}
 }
 
@@ -1454,12 +1460,12 @@ void MultiUserChatWindow::fillChatContentOptions(IChatWindow *AWindow, IMessageC
 	if (AOptions.direction == IMessageContentOptions::DirectionIn)
 	{
 		AOptions.senderColor = "blue";
-		AOptions.senderName = Qt::escape(AWindow->contactJid().resource());
+		AOptions.senderName = AWindow->contactJid().resource().toHtmlEscaped();
 	}
 	else
 	{
 		AOptions.senderColor = "red";
-		AOptions.senderName = Qt::escape(FMultiChat->nickName());
+		AOptions.senderName = FMultiChat->nickName().toHtmlEscaped();
 	}
 	AOptions.senderId = AOptions.senderName;
 }
@@ -1594,11 +1600,11 @@ void MultiUserChatWindow::updateChatWindow(IChatWindow *AWindow)
 	if (AWindow->tabPageNotifier() && AWindow->tabPageNotifier()->activeNotify()>0)
 		icon = AWindow->tabPageNotifier()->notifyById(AWindow->tabPageNotifier()->activeNotify()).icon;
 	if (FStatusIcons && icon.isNull())
-		icon = FStatusIcons->iconByJidStatus(AWindow->contactJid(),AWindow->infoWidget()->field(IInfoWidget::ContactShow).toInt(),QString::null,false);
+		icon = FStatusIcons->iconByJidStatus(AWindow->contactJid(),AWindow->infoWidget()->field(IInfoWidget::ContactShow).toInt(),QString(),false);
 
 	QString contactName = AWindow->infoWidget()->field(IInfoWidget::ContactName).toString();
 	QString caption = QString("[%1]").arg(contactName);
-	AWindow->updateWindow(icon,caption,tr("%1 - Private chat").arg(caption),QString::null);
+	AWindow->updateWindow(icon,caption,tr("%1 - Private chat").arg(caption),QString());
 }
 
 bool MultiUserChatWindow::event(QEvent *AEvent)
@@ -1665,7 +1671,7 @@ void MultiUserChatWindow::closeEvent(QCloseEvent *AEvent)
 		saveWindowGeometry();
 
 	if (Options::node(OPV_MUC_GROUPCHAT_QUITONWINDOWCLOSE).value().toBool() && !Options::node(OPV_MESSAGES_COMBINEWITHROSTER).value().toBool())
-		exitAndDestroy(QString::null);
+		exitAndDestroy(QString());
 
 	QMainWindow::closeEvent(AEvent);
 	emit tabPageClosed();
@@ -1697,7 +1703,7 @@ bool MultiUserChatWindow::eventFilter(QObject *AObject, QEvent *AEvent)
 			if (FEditWidget)
 			{
 				QStandardItem *userItem = FUsersModel->itemFromIndex(FUsersProxy->mapToSource(ui.ltvUsers->indexAt(mouseEvent->pos())));
-				if(mouseEvent->button()==Qt::MidButton && userItem)
+				if(mouseEvent->button()==Qt::MiddleButton && userItem)
 				{
 					QString sufix = FEditWidget->textEdit()->textCursor().atBlockStart() ? Options::node(OPV_MUC_GROUPCHAT_NICKNAMESUFIX).value().toString() : " ";
 					FEditWidget->textEdit()->textCursor().insertText(userItem->text() + sufix);
@@ -1789,7 +1795,7 @@ void MultiUserChatWindow::onUserPresence(IMultiUser *AUser, int AShow, const QSt
 	QStandardItem *userItem = FUsers.value(AUser);
 	if (AShow!=IPresence::Offline && AShow!=IPresence::Error)
 	{
-		QString show = FStatusChanger ? FStatusChanger->nameByShow(AShow) : QString::null;
+		QString show = FStatusChanger ? FStatusChanger->nameByShow(AShow) : QString();
 		if (userItem == NULL)
 		{
 			userItem = new QStandardItem(AUser->nickName());
@@ -1925,7 +1931,7 @@ void MultiUserChatWindow::onSubjectChanged(const QString &ANick, const QString &
 
 void MultiUserChatWindow::onServiceMessageReceived(const Message &AMessage)
 {
-	if (!showStatusCodes(QString::null,FMultiChat->statusCodes()))
+	if (!showStatusCodes(QString(),FMultiChat->statusCodes()))
 		messageDisplay(AMessage,IMessageProcessor::MessageIn);  
 }
 
@@ -1941,7 +1947,7 @@ void MultiUserChatWindow::onUserKicked(const QString &ANick, const QString &ARea
 	Jid realJid = user!=NULL ? user->data(MUDR_REAL_JID).toString() : Jid::null;
 	showStatusMessage(tr("%1 has been kicked from the room%2. %3")
 		.arg(!realJid.isEmpty() ? ANick + QString(" <%1>").arg(realJid.uFull()) : ANick)
-		.arg(!AByUser.isEmpty() ? tr(" by %1").arg(AByUser) : QString::null)
+		.arg(!AByUser.isEmpty() ? tr(" by %1").arg(AByUser) : QString())
 		.arg(AReason), IMessageContentOptions::TypeEvent);
 
 	if (Options::node(OPV_MUC_GROUPCHAT_REJOINAFTERKICK).value().toBool()
@@ -1962,7 +1968,7 @@ void MultiUserChatWindow::onUserBanned(const QString &ANick, const QString &ARea
 	Jid realJid = user!=NULL ? user->data(MUDR_REAL_JID).toString() : Jid::null;
 	showStatusMessage(tr("%1 has been banned from the room%2. %3")
 		.arg(!realJid.isEmpty() ? ANick + QString(" <%1>").arg(realJid.uFull()) : ANick)
-		.arg(!AByUser.isEmpty() ? tr(" by %1").arg(AByUser) : QString::null)
+		.arg(!AByUser.isEmpty() ? tr(" by %1").arg(AByUser) : QString())
 		.arg(AReason), IMessageContentOptions::TypeEvent);
 }
 
@@ -2031,7 +2037,7 @@ void MultiUserChatWindow::onNotifierActiveNotifyChanged(int ANotifyId)
 
 void MultiUserChatWindow::onEditWidgetKeyEvent(QKeyEvent *AKeyEvent, bool &AHooked)
 {
-	if (FMultiChat->isOpen() && AKeyEvent->modifiers()+AKeyEvent->key() == NICK_MENU_KEY)
+	if (FMultiChat->isOpen() && int(AKeyEvent->modifiers())+AKeyEvent->key() == NICK_MENU_KEY)
 	{
 		QTextEdit *textEdit = FEditWidget->textEdit();
 		QTextCursor cursor = textEdit->textCursor();
@@ -2355,7 +2361,7 @@ void MultiUserChatWindow::onToolBarActionTriggered(bool)
 	}
 	else if (action == FExitRoom)
 	{
-		exitAndDestroy(QString::null);
+		exitAndDestroy(QString());
 	}
 	else if (action == FInviteContact)
 	{
@@ -2399,7 +2405,7 @@ void MultiUserChatWindow::onToolBarActionTriggered(bool)
 		if (FMultiChat->isOpen())
 		{
 			bool ok = false;
-			QString reason = QInputDialog::getText(this,tr("Destroying conference"),tr("Enter a reason:"),QLineEdit::Normal,QString::null,&ok);
+			QString reason = QInputDialog::getText(this,tr("Destroying conference"),tr("Enter a reason:"),QLineEdit::Normal,QString(),&ok);
 			if (ok)
 				FMultiChat->destroyRoom(reason);
 		}
@@ -2426,7 +2432,7 @@ void MultiUserChatWindow::onChangeUserRoleActionTriggeted(bool)
 		QString reason;
 		QString role = action->data(ADR_USER_ROLE).toString();
 		if (role == MUC_ROLE_NONE)
-			reason = QInputDialog::getText(this,tr("Kick reason"),tr("Enter reason for kick"),QLineEdit::Normal,QString::null,&ok);
+			reason = QInputDialog::getText(this,tr("Kick reason"),tr("Enter reason for kick"),QLineEdit::Normal,QString(),&ok);
 		if (ok)
 			FMultiChat->setRole(action->data(ADR_USER_NICK).toString(),role,reason);
 	}
@@ -2441,7 +2447,7 @@ void MultiUserChatWindow::onChangeUserAffiliationActionTriggered(bool)
 		QString reason;
 		QString affil = action->data(ADR_USER_AFFIL).toString();
 		if (affil == MUC_AFFIL_OUTCAST)
-			reason = QInputDialog::getText(this,tr("Ban reason"),tr("Enter reason for ban"),QLineEdit::Normal,QString::null,&ok);
+			reason = QInputDialog::getText(this,tr("Ban reason"),tr("Enter reason for ban"),QLineEdit::Normal,QString(),&ok);
 		if (ok)
 			FMultiChat->setAffiliation(action->data(ADR_USER_NICK).toString(),affil,reason);
 	}

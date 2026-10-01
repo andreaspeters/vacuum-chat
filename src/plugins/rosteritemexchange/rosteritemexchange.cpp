@@ -1,4 +1,5 @@
 #include "rosteritemexchange.h"
+#include <QMimeData>
 
 #include <QDropEvent>
 #include <QDataStream>
@@ -191,8 +192,8 @@ bool RosterItemExchange::stanzaReadWrite(int AHandleId, const Jid &AStreamJid, S
 			IRosterExchangeRequest request;
 			request.streamJid = AStreamJid;
 			request.contactJid = AStanza.from();
-			request.id = AStanza.tagName()=="iq" ? AStanza.id() : QString::null;
-			request.message = AStanza.tagName()=="message" ? Message(AStanza).body() : QString::null;
+			request.id = AStanza.tagName()=="iq" ? AStanza.id() : QString();
+			request.message = AStanza.tagName()=="message" ? Message(AStanza).body() : QString();
 
 			QList<Jid> existItems;
 			QDomElement itemElem = xElem.firstChildElement("item");
@@ -398,7 +399,7 @@ QString RosterItemExchange::sendExchangeRequest(const IRosterExchangeRequest &AR
 			}
 		}
 	}
-	return QString::null;
+	return QString();
 }
 
 QList<IRosterItem> RosterItemExchange::dragDataContacts(const QMimeData *AData) const
@@ -481,7 +482,7 @@ bool RosterItemExchange::insertDropActions(const Jid &AStreamJid, const Jid &ACo
 	{
 		itemsJids.append(it->itemJid.pBare());
 		itemsNames.append(it->name);
-		itemsGroups.append(it->groups.toList().value(0));
+		itemsGroups.append(it->groups.values().value(0));
 	}
 
 	if (!itemsJids.isEmpty())
@@ -618,7 +619,7 @@ void RosterItemExchange::notifyExchangeRequest(ExchangeApproveDialog *ADialog)
 			notify.data.insert(NDR_POPUP_CAPTION, tr("Roster modification"));
 			notify.data.insert(NDR_POPUP_TITLE,FNotifications->contactName(request.streamJid,request.contactJid));
 			notify.data.insert(NDR_POPUP_IMAGE,FNotifications->contactAvatar(request.contactJid));
-			notify.data.insert(NDR_POPUP_HTML,Qt::escape(tr("%1 offers you to make some changes in your contact list.").arg(FNotifications->contactName(request.streamJid,request.contactJid))));
+			notify.data.insert(NDR_POPUP_HTML,tr("%1 offers you to make some changes in your contact list.").arg(FNotifications->contactName(request.streamJid,request.contactJid)).toHtmlEscaped());
 			notify.data.insert(NDR_SOUND_FILE,SDF_ROSTEREXCHANGE_REQUEST);
 			notify.data.insert(NDR_ALERT_WIDGET,(qint64)ADialog);
 			notify.data.insert(NDR_SHOWMINIMIZED_WIDGET,(qint64)ADialog);
@@ -653,7 +654,7 @@ bool RosterItemExchange::applyRequest(const IRosterExchangeRequest &ARequest, bo
 					if (ASubscribe)
 					{
 						if (FRosterChanger)
-							FRosterChanger->subscribeContact(ARequest.streamJid,it->itemJid,QString::null,ASilent);
+							FRosterChanger->subscribeContact(ARequest.streamJid,it->itemJid,QString(),ASilent);
 						else
 							roster->sendSubscription(it->itemJid,IRoster::Subscribe);
 					}
@@ -820,4 +821,4 @@ void RosterItemExchange::onExchangeApproveDialogDestroyed()
 	}
 }
 
-Q_EXPORT_PLUGIN2(plg_rosteritemexchange, RosterItemExchange)
+

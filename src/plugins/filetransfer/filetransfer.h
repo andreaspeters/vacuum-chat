@@ -54,6 +54,7 @@ class FileTransfer :
 	public IFileStreamsHandler
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.filetransfer")
 	Q_INTERFACES(IPlugin IFileTransfer IOptionsHolder IDiscoFeatureHandler  IRostersDragDropHandler IViewDropHandler IFileStreamsHandler);
 public:
 	FileTransfer();
@@ -88,7 +89,7 @@ public:
 	virtual bool fileStreamShowDialog(const QString &AStreamId);
 	//IFileTransfer
 	virtual bool isSupported(const Jid &AStreamJid, const Jid &AContactJid) const;
-	virtual IFileStream *sendFile(const Jid &AStreamJid, const Jid &AContactJid, const QString &AFileName = QString::null, const QString &AFileDesc = QString::null);
+	virtual IFileStream *sendFile(const Jid &AStreamJid, const Jid &AContactJid, const QString &AFileName = QString(), const QString &AFileDesc = QString());
 protected:
 	void registerDiscoFeatures();
 	void notifyStream(IFileStream *AStream, bool ANewStream = false);

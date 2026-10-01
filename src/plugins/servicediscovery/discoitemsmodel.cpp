@@ -1,4 +1,5 @@
 #include "discoitemsmodel.h"
+#include <algorithm>
 
 DiscoItemsModel::DiscoItemsModel(IServiceDiscovery *ADiscovery, const Jid &AStreamJid, QObject *AParent) : QAbstractItemModel(AParent)
 {
@@ -238,7 +239,7 @@ QString DiscoItemsModel::itemToolTip(const IDiscoInfo &ADiscoInfo) const
 		if (!ADiscoInfo.features.isEmpty())
 		{
 			QStringList features = ADiscoInfo.features;
-			qSort(features);
+			std::sort(features.begin(),features.end());
 			toolTip+=tr("<li><b>Features:</b></li>");
 			foreach(QString feature, features)
 			{
@@ -332,7 +333,7 @@ void DiscoItemsModel::removeChildren(DiscoItemIndex *AParent, QList<DiscoItemInd
 			if (row >= 0)
 				rows.append(row);
 		}
-		qSort(rows);
+		std::sort(rows.begin(),rows.end());
 
 		int firstRow = -1;
 		int lastRow = -1;
@@ -404,7 +405,14 @@ void DiscoItemsModel::onDiscoItemsReceived(const IDiscoItems &ADiscoItems)
 				}
 			}
 
-			QList<DiscoItemIndex *> removeList = (parentIndex->childs.toSet()-appendList.toSet()-updateList.toSet()).toList();
+			QSet<DiscoItemIndex *> removeSet;
+			for (DiscoItemIndex *index : parentIndex->childs)
+				removeSet.insert(index);
+			for (DiscoItemIndex *index : appendList)
+				removeSet.remove(index);
+			for (DiscoItemIndex *index : updateList)
+				removeSet.remove(index);
+			QList<DiscoItemIndex *> removeList = removeSet.values();
 			removeChildren(parentIndex,removeList);
 
 			QList<DiscoItemIndex *> loadList;

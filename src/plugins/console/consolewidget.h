@@ -12,7 +12,7 @@
 #include <utils/options.h>
 #include <utils/iconstorage.h>
 #include <utils/widgetmanager.h>
-#include "ui_consolewidget.h"
+#include <ui_consolewidget.h>
 
 class ConsoleWidget :
 			public QWidget,

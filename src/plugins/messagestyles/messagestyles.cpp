@@ -9,6 +9,7 @@ MessageStyles::MessageStyles()
 	FStatusIcons = NULL;
 	FVCardPlugin = NULL;
 	FRosterPlugin = NULL;
+	FPluginManager = NULL;
 	FOptionsManager = NULL;
 }
 
@@ -28,6 +29,7 @@ void MessageStyles::pluginInfo(IPluginInfo *APluginInfo)
 
 bool MessageStyles::initConnections(IPluginManager *APluginManager, int &/*AInitOrder*/)
 {
+	FPluginManager = APluginManager;
 	QList<IPlugin *> plugins = APluginManager->pluginInterface("IMessageStylePlugin");
 	foreach (IPlugin *plugin, plugins)
 	{
@@ -51,6 +53,13 @@ bool MessageStyles::initConnections(IPluginManager *APluginManager, int &/*AInit
 	plugin = APluginManager->pluginInterface("IRosterPlugin").value(0,NULL);
 	if (plugin)
 		FRosterPlugin = qobject_cast<IRosterPlugin *>(plugin->instance());
+
+	foreach (IPlugin *protocolPlugin, APluginManager->pluginInterface("IProtocolMessaging"))
+	{
+		IProtocolMessaging *messaging = qobject_cast<IProtocolMessaging *>(protocolPlugin->instance());
+		if (messaging && !FProtocolMessaging.contains(messaging))
+			FProtocolMessaging.append(messaging);
+	}
 
 	plugin = APluginManager->pluginInterface("IVCardPlugin").value(0,NULL);
 	if (plugin)
@@ -121,7 +130,7 @@ IMessageStyleOptions MessageStyles::styleOptions(const OptionsNode &ANode, int A
 		{
 		case Message::GroupChat:
 		case Message::Chat:
-			pluginId = "AdiumMessageStyle";
+			pluginId = "SimpleMessageStyle";
 			break;
 		default:
 			pluginId = "SimpleMessageStyle";
@@ -140,9 +149,29 @@ IMessageStyleOptions MessageStyles::styleOptions(int AMessageType, const QString
 	return styleOptions(node,AMessageType);
 }
 
+QString MessageStyles::contactAvatarById(const AccountId &AAccountId, const UserId &AUserId) const
+{
+	Q_UNUSED(AAccountId);
+	Q_UNUSED(AUserId);
+	return QString();
+}
+
+QString MessageStyles::contactNameById(const AccountId &AAccountId, const UserId &AUserId) const
+{
+	Q_UNUSED(AAccountId);
+	return AUserId;
+}
+
+QString MessageStyles::contactIconById(const AccountId &AAccountId, const UserId &AUserId) const
+{
+	Q_UNUSED(AAccountId);
+	Q_UNUSED(AUserId);
+	return QString();
+}
+
 QString MessageStyles::contactAvatar(const Jid &AContactJid) const
 {
-	return FAvatars!=NULL ? FAvatars->avatarFileName(FAvatars->avatarHash(AContactJid)) : QString::null;
+	return FAvatars!=NULL ? FAvatars->avatarFileName(FAvatars->avatarHash(AContactJid)) : QString();
 }
 
 QString MessageStyles::contactName(const Jid &AStreamJid, const Jid &AContactJid) const
@@ -165,12 +194,33 @@ QString MessageStyles::contactName(const Jid &AStreamJid, const Jid &AContactJid
 	}
 	else if (AStreamJid && AContactJid)
 	{
-		name = !AContactJid.resource().isEmpty() ? AContactJid.resource() : AContactJid.uNode();
+		QList<IProtocolMessaging *> messagingProviders = FProtocolMessaging;
+		if (FPluginManager)
+		{
+			foreach (IPlugin *protocolPlugin, FPluginManager->pluginInterface("IProtocolMessaging"))
+			{
+				IProtocolMessaging *messaging = qobject_cast<IProtocolMessaging *>(protocolPlugin->instance());
+				if (messaging && !messagingProviders.contains(messaging))
+					messagingProviders.append(messaging);
+			}
+		}
+		for (IProtocolMessaging *messaging : messagingProviders)
+		{
+			QString conversationId;
+			if (messaging->conversationIdForAddress(AContactJid, conversationId))
+			{
+				name = messaging->conversationDisplayName(conversationId);
+				if (!name.isEmpty())
+					break;
+			}
+		}
+		if (name.isEmpty())
+			name = !AContactJid.resource().isEmpty() ? AContactJid.resource() : AContactJid.uNode();
 	}
 	else
 	{
 		IRoster *roster = FRosterPlugin!=NULL ? FRosterPlugin->findRoster(AStreamJid) : NULL;
-		name = roster!=NULL ? roster->rosterItem(AContactJid).name : QString::null;
+		name = roster!=NULL ? roster->rosterItem(AContactJid).name : QString();
 	}
 
 	if (name.isEmpty())
@@ -196,7 +246,7 @@ QString MessageStyles::contactIcon(const Jid &AStreamJid, const Jid &AContactJid
 		QString substorage = FStatusIcons->iconsetByJid(AContactJid.isValid() ? AContactJid : AStreamJid);
 		return FStatusIcons->iconFileName(substorage,iconKey);
 	}
-	return QString::null;
+	return QString();
 }
 
 QString MessageStyles::contactIcon(const Jid &AContactJid, int AShow, const QString &ASubscription, bool AAsk) const
@@ -207,7 +257,7 @@ QString MessageStyles::contactIcon(const Jid &AContactJid, int AShow, const QStr
 		QString substorage = FStatusIcons->iconsetByJid(AContactJid);
 		return FStatusIcons->iconFileName(substorage,iconKey);
 	}
-	return QString::null;
+	return QString();
 }
 
 QString MessageStyles::dateSeparator(const QDate &ADate, const QDate &ACurDate) const
@@ -243,7 +293,7 @@ void MessageStyles::appendPendingChanges(int AMessageType, const QString &AConte
 	if (FPendingChages.isEmpty())
 		QTimer::singleShot(0,this,SLOT(onApplyPendingChanges()));
 
-	QPair<int,QString> item = qMakePair<int,QString>(AMessageType,AContext);
+	QPair<int,QString> item(AMessageType,AContext);
 	if (!FPendingChages.contains(item))
 		FPendingChages.append(item);
 }
@@ -290,4 +340,4 @@ void MessageStyles::onApplyPendingChanges()
 	FPendingChages.clear();
 }
 
-Q_EXPORT_PLUGIN2(plg_messagestyles, MessageStyles)
+

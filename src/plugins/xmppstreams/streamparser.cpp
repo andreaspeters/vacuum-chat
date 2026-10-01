@@ -27,12 +27,12 @@ void StreamParser::parseData(const QByteArray &AData)
 		}
 		else if (FReader.isStartElement())
 		{
-			QMap<QStringRef, QStringRef> nsDeclarations;
+			QMap<QString, QString> nsDeclarations;
 			foreach(const QXmlStreamNamespaceDeclaration &nsDecl, FReader.namespaceDeclarations())
-				nsDeclarations.insert(nsDecl.prefix(),nsDecl.namespaceUri());
+				nsDeclarations.insert(nsDecl.prefix().toString(),nsDecl.namespaceUri().toString());
 
 			QDomElement newElement;
-			if (nsDeclarations.contains(FReader.prefix()))
+			if (nsDeclarations.contains(FReader.prefix().toString()))
 				newElement = doc.createElementNS(FReader.namespaceUri().toString(),FReader.qualifiedName().toString());
 			else
 				newElement = doc.createElement(FReader.qualifiedName().toString());
@@ -46,12 +46,12 @@ void StreamParser::parseData(const QByteArray &AData)
 					newElement.setAttribute(attribute.qualifiedName().toString(),attribute.value().toString());
 			}
 
-			for(QMap<QStringRef, QStringRef>::const_iterator it=nsDeclarations.constBegin(); it!=nsDeclarations.constEnd(); ++it)
+			for(QMap<QString, QString>::const_iterator it=nsDeclarations.constBegin(); it!=nsDeclarations.constEnd(); ++it)
 			{
-				if (it.key() != FReader.prefix())
+				if (it.key() != FReader.prefix().toString())
 				{
-					QString prefix = it.key().toString();
-					newElement.setAttribute(!prefix.isEmpty() ? prefix+QString(":xmlns") : QString("xmlns"), it->toString());
+					QString prefix = it.key();
+					newElement.setAttribute(!prefix.isEmpty() ? prefix+QString(":xmlns") : QString("xmlns"), it.value());
 				}
 			}
 

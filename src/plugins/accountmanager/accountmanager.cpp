@@ -1,4 +1,5 @@
 #include "accountmanager.h"
+#include <QMessageBox>
 
 #define ADR_ACCOUNT_ID              Action::DR_Parametr1
 
@@ -7,6 +8,7 @@ AccountManager::AccountManager()
 	FXmppStreams = NULL;
 	FOptionsManager = NULL;
 	FRostersViewPlugin = NULL;
+	FPluginManager = NULL;
 }
 
 AccountManager::~AccountManager()
@@ -28,6 +30,7 @@ void AccountManager::pluginInfo(IPluginInfo *APluginInfo)
 bool AccountManager::initConnections(IPluginManager *APluginManager, int &AInitOrder)
 {
 	Q_UNUSED(AInitOrder);
+	FPluginManager = APluginManager;
 
 	IPlugin *plugin = APluginManager->pluginInterface("IXmppStreams").value(0,NULL);
 	if (plugin)
@@ -78,7 +81,7 @@ QMultiMap<int, IOptionsWidget *> AccountManager::optionsWidgets(const QString &A
 	QMultiMap<int, IOptionsWidget *> widgets;
 	if (ANodeId.startsWith(OPN_ACCOUNTS))
 	{
-		QStringList nodeTree = ANodeId.split(".",QString::SkipEmptyParts);
+		QStringList nodeTree = ANodeId.split(".",Qt::SkipEmptyParts);
 		if (ANodeId == OPN_ACCOUNTS)
 		{
 			widgets.insertMulti(OWO_ACCOUNT_OPTIONS, new AccountsOptions(this,AParent));
@@ -86,8 +89,20 @@ QMultiMap<int, IOptionsWidget *> AccountManager::optionsWidgets(const QString &A
 		else if (nodeTree.count()==2 && nodeTree.at(0)==OPN_ACCOUNTS)
 		{
 			OptionsNode aoptions = Options::node(OPV_ACCOUNT_ITEM,nodeTree.at(1));
-			widgets.insertMulti(OWO_ACCOUNT_OPTIONS,new AccountOptions(this,nodeTree.at(1),AParent));
-			widgets.insertMulti(OWO_ACCOUNT_REQUIRE_ENCRYPTION,FOptionsManager->optionsNodeWidget(aoptions.node("require-encryption"),tr("Require a secure connection"),AParent));
+			AccountOptions *accountOptions = new AccountOptions(this,FPluginManager,QUuid::fromString(nodeTree.at(1)),AParent);
+
+			connect(accountOptions, &AccountOptions::matrixVerificationRequested,
+				this, &AccountManager::onMatrixVerificationRequested, Qt::UniqueConnection);
+			connect(accountOptions, &AccountOptions::matrixSsssRecoveryRequested,
+				this, &AccountManager::onMatrixSsssRecoveryRequested, Qt::UniqueConnection);
+			connect(accountOptions, &AccountOptions::matrixRoomKeyImportRequested,
+				this, &AccountManager::onMatrixRoomKeyImportRequested, Qt::UniqueConnection);
+			widgets.insertMulti(OWO_ACCOUNT_OPTIONS, accountOptions);
+			QString accountType = aoptions.value("type").toString();
+			if (accountType.compare(QStringLiteral("matrix"), Qt::CaseInsensitive) != 0)
+			{
+				widgets.insertMulti(OWO_ACCOUNT_REQUIRE_ENCRYPTION,FOptionsManager->optionsNodeWidget(aoptions.node("require-encryption"),tr("Require a secure connection"),AParent));
+			}
 		}
 	}
 	return widgets;
@@ -101,6 +116,14 @@ QList<IAccount *> AccountManager::accounts() const
 IAccount *AccountManager::accountById(const QUuid &AAcoountId) const
 {
 	return FAccounts.value(AAcoountId);
+}
+
+IAccount *AccountManager::accountByProtocolId(const AccountId &AAccountId) const
+{
+	foreach (IAccount *account, FAccounts)
+		if (account && account->accountId().toString() == AAccountId)
+			return account;
+	return NULL;
 }
 
 IAccount *AccountManager::accountByStream(const Jid &AStreamJid) const
@@ -125,6 +148,9 @@ IAccount *AccountManager::appendAccount(const QUuid &AAccountId)
 		FAccounts.insert(AAccountId,account);
 		openAccountOptionsNode(AAccountId,account->name());
 		emit appended(account);
+		// Restore the persisted activation state after the account is fully
+		// registered, so protocol plugins receive the normal shown signal.
+		account->setActive(account->optionsNode().value("active").toBool());
 		return account;
 	}
 	return FAccounts.value(AAccountId);
@@ -200,7 +226,7 @@ void AccountManager::onProfileOpened(const QString &AProfile)
 {
 	Q_UNUSED(AProfile);
 	foreach(IAccount *account, FAccounts)
-		account->setActive(Options::node(OPV_ACCOUNT_ITEM,account->accountId()).value("active").toBool());
+		account->setActive(Options::node(OPV_ACCOUNT_ITEM,account->accountId().toString()).value("active").toBool());
 }
 
 void AccountManager::onProfileClosed(const QString &AProfile)
@@ -208,7 +234,7 @@ void AccountManager::onProfileClosed(const QString &AProfile)
 	Q_UNUSED(AProfile);
 	foreach(IAccount *account, FAccounts)
 	{
-		Options::node(OPV_ACCOUNT_ITEM,account->accountId()).setValue(account->isActive(),"active");
+		Options::node(OPV_ACCOUNT_ITEM,account->accountId().toString()).setValue(account->isActive(),"active");
 		account->setActive(false);
 	}
 }
@@ -216,7 +242,7 @@ void AccountManager::onProfileClosed(const QString &AProfile)
 void AccountManager::onOptionsOpened()
 {
 	foreach(QString id, Options::node(OPV_ACCOUNT_ROOT).childNSpaces("account"))
-		appendAccount(id);
+		appendAccount(QUuid::fromString(id));
 }
 
 void AccountManager::onOptionsClosed()
@@ -229,7 +255,7 @@ void AccountManager::onShowAccountOptions(bool)
 {
 	Action *action = qobject_cast<Action *>(sender());
 	if (action)
-		showAccountOptionsDialog(action->data(ADR_ACCOUNT_ID).toString());
+		showAccountOptionsDialog(QUuid::fromString(action->data(ADR_ACCOUNT_ID).toString()));
 }
 
 void AccountManager::onAccountActiveChanged(bool AActive)
@@ -237,6 +263,9 @@ void AccountManager::onAccountActiveChanged(bool AActive)
 	IAccount *account = qobject_cast<IAccount *>(sender());
 	if (account)
 	{
+		Options::node(OPV_ACCOUNT_ITEM, account->accountId().toString()).setValue(AActive, "active");
+		if (FOptionsManager)
+			FOptionsManager->saveOptions();
 		if (AActive)
 			emit shown(account);
 		else
@@ -253,6 +282,54 @@ void AccountManager::onAccountOptionsChanged(const OptionsNode &ANode)
 			openAccountOptionsNode(account->accountId(),ANode.value().toString());
 		emit changed(account, ANode);
 	}
+}
+
+
+void AccountManager::onMatrixVerificationRequested(const QUuid &accountId,
+	const QString &userId, const QString &deviceId)
+{
+	qWarning() << "[Matrix-E2EE] account manager verification relay:" << accountId << userId << deviceId;
+	if (!FPluginManager)
+		return;
+	bool invoked = false;
+	for (IPlugin *plugin : FPluginManager->pluginInterface(QStringLiteral("IProtocolMessaging")))
+		if (plugin && plugin->instance())
+			invoked = QMetaObject::invokeMethod(plugin->instance(), "requestDeviceVerificationForAccount",
+				Qt::QueuedConnection, Q_ARG(QString, accountId.toString()),
+				Q_ARG(QString, userId), Q_ARG(QString, deviceId)) || invoked;
+	if (!invoked)
+		QMessageBox::warning(nullptr, tr("Matrix verification"),
+			tr("No active Matrix messaging plugin accepted the verification request."));
+}
+
+void AccountManager::onMatrixSsssRecoveryRequested(const QUuid &accountId)
+{
+	if (!FPluginManager)
+		return;
+	bool invoked = false;
+	for (IPlugin *plugin : FPluginManager->pluginInterface(QStringLiteral("IProtocolMessaging")))
+		if (plugin && plugin->instance())
+			invoked = QMetaObject::invokeMethod(plugin->instance(),
+				"requestSsssRecoveryForAccount", Qt::QueuedConnection,
+				Q_ARG(QString, accountId.toString())) || invoked;
+	if (!invoked)
+		QMessageBox::warning(nullptr, tr("Matrix SSSS recovery"),
+			tr("No active Matrix messaging plugin accepted the SSSS recovery request."));
+}
+
+void AccountManager::onMatrixRoomKeyImportRequested(const QUuid &accountId)
+{
+	if (!FPluginManager)
+		return;
+	bool invoked = false;
+	for (IPlugin *plugin : FPluginManager->pluginInterface(QStringLiteral("IProtocolMessaging")))
+		if (plugin && plugin->instance())
+			invoked = QMetaObject::invokeMethod(plugin->instance(),
+				"requestRoomKeyImportForAccount", Qt::QueuedConnection,
+				Q_ARG(QString, accountId.toString())) || invoked;
+	if (!invoked)
+		QMessageBox::warning(nullptr, tr("Matrix room-key import"),
+			tr("No active Matrix messaging plugin accepted the room-key import request."));
 }
 
 void AccountManager::onRosterIndexContextMenu(const QList<IRosterIndex *> &AIndexes, quint32 ALabelId, Menu *AMenu)
@@ -272,4 +349,4 @@ void AccountManager::onRosterIndexContextMenu(const QList<IRosterIndex *> &AInde
 	}
 }
 
-Q_EXPORT_PLUGIN2(plg_accountmanager, AccountManager)
+

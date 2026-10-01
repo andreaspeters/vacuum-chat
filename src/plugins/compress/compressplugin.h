@@ -19,7 +19,7 @@
 #include <utils/xmpperror.h>
 #include "compression.h"
 
-#define COMPRESS_UUID "{061D0687-B954-416d-B690-D1BA7D845D83}"
+#define COMPRESS_UUID QUuid("{061D0687-B954-416d-B690-D1BA7D845D83}")
 
 class CompressPlugin :
 	public QObject,
@@ -28,6 +28,7 @@ class CompressPlugin :
 	public IXmppFeaturesPlugin
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.compress")
 	Q_INTERFACES(IPlugin IOptionsHolder IXmppFeaturesPlugin);
 public:
 	CompressPlugin();

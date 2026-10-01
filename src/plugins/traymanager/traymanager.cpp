@@ -1,4 +1,5 @@
 #include "traymanager.h"
+#include <QRandomGenerator>
 
 #include <QApplication>
 
@@ -134,9 +135,9 @@ ITrayNotify TrayManager::notifyById( int ANotifyId ) const
 
 int TrayManager::appendNotify( const ITrayNotify &ANotify )
 {
-	int notifyId = qrand();
+	int notifyId = static_cast<int>(QRandomGenerator::global()->generate());
 	while (notifyId<=0 || FNotifyItems.contains(notifyId))
-		notifyId = qrand();
+		notifyId = static_cast<int>(QRandomGenerator::global()->generate());
 	FNotifyOrder.append(notifyId);
 	FNotifyItems.insert(notifyId,ANotify);
 	updateTray();
@@ -222,4 +223,4 @@ void TrayManager::onShutdownStarted()
 	FSystemIcon.hide();
 }
 
-Q_EXPORT_PLUGIN2(plg_traymanager, TrayManager)
+

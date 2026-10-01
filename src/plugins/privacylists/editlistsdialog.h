@@ -7,7 +7,7 @@
 #include <interfaces/iroster.h>
 #include <interfaces/iprivacylists.h>
 #include <utils/iconstorage.h>
-#include "ui_editlistsdialog.h"
+#include <ui_editlistsdialog.h>
 
 class EditListsDialog :
 			public QDialog

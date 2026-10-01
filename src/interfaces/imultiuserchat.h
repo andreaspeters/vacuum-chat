@@ -11,7 +11,7 @@
 #include <utils/xmpperror.h>
 #include <utils/menubarchanger.h>
 
-#define MULTIUSERCHAT_UUID "{EB960F92-59A9-4322-A646-F9AB4913706C}"
+#define MULTIUSERCHAT_UUID QUuid("{EB960F92-59A9-4322-A646-F9AB4913706C}")
 
 #define MUC_ROLE_NONE                   "none"
 #define MUC_ROLE_VISITOR                "visitor"
@@ -114,7 +114,7 @@ public:
 	virtual XmppError roomError() const =0;
 	virtual bool sendStreamPresence() =0;
 	virtual bool sendPresence(int AShow, const QString &AStatus) =0;
-	virtual bool sendMessage(const Message &AMessage, const QString &AToNick = QString::null) =0;
+	virtual bool sendMessage(const Message &AMessage, const QString &AToNick = QString()) =0;
 	virtual bool requestVoice() =0;
 	virtual bool inviteContact(const Jid &AContactJid, const QString &AReason) =0;
 	//Moderator
@@ -122,8 +122,8 @@ public:
 	virtual bool sendSubject(const QString &ASubject) =0;
 	virtual bool sendDataFormMessage(const IDataForm &AForm) =0;
 	//Administrator
-	virtual bool setRole(const QString &ANick, const QString &ARole, const QString &AReason = QString::null) =0;
-	virtual bool setAffiliation(const QString &ANick, const QString &AAffiliation, const QString &AReason = QString::null) =0;
+	virtual bool setRole(const QString &ANick, const QString &ARole, const QString &AReason = QString()) =0;
+	virtual bool setAffiliation(const QString &ANick, const QString &AAffiliation, const QString &AReason = QString()) =0;
 	virtual bool requestAffiliationList(const QString &AAffiliation) =0;
 	virtual bool changeAffiliationList(const QList<IMultiUserListItem> &ADeltaList) =0;
 	//Owner

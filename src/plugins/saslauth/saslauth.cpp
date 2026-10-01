@@ -1,4 +1,5 @@
 #include "saslauth.h"
+#include <QRandomGenerator>
 
 #include <QMultiHash>
 #include <QStringList>
@@ -73,12 +74,12 @@ bool SASLAuth::xmppStanzaIn(IXmppStream *AXmppStream, Stanza &AStanza, int AOrde
 			if (FChallengeStep == 0)
 			{
 				FChallengeStep++;
-				QMap<QByteArray, QByteArray> challengeMap = parseChallenge(QByteArray::fromBase64(AStanza.element().text().toAscii()));
+				QMap<QByteArray, QByteArray> challengeMap = parseChallenge(QByteArray::fromBase64(AStanza.element().text().toLatin1()));
 
 				QMap<QByteArray, QByteArray> responseMap;
 				QByteArray randBytes(32,' ');
 				for (int i=0; i<31; i++)
-					randBytes[i] = (char) (256.0 * qrand() / (RAND_MAX + 1.0));
+					randBytes[i] = (char) QRandomGenerator::global()->bounded(256);
 				responseMap["cnonce"] = randBytes.toBase64();
 				if (challengeMap.contains("realm"))
 					responseMap["realm"] = challengeMap.value("realm");

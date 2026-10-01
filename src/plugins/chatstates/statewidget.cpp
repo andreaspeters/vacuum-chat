@@ -39,6 +39,8 @@ StateWidget::StateWidget(IChatStates *AChatStates, IChatWindow *AWindow, QWidget
 	        SLOT(onPermitStatusChanged(const Jid &, int)));
 	connect(FChatStates->instance(),SIGNAL(userChatStateChanged(const Jid &, const Jid &, int)),
 	        SLOT(onUserChatStateChanged(const Jid &, const Jid &, int)));
+	connect(FChatStates->instance(),SIGNAL(protocolUserChatStateChanged(QString,QString,int)),
+	        SLOT(onProtocolUserChatStateChanged(QString,QString,int)));
 
 	onPermitStatusChanged(FWindow->contactJid(),FChatStates->permitStatus(FWindow->contactJid()));
 	onUserChatStateChanged(FWindow->streamJid(),FWindow->contactJid(),FChatStates->userChatState(FWindow->streamJid(),FWindow->contactJid()));
@@ -71,42 +73,52 @@ void StateWidget::onPermitStatusChanged(const Jid &AContactJid, int AStatus)
 void StateWidget::onUserChatStateChanged(const Jid &AStreamJid, const Jid &AContactJid, int AState)
 {
 	if (FWindow->streamJid()==AStreamJid && FWindow->contactJid()==AContactJid)
+		updateUserChatState(AState);
+}
+
+void StateWidget::onProtocolUserChatStateChanged(const QString &accountId,
+	const QString &conversationId, int AState)
+{
+	if (FWindow->accountId() == accountId && FWindow->conversationId() == conversationId)
+		updateUserChatState(AState);
+}
+
+void StateWidget::updateUserChatState(int AState)
+{
+	QString state;
+	QString iconKey;
+
+	if (AState == IChatStates::StateActive)
 	{
-		QString state;
-		QString iconKey;
-
-		if (AState == IChatStates::StateActive)
-		{
-			state = tr("Active");
-			iconKey = MNI_CHATSTATES_ACTIVE;
-		}
-		else if (AState == IChatStates::StateComposing)
-		{
-			state = tr("Composing");
-			iconKey = MNI_CHATSTATES_COMPOSING;
-		}
-		else if (AState == IChatStates::StatePaused)
-		{
-			state = tr("Paused");
-			iconKey = MNI_CHATSTATES_PAUSED;
-		}
-		else if (AState == IChatStates::StateInactive)
-		{
-			state = tr("Inactive %1").arg(QDateTime::currentDateTime().toString("hh:mm"));
-			iconKey = MNI_CHATSTATES_INACTIVE;
-		}
-		else if (AState == IChatStates::StateGone)
-		{
-			state = tr("Gone %1").arg(QDateTime::currentDateTime().toString("hh:mm"));
-			iconKey = MNI_CHATSTATES_GONE;
-		}
-		else
-		{
-			state = tr("Unknown");
-			iconKey = MNI_CHATSTATES_UNKNOWN;
-		}
-
-		setText(state);
-		IconStorage::staticStorage(RSR_STORAGE_MENUICONS)->insertAutoIcon(this,iconKey);
+		state = tr("Active");
+		iconKey = MNI_CHATSTATES_ACTIVE;
 	}
+	else if (AState == IChatStates::StateComposing)
+	{
+		state = tr("Composing");
+		iconKey = MNI_CHATSTATES_COMPOSING;
+	}
+	else if (AState == IChatStates::StatePaused)
+	{
+		state = tr("Paused");
+		iconKey = MNI_CHATSTATES_PAUSED;
+	}
+	else if (AState == IChatStates::StateInactive)
+	{
+		state = tr("Inactive %1").arg(QDateTime::currentDateTime().toString("hh:mm"));
+		iconKey = MNI_CHATSTATES_INACTIVE;
+	}
+	else if (AState == IChatStates::StateGone)
+	{
+		state = tr("Gone %1").arg(QDateTime::currentDateTime().toString("hh:mm"));
+		iconKey = MNI_CHATSTATES_GONE;
+	}
+	else
+	{
+		state = tr("Unknown");
+		iconKey = MNI_CHATSTATES_UNKNOWN;
+	}
+
+	setText(state);
+	IconStorage::staticStorage(RSR_STORAGE_MENUICONS)->insertAutoIcon(this,iconKey);
 }

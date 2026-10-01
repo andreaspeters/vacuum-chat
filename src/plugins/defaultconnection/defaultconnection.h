@@ -77,6 +77,7 @@ private:
 	QList<QJDns::Record> FRecords;
 private:
 	bool FSSLError;
+	QList<QSslError> FSSLErrors;
 	bool FUseLegacySSL;
 	bool FDisconnecting;
 	QSslSocket FSocket;

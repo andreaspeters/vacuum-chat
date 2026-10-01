@@ -13,7 +13,10 @@
 #include <utils/shortcuts.h>
 #include <utils/textmanager.h>
 #include <utils/widgetmanager.h>
-#include "ui_chatwindow.h"
+#include <utils/iconstorage.h>
+#include <ui_chatwindow.h>
+
+class QDockWidget;
 
 class ChatWindow :
 	public QMainWindow,
@@ -23,6 +26,7 @@ class ChatWindow :
 	Q_INTERFACES(IChatWindow ITabPage);
 public:
 	ChatWindow(IMessageWidgets *AMessageWidgets, const Jid &AStreamJid, const Jid &AContactJid);
+	ChatWindow(IMessageWidgets *AMessageWidgets, const AccountId &AAccountId, const ConversationId &AConversationId);
 	virtual ~ChatWindow();
 	virtual QMainWindow *instance() { return this; }
 	//ITabWindowPage
@@ -39,6 +43,8 @@ public:
 	virtual ITabPageNotifier *tabPageNotifier() const;
 	virtual void setTabPageNotifier(ITabPageNotifier *ANotifier);
 	//IChatWindow
+	virtual AccountId accountId() const { return FAccountId; }
+	virtual ConversationId conversationId() const { return FConversationId; }
 	virtual const Jid &streamJid() const { return FStreamJid; }
 	virtual const Jid &contactJid() const { return FContactJid; }
 	virtual void setContactJid(const Jid &AContactJid);
@@ -48,6 +54,7 @@ public:
 	virtual IMenuBarWidget *menuBarWidget() const { return FMenuBarWidget; }
 	virtual IToolBarWidget *toolBarWidget() const { return FToolBarWidget; }
 	virtual IStatusBarWidget *statusBarWidget() const { return FStatusBarWidget; }
+	virtual void setSidebarWidget(QWidget *AWidget);
 	virtual void updateWindow(const QIcon &AIcon, const QString &ACaption, const QString &ATitle, const QString &AToolTip);
 signals:
 	//ITabWindowPage
@@ -71,6 +78,7 @@ protected:
 	void loadWindowGeometry();
 protected:
 	virtual bool event(QEvent *AEvent);
+	virtual bool eventFilter(QObject *AObject, QEvent *AEvent);
 	virtual void showEvent(QShowEvent *AEvent);
 	virtual void closeEvent(QCloseEvent *AEvent);
 protected slots:
@@ -92,9 +100,13 @@ private:
 	IToolBarWidget *FToolBarWidget;
 	IStatusBarWidget *FStatusBarWidget;
 	ITabPageNotifier *FTabPageNotifier;
+	QDockWidget *FSidebarDock;
+	bool FRestoringSidebarWidth;
 private:
 	Jid FStreamJid;
 	Jid FContactJid;
+	AccountId FAccountId;
+	ConversationId FConversationId;
 	bool FShownDetached;
 	QString FTabPageToolTip;
 };

@@ -246,7 +246,7 @@ INotification NormalMessageHandler::messageNotify(INotifications *ANotifications
 				}
 				else
 				{
-					notify.data.insert(NDR_POPUP_HTML,Qt::escape(AMessage.body()));
+					notify.data.insert(NDR_POPUP_HTML,AMessage.body().toHtmlEscaped());
 				}
 
 				FNotifiedMessages.insertMulti(window,AMessage.data(MDR_MESSAGE_ID).toInt());
@@ -384,7 +384,7 @@ void NormalMessageHandler::updateWindow(IMessageWindow *AWindow)
 	else
 		caption = tr("Composing message");
 
-	AWindow->updateWindow(icon,caption,caption,QString::null);
+	AWindow->updateWindow(icon,caption,caption,QString());
 	AWindow->setNextCount(FMessageQueue.value(AWindow).count()-1);
 }
 
@@ -423,7 +423,7 @@ void NormalMessageHandler::fillContentOptions(IMessageWindow *AWindow, IMessageC
 {
 	AOptions.senderColor = "blue";
 	AOptions.senderId = AWindow->contactJid().full();
-	AOptions.senderName = Qt::escape(FMessageStyles->contactName(AWindow->streamJid(),AWindow->contactJid()));
+	AOptions.senderName = FMessageStyles->contactName(AWindow->streamJid(),AWindow->contactJid()).toHtmlEscaped();
 	AOptions.senderAvatar = FMessageStyles->contactAvatar(AWindow->contactJid());
 	AOptions.senderIcon = FMessageStyles->contactIcon(AWindow->streamJid(),AWindow->contactJid());
 }
@@ -447,7 +447,7 @@ void NormalMessageHandler::showStyledMessage(IMessageWindow *AWindow, const Mess
 	{
 		XmppStanzaError err(AMessage.stanza());
 		QString html = tr("<b>The message with a error is received</b>");
-		html += "<p style='color:red;'>"+Qt::escape(err.errorMessage())+"</p>";
+		html += "<p style='color:red;'>"+err.errorMessage().toHtmlEscaped()+"</p>";
 		html += "<hr>";
 		options.kind = IMessageContentOptions::KindMessage;
 		AWindow->viewWidget()->appendHtml(html,options);
@@ -608,7 +608,7 @@ void NormalMessageHandler::onShowWindowAction(bool)
 	{
 		QStringList contacts = action->data(ADR_CONTACT_JID).toStringList();
 		Jid streamJid = action->data(ADR_STREAM_JID).toString();
-		Jid contactJid = contacts.count()==1 ? contacts.first() : QString::null;
+		Jid contactJid = contacts.count()==1 ? contacts.first() : QString();
 		if (messageShowWindow(MHO_NORMALMESSAGEHANDLER,streamJid,contactJid,Message::Normal,IMessageHandler::SM_SHOW))
 		{
 			IMessageWindow *window = FMessageWidgets->findMessageWindow(streamJid,contactJid);
@@ -647,7 +647,7 @@ void NormalMessageHandler::onShortcutActivated(const QString &AId, QWidget *AWid
 						contacts.append(index->data(RDR_FULL_JID).toString());
 				}
 
-				Jid contactJid = contacts.count()==1 ? contacts.first() : QString::null;
+				Jid contactJid = contacts.count()==1 ? contacts.first() : QString();
 				if (messageShowWindow(MHO_NORMALMESSAGEHANDLER,streamJid,contactJid,Message::Normal,IMessageHandler::SM_SHOW))
 				{
 					IMessageWindow *window = FMessageWidgets->findMessageWindow(streamJid,contactJid);
@@ -730,4 +730,4 @@ void NormalMessageHandler::onStyleOptionsChanged(const IMessageStyleOptions &AOp
 	}
 }
 
-Q_EXPORT_PLUGIN2(plg_normalmessagehandler, NormalMessageHandler)
+

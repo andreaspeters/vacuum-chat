@@ -2,6 +2,7 @@
 #define CLOSEBUTTON_H
 
 #include <QAbstractButton>
+#include <QEnterEvent>
 #include "utilsexport.h"
 
 class UTILS_EXPORT CloseButton : 
@@ -13,7 +14,7 @@ public:
 	~CloseButton();
 	QSize sizeHint() const;
 protected:
-	void enterEvent(QEvent *AEvent);
+	void enterEvent(QEnterEvent *AEvent);
 	void leaveEvent(QEvent *AEvent);
 	void paintEvent(QPaintEvent *AEvent);
 };

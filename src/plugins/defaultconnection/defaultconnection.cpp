@@ -141,12 +141,13 @@ void DefaultConnection::startClientEncryption()
 void DefaultConnection::ignoreSslErrors()
 {
 	FSSLError = false;
+	FSSLErrors.clear();
 	FSocket.ignoreSslErrors();
 }
 
 QList<QSslError> DefaultConnection::sslErrors() const
 {
-	return FSocket.sslErrors();
+	return FSSLErrors;
 }
 
 QSslCertificate DefaultConnection::peerCertificate() const
@@ -186,12 +187,14 @@ void DefaultConnection::setLocalCertificate(const QSslCertificate &ACertificate)
 
 QList<QSslCertificate> DefaultConnection::caCertificates() const
 {
-	return FSocket.caCertificates();
+	return FSocket.sslConfiguration().caCertificates();
 }
 
 void DefaultConnection::setCaCertificates(const QList<QSslCertificate> &ACertificates)
 {
-	FSocket.setCaCertificates(ACertificates);
+	QSslConfiguration configuration = FSocket.sslConfiguration();
+	configuration.setCaCertificates(ACertificates);
+	FSocket.setSslConfiguration(configuration);
 }
 
 QNetworkProxy DefaultConnection::proxy() const
@@ -295,6 +298,7 @@ void DefaultConnection::onSocketReadyRead()
 void DefaultConnection::onSocketSSLErrors(const QList<QSslError> &AErrors)
 {
 	FSSLError = true;
+	FSSLErrors = AErrors;
 	emit sslErrorsOccured(AErrors);
 }
 

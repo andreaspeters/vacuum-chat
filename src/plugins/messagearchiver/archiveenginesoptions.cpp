@@ -13,7 +13,7 @@ EngineWidget::EngineWidget(IMessageArchiver *AArchiver, IArchiveEngine *AEngine,
 	setTitle(AEngine->engineName());
 
 	QHBoxLayout *hlayout = new QHBoxLayout;
-	hlayout->setMargin(0);
+	hlayout->setContentsMargins(0,0,0,0);
 
 	QLabel *descr = new QLabel(this);
 	descr->setWordWrap(true);
@@ -31,7 +31,7 @@ EngineWidget::EngineWidget(IMessageArchiver *AArchiver, IArchiveEngine *AEngine,
 	hlayout->addWidget(pbtDisable);
 
 	QVBoxLayout *vlayout = new QVBoxLayout;
-	vlayout->setMargin(5);
+	vlayout->setContentsMargins(5,5,5,5);
 	vlayout->addLayout(hlayout);
 
 	IOptionsWidget *engineOptions = FEngine->engineSettingsWidget(this);
@@ -103,7 +103,7 @@ ArchiveEnginesOptions::ArchiveEnginesOptions(IMessageArchiver *AArchiver, QWidge
 	FArchiver = AArchiver;
 
 	QVBoxLayout *layout = new QVBoxLayout;
-	layout->setMargin(0);
+	layout->setContentsMargins(0,0,0,0);
 	setLayout(layout);
 
 	QMultiMap<QString, IArchiveEngine *> engineOrder;

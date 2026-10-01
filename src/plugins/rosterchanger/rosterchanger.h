@@ -55,6 +55,7 @@ class RosterChanger :
 	public AdvancedDelegateEditProxy
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.rosterchanger")
 	Q_INTERFACES(IPlugin IRosterChanger IOptionsHolder IRostersDragDropHandler IRostersEditHandler IXmppUriHandler);
 public:
 	RosterChanger();
@@ -88,8 +89,8 @@ public:
 	virtual bool isSilentSubsctiption(const Jid &AStreamJid, const Jid &AContactJid) const;
 	virtual void insertAutoSubscribe(const Jid &AStreamJid, const Jid &AContactJid, bool ASilently, bool ASubscr, bool AUnsubscr);
 	virtual void removeAutoSubscribe(const Jid &AStreamJid, const Jid &AContactJid);
-	virtual void subscribeContact(const Jid &AStreamJid, const Jid &AContactJid, const QString &AMessage = QString::null, bool ASilently = false);
-	virtual void unsubscribeContact(const Jid &AStreamJid, const Jid &AContactJid, const QString &AMessage = QString::null, bool ASilently = false);
+	virtual void subscribeContact(const Jid &AStreamJid, const Jid &AContactJid, const QString &AMessage = QString(), bool ASilently = false);
+	virtual void unsubscribeContact(const Jid &AStreamJid, const Jid &AContactJid, const QString &AMessage = QString(), bool ASilently = false);
 	virtual IAddContactDialog *showAddContactDialog(const Jid &AStreamJid);
 signals:
 	void addContactDialogCreated(IAddContactDialog *ADialog);

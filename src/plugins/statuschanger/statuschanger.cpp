@@ -1,4 +1,5 @@
 #include "statuschanger.h"
+#include <QRandomGenerator>
 
 #include <QTimer>
 #include <QToolButton>
@@ -21,6 +22,7 @@ StatusChanger::StatusChanger()
 	FOptionsManager = NULL;
 	FAccountManager = NULL;
 	FNotifications = NULL;
+	FProtocolPresence = NULL;
 
 	FMainMenu = NULL;
 	FModifyStatus = NULL;
@@ -66,6 +68,21 @@ bool StatusChanger::initConnections(IPluginManager *APluginManager, int &AInitOr
 				SLOT(onPresenceChanged(IPresence *, int, const QString &, int)));
 			connect(FPresencePlugin->instance(),SIGNAL(presenceRemoved(IPresence *)),
 				SLOT(onPresenceRemoved(IPresence *)));
+		}
+	}
+
+	plugin = APluginManager->pluginInterface("IProtocolPresence").value(0,NULL);
+	if (plugin)
+	{
+		FProtocolPresence = qobject_cast<IProtocolPresence *>(plugin->instance());
+		if (FProtocolPresence)
+		{
+			connect(FProtocolPresence->instance(),SIGNAL(protocolPresenceChanged(QString,int,QString)),
+				SLOT(onProtocolPresenceChanged(QString,int,QString)));
+			connect(FProtocolPresence->instance(),SIGNAL(protocolPresenceClosed(QString)),
+				SLOT(onProtocolPresenceClosed(QString)));
+			if (!FProtocolPresence->streamId().isEmpty())
+				FProtocolStatuses.insert(FProtocolPresence->streamId(), FProtocolPresence->show());
 		}
 	}
 
@@ -220,7 +237,7 @@ bool StatusChanger::initObjects()
 	{
 		INotificationType notifyType;
 		notifyType.order = NTO_CONNECTION_ERROR;
-		notifyType.icon = FStatusIcons!=NULL ? FStatusIcons->iconByStatus(IPresence::Error,QString::null,false) : QIcon();
+		notifyType.icon = FStatusIcons!=NULL ? FStatusIcons->iconByStatus(IPresence::Error,QString(),false) : QIcon();
 		notifyType.title = tr("On loss of connection to the server");
 		notifyType.kindMask = INotification::PopupWindow|INotification::SoundPlay;
 		notifyType.kindDefs = notifyType.kindMask;
@@ -252,6 +269,23 @@ bool StatusChanger::initSettings()
 
 bool StatusChanger::startPlugin()
 {
+	if (!FProtocolPresence && FPluginManager)
+	{
+		IPlugin *plugin = FPluginManager->pluginInterface("IProtocolPresence").value(0,NULL);
+		if (plugin)
+		{
+			FProtocolPresence = qobject_cast<IProtocolPresence *>(plugin->instance());
+			if (FProtocolPresence)
+			{
+				connect(FProtocolPresence->instance(),SIGNAL(protocolPresenceChanged(QString,int,QString)),
+					SLOT(onProtocolPresenceChanged(QString,int,QString)),Qt::UniqueConnection);
+				connect(FProtocolPresence->instance(),SIGNAL(protocolPresenceClosed(QString)),
+					SLOT(onProtocolPresenceClosed(QString)),Qt::UniqueConnection);
+			}
+		}
+	}
+	if (FProtocolPresence && !FProtocolPresence->streamId().isEmpty())
+		FProtocolStatuses.insert(FProtocolPresence->streamId(), FProtocolPresence->show());
 	updateMainMenu();
 	return true;
 }
@@ -259,7 +293,7 @@ bool StatusChanger::startPlugin()
 QMultiMap<int, IOptionsWidget *> StatusChanger::optionsWidgets(const QString &ANodeId, QWidget *AParent)
 {
 	QMultiMap<int, IOptionsWidget *> widgets;
-	QStringList nodeTree = ANodeId.split(".",QString::SkipEmptyParts);
+	QStringList nodeTree = ANodeId.split(".",Qt::SkipEmptyParts);
 	if (FOptionsManager && nodeTree.count()==2 && nodeTree.at(0)==OPN_ACCOUNTS)
 	{
 		OptionsNode aoptions = Options::node(OPV_ACCOUNT_ITEM,nodeTree.at(1));
@@ -346,8 +380,51 @@ int StatusChanger::streamStatus(const Jid &AStreamJid) const
 	return !AStreamJid.isValid() ? mainStatus() : STATUS_NULL_ID;
 }
 
+QList<AccountId> StatusChanger::statusAccounts(int AStatusId) const
+{
+	QList<AccountId> accounts;
+	if (FProtocolPresence && accountStatus(FProtocolPresence->streamId()) == AStatusId)
+		accounts.append(FProtocolPresence->streamId());
+	return accounts;
+}
+
+int StatusChanger::accountStatus(const AccountId &AAccountId) const
+{
+	if (FProtocolPresence && FProtocolPresence->streamId() == AAccountId)
+	{
+		QList<int> statuses = statusByShow(FProtocolPresence->show());
+		return statuses.isEmpty() ? STATUS_NULL_ID : statuses.first();
+	}
+	return STATUS_NULL_ID;
+}
+
+void StatusChanger::setAccountStatus(const AccountId &AAccountId, int AStatusId)
+{
+	if (FProtocolPresence && FProtocolPresence->streamId() == AAccountId && FStatusItems.contains(AStatusId))
+	{
+		const StatusItem status = FStatusItems.value(AStatusId);
+		FProtocolPresence->setPresence(status.show, status.text);
+		updateMainMenu();
+	}
+}
+
 void StatusChanger::setStreamStatus(const Jid &AStreamJid, int AStatusId)
 {
+	if (!FProtocolPresence && FPluginManager)
+	{
+		IPlugin *plugin = FPluginManager->pluginInterface("IProtocolPresence").value(0,NULL);
+		if (plugin)
+		{
+			FProtocolPresence = qobject_cast<IProtocolPresence *>(plugin->instance());
+			if (FProtocolPresence)
+			{
+				connect(FProtocolPresence->instance(),SIGNAL(protocolPresenceChanged(QString,int,QString)),
+					SLOT(onProtocolPresenceChanged(QString,int,QString)),Qt::UniqueConnection);
+				connect(FProtocolPresence->instance(),SIGNAL(protocolPresenceClosed(QString)),
+					SLOT(onProtocolPresenceClosed(QString)),Qt::UniqueConnection);
+			}
+		}
+	}
 	if (FStatusItems.contains(AStatusId))
 	{
 		bool isSwitchOffline = false;
@@ -355,6 +432,13 @@ void StatusChanger::setStreamStatus(const Jid &AStreamJid, int AStatusId)
 		bool isChangeMainStatus = !AStreamJid.isValid() && AStatusId!=STATUS_MAIN_ID;
 
 		StatusItem newStatus = FStatusItems.value(AStatusId);
+		if (FProtocolPresence && (!AStreamJid.isValid() ||
+			AStreamJid.bare() == FProtocolPresence->streamId()))
+		{
+			FProtocolPresence->setPresence(newStatus.show, newStatus.text);
+			FProtocolStatuses.insert(FProtocolPresence->streamId(), newStatus.show);
+			updateMainMenu();
+		}
 		IPresence *mainPresence = visibleMainStatusPresence();
 		StatusItem oldMainStatus = FStatusItems.value(FCurrentStatus.value(mainPresence,STATUS_OFFLINE));
 
@@ -440,7 +524,7 @@ QString StatusChanger::statusItemName(int AStatusId) const
 {
 	if (FStatusItems.contains(AStatusId))
 		return FStatusItems.value(AStatusId).name;
-	return QString::null;
+	return QString();
 }
 
 int StatusChanger::statusItemShow(int AStatusId) const
@@ -454,7 +538,7 @@ QString StatusChanger::statusItemText(int AStatusId) const
 {
 	if (FStatusItems.contains(AStatusId))
 		return FStatusItems.value(AStatusId).text;
-	return QString::null;
+	return QString();
 }
 
 int StatusChanger::statusItemPriority(int AStatusId) const
@@ -503,7 +587,7 @@ int StatusChanger::addStatusItem(const QString &AName, int AShow, const QString 
 	int statusId = statusByName(AName);
 	if (statusId == STATUS_NULL_ID && !AName.isEmpty())
 	{
-		statusId = qrand();
+		statusId = static_cast<int>(QRandomGenerator::global()->generate());
 		while(statusId<=STATUS_MAX_STANDART_ID || FStatusItems.contains(statusId))
 			statusId = (statusId > STATUS_MAX_STANDART_ID) ? statusId+1 : STATUS_MAX_STANDART_ID+1;
 		StatusItem status;
@@ -553,7 +637,7 @@ void StatusChanger::removeStatusItem(int AStatusId)
 
 QIcon StatusChanger::iconByShow(int AShow) const
 {
-	return FStatusIcons != NULL ? FStatusIcons->iconByStatus(AShow,QString::null,false) : QIcon();
+	return FStatusIcons != NULL ? FStatusIcons->iconByStatus(AShow,QString(),false) : QIcon();
 }
 
 QString StatusChanger::nameByShow(int AShow) const
@@ -821,13 +905,34 @@ IPresence *StatusChanger::visibleMainStatusPresence() const
 void StatusChanger::updateMainMenu()
 {
 	int statusId = FCurrentStatus.value(visibleMainStatusPresence(),STATUS_OFFLINE);
+	bool protocolOnline = false;
+	int protocolShow = IPresence::Offline;
+	if (FProtocolPresence && !FProtocolPresence->streamId().isEmpty())
+	{
+		protocolShow = FProtocolPresence->show();
+		protocolOnline = protocolShow != IPresence::Offline && protocolShow != IPresence::Error;
+	}
+	for (QMap<QString, int>::const_iterator it = FProtocolStatuses.constBegin();
+		it != FProtocolStatuses.constEnd(); ++it) {
+		if (!protocolOnline && it.value() != IPresence::Offline && it.value() != IPresence::Error) {
+			protocolOnline = true;
+			protocolShow = it.value();
+			break;
+		}
+	}
+	if (protocolOnline || (FCurrentStatus.isEmpty() && !FProtocolStatuses.isEmpty()))
+	{
+		const QList<int> protocolStatuses = statusByShow(protocolShow);
+		if (!protocolStatuses.isEmpty())
+			statusId = protocolStatuses.first();
+	}
 
 	if (statusId == STATUS_CONNECTING_ID)
 		FMainMenu->setIcon(RSR_STORAGE_MENUICONS, MNI_SCHANGER_CONNECTING);
 	else
 		FMainMenu->setIcon(iconByShow(statusItemShow(statusId)));
 	FMainMenu->setTitle(statusItemName(statusId));
-	FMainMenu->menuAction()->setEnabled(!FCurrentStatus.isEmpty());
+	FMainMenu->menuAction()->setEnabled(!FCurrentStatus.isEmpty() || !FProtocolStatuses.isEmpty());
 
 	if (FTrayManager)
 	{
@@ -955,13 +1060,13 @@ void StatusChanger::insertStatusNotification(IPresence *APresence)
 		if (notify.kinds > 0)
 		{
 			notify.typeId = NNT_CONNECTION_ERROR;
-			notify.data.insert(NDR_ICON,FStatusIcons!=NULL ? FStatusIcons->iconByStatus(IPresence::Error,QString::null,false) : QIcon());
+			notify.data.insert(NDR_ICON,FStatusIcons!=NULL ? FStatusIcons->iconByStatus(IPresence::Error,QString(),false) : QIcon());
 			notify.data.insert(NDR_POPUP_CAPTION, tr("Connection error"));
 			notify.data.insert(NDR_POPUP_TITLE,FAccountManager!=NULL ? FAccountManager->accountByStream(APresence->streamJid())->name() : APresence->streamJid().uFull());
 			notify.data.insert(NDR_STREAM_JID,APresence->streamJid().full());
 			notify.data.insert(NDR_CONTACT_JID,APresence->streamJid().full());
 			notify.data.insert(NDR_POPUP_IMAGE, FNotifications->contactAvatar(APresence->streamJid()));
-			notify.data.insert(NDR_POPUP_HTML,Qt::escape(APresence->status()));
+			notify.data.insert(NDR_POPUP_HTML,APresence->status().toHtmlEscaped());
 			notify.data.insert(NDR_SOUND_FILE,SDF_SCHANGER_CONNECTION_ERROR);
 			FNotifyId.insert(APresence,FNotifications->appendNotification(notify));
 		}
@@ -1295,4 +1400,17 @@ void StatusChanger::onNotificationActivated(int ANotifyId)
 		FNotifications->removeNotification(ANotifyId);
 }
 
-Q_EXPORT_PLUGIN2(plg_statuschanger, StatusChanger)
+void StatusChanger::onProtocolPresenceChanged(const QString &AStreamId, int AShow, const QString &AStatus)
+{
+	Q_UNUSED(AStatus);
+	FProtocolStatuses.insert(AStreamId, AShow);
+	updateMainMenu();
+}
+
+void StatusChanger::onProtocolPresenceClosed(const QString &AStreamId)
+{
+	FProtocolStatuses.remove(AStreamId);
+	updateMainMenu();
+}
+
+

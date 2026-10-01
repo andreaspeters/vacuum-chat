@@ -39,6 +39,7 @@ class DataStreamsManger :
 	public IOptionsHolder
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.datastreamsmanager")
 	Q_INTERFACES(IPlugin IDataStreamsManager IStanzaHandler IStanzaRequestOwner IOptionsHolder);
 public:
 	DataStreamsManger();

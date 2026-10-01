@@ -13,7 +13,7 @@
 #include <interfaces/irosterchanger.h>
 #include <interfaces/ivcard.h>
 #include <utils/toolbarchanger.h>
-#include "ui_searchdialog.h"
+#include <ui_searchdialog.h>
 
 class SearchDialog :
 			public QDialog

@@ -1,501 +1,0 @@
-10
-
-dir
-2082
-http://vacuum-im.googlecode.com/svn/trunk/src/plugins
-http://vacuum-im.googlecode.com/svn
-
-
-
-2013-01-23T14:52:10.264484Z
-2082
-potapov.s.a
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-8ee3b2d0-dc07-11de-995a-ab19b33c1a40
-
-recentcontacts
-dir
-
-dataforms
-dir
-
-socksstreams
-dir
-
-newplugin.sh
-file
-
-
-
-
-2013-01-25T21:50:04.000000Z
-0523f2fede12da5a9ce4383e402ecedc
-2010-07-07T20:52:35.536298Z
-1166
-gelraen.ua
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-473
-
-rostersmodel
-dir
-
-adiummessagestyle
-dir
-
-accountmanager
-dir
-
-connectionmanager
-dir
-
-clientinfo
-dir
-
-birthdayreminder
-dir
-
-rosteritemexchange
-dir
-
-emoticons
-dir
-
-plugins.cmake
-file
-
-
-
-
-2013-01-25T21:50:04.000000Z
-579cce5af1c867a707c4cc0dee386cf4
-2012-09-06T13:52:31.968576Z
-1913
-potapov.s.a
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-1979
-
-xmppuriqueries
-dir
-
-messagearchiver
-dir
-
-messagewidgets
-dir
-
-jabbersearch
-dir
-
-autostatus
-dir
-
-roster
-dir
-
-plugins.pro
-file
-
-
-
-
-2013-01-25T21:50:04.000000Z
-a3cf9e8111cd7003d8fcd4b9ba73ea3a
-2013-01-05T08:36:51.702928Z
-2053
-potapov.s.a
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-1678
-
-messageprocessor
-dir
-
-optionsmanager
-dir
-
-normalmessagehandler
-dir
-
-bitsofbinary
-dir
-
-privacylists
-dir
-
-vcard
-dir
-
-stanzaprocessor
-dir
-
-commands
-dir
-
-urlprocessor
-dir
-
-presence
-dir
-
-filestreamsmanager
-dir
-
-statuschanger
-dir
-
-mainwindow
-dir
-
-statusicons
-dir
-
-pepmanager
-dir
-
-starttls
-dir
-
-gateways
-dir
-
-saslauth
-dir
-
-sessionnegotiation
-dir
-
-bookmarks
-dir
-
-messagestyles
-dir
-
-plugins.inc
-file
-
-
-
-
-2013-01-25T21:50:04.000000Z
-73237faace4195dcd288d4a2d9094a1d
-2012-09-06T13:52:31.968576Z
-1913
-potapov.s.a
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-923
-
-inbandstreams
-dir
-
-compress
-dir
-
-iqauth
-dir
-
-rostersview
-dir
-
-annotations
-dir
-
-chatstates
-dir
-
-shortcutmanager
-dir
-
-plugin_list.cmake
-file
-
-
-
-
-2013-01-25T21:50:04.000000Z
-9f3ecdc340159ac1f56a2b4262d2a7a7
-2013-01-05T08:36:51.702928Z
-2053
-potapov.s.a
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-2115
-
-notifications
-dir
-
-captchaforms
-dir
-
-traymanager
-dir
-
-servermessagearchive
-dir
-
-CMakeLists.txt
-file
-
-
-
-
-2013-01-25T21:50:04.000000Z
-9464ad377bdc389030f1ea8d10910fab
-2010-08-25T22:00:02.077896Z
-1253
-gelraen.ua
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-472
-
-simplemessagestyle
-dir
-
-chatmessagehandler
-dir
-
-xmppstreams
-dir
-
-filetransfer
-dir
-
-filemessagearchive
-dir
-
-servicediscovery
-dir
-
-multiuserchat
-dir
-
-remotecontrol
-dir
-
-messagecarbons
-dir
-
-privatestorage
-dir
-
-avatars
-dir
-
-console
-dir
-
-datastreamsmanager
-dir
-
-rostersearch
-dir
-
-spellchecker
-dir
-
-defaultconnection
-dir
-
-make_vcproj.bat
-file
-
-
-
-
-2013-01-25T21:50:04.000000Z
-2d0afd221f57fa01a29ab96226d6b025
-2008-10-01T13:10:23.457342Z
-544
-potapov.s.a
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-265
-
-rosterchanger
-dir
-
-registration
-dir
-
-newplugin.bat
-file
-
-
-
-
-2013-01-25T21:50:04.000000Z
-1e816887fecd5b82c9ce1009ff989814
-2010-07-07T20:52:35.536298Z
-1166
-gelraen.ua
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-255
-

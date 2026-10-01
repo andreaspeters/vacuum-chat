@@ -354,7 +354,7 @@ void Annotations::onRosterItemReceived(IRoster *ARoster, const IRosterItem &AIte
 	if (AItem.subscription==SUBSCRIPTION_REMOVE && isEnabled(ARoster->streamJid()))
 	{
 		if (!annotation(ARoster->streamJid(),AItem.itemJid).isEmpty())
-			setAnnotation(ARoster->streamJid(),AItem.itemJid,QString::null);
+			setAnnotation(ARoster->streamJid(),AItem.itemJid,QString());
 	}
 }
 
@@ -414,7 +414,7 @@ void Annotations::onRosterIndexToolTips(IRosterIndex *AIndex, quint32 ALabelId, 
 	{
 		QString note = AIndex->data(RDR_ANNOTATIONS).toString();
 		if (!note.isEmpty())
-			AToolTips.insert(RTTO_ANNOTATIONS,QString("%1 <div style='margin-left:10px;'>%2</div>").arg(tr("Annotation:")).arg(Qt::escape(note).replace("\n","<br>")));
+			AToolTips.insert(RTTO_ANNOTATIONS,QString("%1 <div style='margin-left:10px;'>%2</div>").arg(tr("Annotation:")).arg(note.toHtmlEscaped().replace("\n","<br>")));
 	}
 }
 
@@ -439,4 +439,4 @@ void Annotations::onEditNoteDialogDestroyed()
 		FEditDialogs[dialog->streamJid()].remove(dialog->contactJid());
 }
 
-Q_EXPORT_PLUGIN2(plg_annotations, Annotations)
+

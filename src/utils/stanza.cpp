@@ -1,6 +1,8 @@
 #include "stanza.h"
 
 #include <QTextStream>
+#include <QIODevice>
+#include <QStringConverter>
 #include "jid.h"
 
 StanzaData::StanzaData(const QString &ATagName)
@@ -177,7 +179,7 @@ QString Stanza::toString(int AIndent) const
 {
 	QString data;
 	QTextStream ts(&data, QIODevice::WriteOnly);
-	ts.setCodec("UTF-16");
+	ts.setEncoding(QStringConverter::Utf16);
 	element().save(ts, AIndent);
 	return data;
 }

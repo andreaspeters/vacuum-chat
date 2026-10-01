@@ -7,7 +7,7 @@
 #include <utils/stanza.h>
 #include <utils/xmpperror.h>
 
-#define XMPPSTREAMS_UUID "{8074A197-3B77-4bb0-9BD3-6F06D5CB8D15}"
+#define XMPPSTREAMS_UUID QUuid("{8074A197-3B77-4bb0-9BD3-6F06D5CB8D15}")
 
 class IXmppStream;
 class IConnection;

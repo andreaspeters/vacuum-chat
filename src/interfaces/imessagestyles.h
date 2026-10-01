@@ -9,9 +9,10 @@
 #include <QTextDocumentFragment>
 #include <interfaces/ioptionsmanager.h>
 #include <utils/jid.h>
+#include <interfaces/identity.h>
 #include <utils/options.h>
 
-#define MESSAGESTYLES_UUID  "{e3ab1bc7-35a6-431a-9b91-c778451b1eb1}"
+#define MESSAGESTYLES_UUID QUuid("{e3ab1bc7-35a6-431a-9b91-c778451b1eb1}")
 
 struct IMessageStyleOptions
 {
@@ -57,7 +58,7 @@ struct IMessageContentOptions
 		DirectionIn,
 		DirectionOut
 	};
-	IMessageContentOptions() { 
+	IMessageContentOptions() {
 		kind = KindMessage;
 		type = TypeEmpty;
 		status = StatusEmpty;
@@ -71,6 +72,7 @@ struct IMessageContentOptions
 	bool noScroll;
 	QDateTime time;
 	QString timeFormat;
+	QString messageId;
 	QString senderId;
 	QString senderName;
 	QString senderAvatar;
@@ -127,11 +129,14 @@ public:
 	virtual IMessageStylePlugin *pluginById(const QString &APluginId) const =0;
 	virtual IMessageStyle *styleForOptions(const IMessageStyleOptions &AOptions) const =0;
 	virtual IMessageStyleOptions styleOptions(const OptionsNode &ANode, int AMessageType) const =0;
-	virtual IMessageStyleOptions styleOptions(int AMessageType, const QString &AContext = QString::null) const =0;
+	virtual IMessageStyleOptions styleOptions(int AMessageType, const QString &AContext = QString()) const =0;
 	virtual QString contactAvatar(const Jid &AContactJid) const =0;
 	virtual QString contactName(const Jid &AStreamJid, const Jid &AContactJid = Jid::null) const =0;
 	virtual QString contactIcon(const Jid &AStreamJid, const Jid &AContactJid = Jid::null) const =0;
 	virtual QString contactIcon(const Jid &AContactJid, int AShow, const QString &ASubscription, bool AAsk) const =0;
+	virtual QString contactAvatarById(const AccountId &AAccountId, const UserId &AUserId) const =0;
+	virtual QString contactNameById(const AccountId &AAccountId, const UserId &AUserId) const =0;
+	virtual QString contactIconById(const AccountId &AAccountId, const UserId &AUserId) const =0;
 	virtual QString dateSeparator(const QDate &ADate, const QDate &ACurDate = QDate::currentDate()) const =0;
 	virtual QString timeFormat(const QDateTime &ATime, const QDateTime &ACurTime = QDateTime::currentDateTime()) const =0;
 protected:

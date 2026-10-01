@@ -394,7 +394,7 @@ void Roster::copyGroupToGroup(const QString &AGroup, const QString &AGroupTo)
 	if (AGroup!=AGroupTo && !AGroup.isEmpty())
 	{
 		QList<IRosterItem> allGroupItems = groupItems(AGroup);
-		QString groupName = AGroup.split(FGroupDelim,QString::SkipEmptyParts).last();
+		QString groupName = AGroup.split(FGroupDelim,Qt::SkipEmptyParts).last();
 		QList<IRosterItem>::iterator it = allGroupItems.begin();
 		while (it != allGroupItems.end())
 		{
@@ -426,7 +426,7 @@ void Roster::moveGroupToGroup(const QString &AGroup, const QString &AGroupTo)
 	if (AGroup != AGroupTo)
 	{
 		QList<IRosterItem> allGroupItems = groupItems(AGroup);
-		QString groupName = AGroup.split(FGroupDelim,QString::SkipEmptyParts).last();
+		QString groupName = AGroup.split(FGroupDelim,Qt::SkipEmptyParts).last();
 		QList<IRosterItem>::iterator it = allGroupItems.begin();
 		while (it != allGroupItems.end())
 		{
@@ -474,7 +474,10 @@ void Roster::processItemsElement(const QDomElement &AItemsElem, bool ACompleteRo
 	if (!AItemsElem.isNull())
 	{
 		FRosterVer = AItemsElem.attribute("ver");
-		QSet<Jid> oldItems = ACompleteRoster ? FRosterItems.keys().toSet() : QSet<Jid>();
+		QSet<Jid> oldItems;
+		if (ACompleteRoster)
+			for (const Jid &jid : FRosterItems.keys())
+				oldItems.insert(jid);
 		QDomElement itemElem = AItemsElem.firstChildElement("item");
 		while (!itemElem.isNull())
 		{

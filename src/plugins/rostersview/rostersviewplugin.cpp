@@ -156,7 +156,7 @@ int RostersViewPlugin::rosterDataOrder() const
 QList<int> RostersViewPlugin::rosterDataRoles() const
 {
 	static const QList<int> dataRoles = QList<int>() 
-		<< Qt::DisplayRole << Qt::ForegroundRole << Qt::BackgroundColorRole << RDR_STATES_FORCE_ON << RDR_ALLWAYS_VISIBLE;
+		<< Qt::DisplayRole << Qt::ForegroundRole << Qt::BackgroundRole << RDR_STATES_FORCE_ON << RDR_ALLWAYS_VISIBLE;
 	return dataRoles;
 }
 
@@ -178,7 +178,7 @@ QVariant RostersViewPlugin::rosterData(const IRosterIndex *AIndex, int ARole) co
 				return AIndex->data(RDR_NAME);
 			case Qt::ForegroundRole:
 				return FRostersView->palette().color(QPalette::Active, QPalette::BrightText);
-			case Qt::BackgroundColorRole:
+			case Qt::BackgroundRole:
 				return FRostersView->palette().color(QPalette::Active, QPalette::Dark);
 			case RDR_STATES_FORCE_ON:
 				return QStyle::State_Children;
@@ -200,6 +200,8 @@ QVariant RostersViewPlugin::rosterData(const IRosterIndex *AIndex, int ARole) co
 		}
 		else if (ARole == Qt::DisplayRole)
 		{
+			if (!AIndex->data(RDR_ACCOUNT_ID).toString().isEmpty() && !AIndex->data(RDR_CONVERSATION_ID).toString().isEmpty())
+				return AIndex->data(RDR_NAME);
 			Jid streamJid = AIndex->data(RDR_STREAM_JID).toString();
 			Jid indexJid = AIndex->data(RDR_FULL_JID).toString();
 			QString name = AIndex->data(RDR_NAME).toString();
@@ -274,7 +276,7 @@ QString RostersViewPlugin::indexExpandId(const QModelIndex &AIndex) const
 	int role = FExpandableTypes.value(AIndex.data(RDR_TYPE).toInt());
 	if (role > 0)
 		return AIndex.data(role).toString();
-	return QString::null;
+	return QString();
 }
 
 void RostersViewPlugin::loadExpandState(const QModelIndex &AIndex)
@@ -450,4 +452,4 @@ void RostersViewPlugin::onShowOfflineContactsAction(bool)
 	node.setValue(!node.value().toBool());
 }
 
-Q_EXPORT_PLUGIN2(plg_rostersview, RostersViewPlugin)
+

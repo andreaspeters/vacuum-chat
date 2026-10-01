@@ -4,7 +4,7 @@
 #include <QImage>
 #include <utils/jid.h>
 
-#define AVATARTS_UUID "{22F84EAF-683E-4a20-B5E5-1FE363FD206C}"
+#define AVATARTS_UUID QUuid("{22F84EAF-683E-4a20-B5E5-1FE363FD206C}")
 
 class IAvatars 
 {
@@ -17,6 +17,9 @@ public:
 	virtual QByteArray loadAvatarData(const QString &AHash) const =0;
 	virtual bool setAvatar(const Jid &AStreamJid, const QByteArray &AData) =0;
 	virtual QString setCustomPictire(const Jid &AContactJid, const QByteArray &AData) =0;
+	virtual QString avatarHashByKey(const QString &AKey) const =0;
+	virtual QString setCustomPictureByKey(const QString &AKey, const QByteArray &AData) =0;
+	virtual void setCustomImageByKey(const QString &AKey, const QImage &AImage) { (void)AKey; (void)AImage; }
 	virtual QImage loadAvatarImage(const QString &AHash, const QSize &AMaxSize = QSize(), bool AGray = false) const =0;
 protected:
 	virtual void avatarChanged(const Jid &AContactJid) =0;

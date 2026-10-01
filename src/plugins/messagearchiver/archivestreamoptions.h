@@ -5,7 +5,7 @@
 #include <definitions/namespaces.h>
 #include <interfaces/imessagearchiver.h>
 #include <interfaces/ioptionsmanager.h>
-#include "ui_archivestreamoptions.h"
+#include <ui_archivestreamoptions.h>
 
 class ArchiveDelegate :
 			public QItemDelegate

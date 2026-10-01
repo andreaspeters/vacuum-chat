@@ -10,7 +10,7 @@
 #include <utils/xmpperror.h>
 #include <utils/toolbarchanger.h>
 
-#define SERVICEDISCOVERY_UUID "{CF0D99D1-A2D8-4583-87FD-E584E0915BCC}"
+#define SERVICEDISCOVERY_UUID QUuid("{CF0D99D1-A2D8-4583-87FD-E584E0915BCC}")
 
 struct IDiscoIdentity
 {
@@ -93,7 +93,7 @@ class IServiceDiscovery
 public:
 	virtual QObject *instance() =0;
 	virtual IPluginManager *pluginManager() const =0;
-	virtual IDiscoInfo selfDiscoInfo(const Jid &AStreamJid, const QString &ANode = QString::null) const =0;
+	virtual IDiscoInfo selfDiscoInfo(const Jid &AStreamJid, const QString &ANode = QString()) const =0;
 	virtual void showDiscoInfo(const Jid &AStreamJid, const Jid &AContactJid, const QString &ANode, QWidget *AParent = NULL) =0;
 	virtual void showDiscoItems(const Jid &AStreamJid, const Jid &AContactJid, const QString &ANode, QWidget *AParent = NULL) =0;
 	virtual bool checkDiscoFeature(const Jid &AStreamJid, const Jid &AContactJid, const QString &ANode, const QString &AFeature, bool ADefault = true) =0;
@@ -116,13 +116,13 @@ public:
 	virtual IDiscoFeature discoFeature(const QString &AFeatureVar) const =0;
 	virtual void removeDiscoFeature(const QString &AFeatureVar) =0;
 	//DiscoInfo
-	virtual bool hasDiscoInfo(const Jid &AStreamJid, const Jid &AContactJid, const QString &ANode = QString::null) const =0;
-	virtual IDiscoInfo discoInfo(const Jid &AStreamJid, const Jid &AContactJid, const QString &ANode = QString::null) const =0;
-	virtual bool requestDiscoInfo(const Jid &AStreamJid, const Jid &AContactJid, const QString &ANode = QString::null) =0;
-	virtual void removeDiscoInfo(const Jid &AStreamJid, const Jid &AContactJid, const QString &ANode = QString::null) =0;
+	virtual bool hasDiscoInfo(const Jid &AStreamJid, const Jid &AContactJid, const QString &ANode = QString()) const =0;
+	virtual IDiscoInfo discoInfo(const Jid &AStreamJid, const Jid &AContactJid, const QString &ANode = QString()) const =0;
+	virtual bool requestDiscoInfo(const Jid &AStreamJid, const Jid &AContactJid, const QString &ANode = QString()) =0;
+	virtual void removeDiscoInfo(const Jid &AStreamJid, const Jid &AContactJid, const QString &ANode = QString()) =0;
 	virtual int findIdentity(const QList<IDiscoIdentity> &AIdentity, const QString &ACategory, const QString &AType) const =0;
 	//DiscoItems
-	virtual bool requestDiscoItems(const Jid &AStreamJid, const Jid &AContactJid, const QString &ANode = QString::null) =0;
+	virtual bool requestDiscoItems(const Jid &AStreamJid, const Jid &AContactJid, const QString &ANode = QString()) =0;
 protected:
 	virtual void discoItemsWindowCreated(IDiscoItemsWindow *AWindow) =0;
 	virtual void discoItemsWindowDestroyed(IDiscoItemsWindow *AWindow) =0;

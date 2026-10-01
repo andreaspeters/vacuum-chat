@@ -32,6 +32,7 @@ class SessionNegotiation :
 			public IDataLocalizer
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.sessionnegotiation")
 	Q_INTERFACES(IPlugin ISessionNegotiation IStanzaHandler IDiscoFeatureHandler ISessionNegotiator IDataLocalizer);
 public:
 	SessionNegotiation();

@@ -10,7 +10,7 @@
 #include <interfaces/inotifications.h>
 #include <interfaces/ioptionsmanager.h>
 #include <utils/iconstorage.h>
-#include "ui_notifyoptionswidget.h"
+#include <ui_notifyoptionswidget.h>
 
 class SortFilterProxyModel : 
 	public QSortFilterProxyModel

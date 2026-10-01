@@ -13,7 +13,7 @@
 #include <utils/shortcuts.h>
 #include <utils/xmpperror.h>
 #include <utils/widgetmanager.h>
-#include "ui_messagewindow.h"
+#include <ui_messagewindow.h>
 
 class MessageWindow :
 	public QMainWindow,

@@ -11,7 +11,7 @@
 #include <utils/xmpperror.h>
 #include "starttls.h"
 
-#define STARTTLS_UUID "{F554544C-0851-4e2a-9158-99191911E468}"
+#define STARTTLS_UUID QUuid("{F554544C-0851-4e2a-9158-99191911E468}")
 
 class StartTLSPlugin :
 	public QObject,
@@ -19,6 +19,7 @@ class StartTLSPlugin :
 	public IXmppFeaturesPlugin
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.starttls")
 	Q_INTERFACES(IPlugin IXmppFeaturesPlugin);
 public:
 	StartTLSPlugin();

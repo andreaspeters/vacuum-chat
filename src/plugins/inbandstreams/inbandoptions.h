@@ -4,7 +4,7 @@
 #include <QWidget>
 #include <interfaces/iinbandstreams.h>
 #include <interfaces/ioptionsmanager.h>
-#include "ui_inbandoptions.h"
+#include <ui_inbandoptions.h>
 
 class InBandOptions :
 			public QWidget,

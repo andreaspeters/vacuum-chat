@@ -29,7 +29,9 @@ Action *Menu::menuAction() const
 
 int Menu::actionGroup(const Action *AAction) const
 {
-	QMultiMap<int,Action *>::const_iterator it = qFind(FActions.begin(),FActions.end(),AAction);
+	QMultiMap<int,Action *>::const_iterator it = FActions.constBegin();
+	while (it != FActions.constEnd() && it.value() != AAction)
+		++it;
 	if (it != FActions.constEnd())
 		return it.key();
 	return AG_NULL;
@@ -74,7 +76,9 @@ void Menu::addAction(Action *AAction, int AGroup, bool ASort)
 {
 	QAction *before = NULL;
 	QAction *separator = NULL;
-	QMultiMap<int,Action *>::iterator it = qFind(FActions.begin(),FActions.end(),AAction);
+	QMultiMap<int,Action *>::iterator it = FActions.begin();
+	while (it != FActions.end() && it.value() != AAction)
+		++it;
 	if (it != FActions.end())
 	{
 		if (FActions.values(it.key()).count() == 1)
@@ -146,7 +150,9 @@ void Menu::addMenuActions(const Menu *AMenu, int AGroup, bool ASort)
 
 void Menu::removeAction(Action *AAction)
 {
-	QMultiMap<int,Action *>::iterator it = qFind(FActions.begin(),FActions.end(),AAction);
+	QMultiMap<int,Action *>::iterator it = FActions.begin();
+	while (it != FActions.end() && it.value() != AAction)
+		++it;
 	if (it != FActions.end())
 	{
 		disconnect(AAction,SIGNAL(actionDestroyed(Action *)),this,SLOT(onActionDestroyed(Action *)));
@@ -181,7 +187,7 @@ void Menu::clear()
 
 void Menu::setIcon(const QIcon &AIcon)
 {
-	setIcon(QString::null,QString::null,0);
+	setIcon(QString(),QString(),0);
 	FMenuAction->setIcon(AIcon);
 	QMenu::setIcon(AIcon);
 }

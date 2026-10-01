@@ -1,11 +1,9 @@
 file(GLOB SOURCES "*.cpp")
+list(FILTER SOURCES EXCLUDE REGEX "/moc_[^/]*\\.cpp$")
 file(GLOB UIS "*.ui")
 set(HEADERS "aboutbox.h"
 		"pluginmanager.h"
 		"setuppluginsdialog.h")
 
-qt4_wrap_cpp(MOC_SOURCES ${HEADERS})
-qt4_wrap_ui(UI_HEADERS ${UIS})
-if (NOT MSVC)
-	qt4_add_resources(RC_SOURCES "loader.rc")
-endif (NOT MSVC)
+# Qt6's CMake integration handles MOC/UIC/RCC through the target properties
+# enabled in the top-level project.

@@ -67,6 +67,7 @@ class ClientInfo :
 			public IDiscoFeatureHandler
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.clientinfo")
 	Q_INTERFACES(IPlugin IClientInfo IOptionsHolder IStanzaHandler IStanzaRequestOwner IDataLocalizer IDiscoFeatureHandler);
 public:
 	ClientInfo();

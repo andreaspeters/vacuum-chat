@@ -9,7 +9,7 @@
 static const QChar CharDog = '@';
 static const QChar CharSlash = '/';
 QHash<QString,Jid> JidCache = QHash<QString,Jid>();
-QList<QChar> EscChars =       QList<QChar>()   << 0x5c << 0x20 << 0x22 << 0x26 << 0x27 << 0x2f << 0x3a << 0x3c << 0x3e << 0x40;
+QList<QChar> EscChars =       QList<QChar>()   << QChar(0x5c) << QChar(0x20) << QChar(0x22) << QChar(0x26) << QChar(0x27) << QChar(0x2f) << QChar(0x3a) << QChar(0x3c) << QChar(0x3e) << QChar(0x40);
 QList<QString> EscStrings =   QList<QString>() <<"\\5c"<<"\\20"<<"\\22"<<"\\26"<<"\\27"<<"\\2f"<<"\\3a"<<"\\3c"<<"\\3e"<<"\\40";
 
 Jid Jid::null = Jid();
@@ -20,7 +20,7 @@ void registerJidStreamOperators()
 	if (!typeStreamOperatorsRegistered)
 	{
 		typeStreamOperatorsRegistered = true;
-		qRegisterMetaTypeStreamOperators<Jid>("Jid");
+		qRegisterMetaType<Jid>("Jid");
 	}
 }
 
@@ -33,7 +33,7 @@ QString stringPrepare(const Stringprep_profile *AProfile, const QString &AString
 		if (stringprep(buffer.data(),buffer.capacity(),(Stringprep_profile_flags)0, AProfile) == STRINGPREP_OK)
 			return QString::fromUtf8(buffer.constData());
 	}
-	return QString::null;
+	return QString();
 }
 
 JidData::JidData()
@@ -103,17 +103,17 @@ bool Jid::isEmpty() const
 
 QString Jid::node() const
 {
-	return d->FNode.toString();
+	return d->FNode;
 }
 
 QString Jid::pNode() const
 {
-	return d->FPrepNode.toString();
+	return d->FPrepNode;
 }
 
 QString Jid::uNode() const
 {
-	return unescape(d->FNode.toString());
+	return unescape(d->FNode);
 }
 
 void Jid::setNode(const QString &ANode)
@@ -123,12 +123,12 @@ void Jid::setNode(const QString &ANode)
 
 QString Jid::domain() const
 {
-	return d->FDomain.toString();
+	return d->FDomain;
 }
 
 QString Jid::pDomain() const
 {
-	return d->FPrepDomain.toString();
+	return d->FPrepDomain;
 }
 
 void Jid::setDomain(const QString &ADomain)
@@ -138,12 +138,12 @@ void Jid::setDomain(const QString &ADomain)
 
 QString Jid::resource() const
 {
-	return d->FResource.toString();
+	return d->FResource;
 }
 
 QString Jid::pResource() const
 {
-	return d->FPrepResource.toString();
+	return d->FPrepResource;
 }
 
 void Jid::setResource(const QString &AResource)
@@ -153,23 +153,23 @@ void Jid::setResource(const QString &AResource)
 
 QString Jid::bare() const
 {
-	return d->FBare.toString();
+	return d->FBare;
 }
 
 QString Jid::pBare() const
 {
-	return d->FPrepBare.toString();
+	return d->FPrepBare;
 }
 
 QString Jid::uBare() const
 {
 	QString ubare;
-	if (d->FNode.string())
+	if (!d->FNode.isEmpty())
 	{
-		ubare += unescape(d->FNode.toString());
+		ubare += unescape(d->FNode);
 		ubare += CharDog;
 	}
-	ubare += d->FDomain.toString();
+	ubare += d->FDomain;
 	return ubare;
 }
 
@@ -186,10 +186,10 @@ QString Jid::pFull() const
 QString Jid::uFull() const
 {
 	QString ufull = uBare();
-	if (d->FResource.string())
+	if (!d->FResource.isEmpty())
 	{
 		ufull += CharSlash;
-		ufull += d->FResource.toString();
+		ufull += d->FResource;
 	}
 	return ufull;
 }
@@ -324,7 +324,7 @@ QString Jid::encode(const QString &AJidStr)
 			else if (!AJidStr.at(i).isLetterOrNumber())
 			{
 				QString hex;
-				hex.sprintf("%%%02X", AJidStr.at(i).toLatin1());
+				hex = QString::asprintf("%%%02X", AJidStr.at(i).toLatin1());
 				encJid.append(hex);
 			}
 			else
@@ -401,37 +401,37 @@ Jid &Jid::parseFromString(const QString &AJidStr)
 			int at = AJidStr.lastIndexOf(CharDog,slash-AJidStr.size()-1);
 
 			// Build normal JID
-			d->FFull = QString::null;
+			d->FFull = QString();
 
 			if (at > 0)
 			{
 				d->FFull += AJidStr.left(at);
-				d->FNode = QStringRef(&d->FFull,0,d->FFull.size());
+				d->FNode = d->FFull;
 				d->FFull.append(CharDog);
 			}
 			else
 			{
-				d->FNode = QStringRef(NULL,0,0);
+				d->FNode = QString();
 			}
 
 			if (slash-at-1 > 0)
 			{
 				int nodeSize = d->FFull.size();
 				d->FFull += AJidStr.mid(at+1,slash-at-1);
-				d->FDomain = QStringRef(&d->FFull,nodeSize,d->FFull.size()-nodeSize);
+				d->FDomain = d->FFull.mid(nodeSize);
 			}
 			else
 			{
-				d->FDomain = QStringRef(NULL,0,0);
+				d->FDomain = QString();
 			}
 
 			if (!d->FFull.isEmpty())
 			{
-				d->FBare = QStringRef(&d->FFull,0,d->FFull.size());
+				d->FBare = d->FFull;
 			}
 			else
 			{
-				d->FBare = QStringRef(NULL,0,0);
+				d->FBare = QString();
 			}
 
 			if (slash<AJidStr.size()-1)
@@ -439,19 +439,19 @@ Jid &Jid::parseFromString(const QString &AJidStr)
 				d->FFull.append(CharSlash);
 				int bareSize = d->FFull.size();
 				d->FFull += AJidStr.right(AJidStr.size()-slash-1);
-				d->FResource = QStringRef(&d->FFull,bareSize,d->FFull.size()-bareSize);
+				d->FResource = d->FFull.mid(bareSize);
 			}
 			else
 			{
-				d->FResource = QStringRef(NULL,0,0);
+				d->FResource = QString();
 			}
 
 			//Build prepared JID
-			d->FPrepFull = QString::null;
+			d->FPrepFull = QString();
 
-			if (d->FNode.string())
+			if (!d->FNode.isEmpty())
 			{
-				QString prepNode = nodePrepare(d->FNode.toString());
+				QString prepNode = nodePrepare(d->FNode);
 				if (!prepNode.isEmpty())
 				{
 					d->FPrepFull += prepNode;
@@ -459,22 +459,22 @@ Jid &Jid::parseFromString(const QString &AJidStr)
 				}
 				else
 				{
-					d->FPrepFull += d->FNode.toString();
+					d->FPrepFull += d->FNode;
 					d->FNodeValid = false;
 				}
-				d->FPrepNode = QStringRef(&d->FPrepFull,0,d->FPrepFull.size());
+				d->FPrepNode = d->FPrepFull;
 				d->FPrepFull.append(CharDog);
 			}
 			else
 			{
-				d->FPrepNode = QStringRef(NULL,0,0);
+				d->FPrepNode = QString();
 				d->FNodeValid = true;
 			}
 
-			if (d->FDomain.string())
+			if (!d->FDomain.isEmpty())
 			{
 				int nodeSize = d->FPrepFull.size();
-				QString prepDomain = domainPrepare(d->FDomain.toString());
+				QString prepDomain = domainPrepare(d->FDomain);
 				if (!prepDomain.isEmpty())
 				{
 					d->FPrepFull += prepDomain;
@@ -482,31 +482,31 @@ Jid &Jid::parseFromString(const QString &AJidStr)
 				}
 				else
 				{
-					d->FPrepFull += d->FDomain.toString();
+					d->FPrepFull += d->FDomain;
 					d->FDomainValid = false;
 				}
-				d->FPrepDomain = QStringRef(&d->FPrepFull,nodeSize,d->FPrepFull.size()-nodeSize);
+				d->FPrepDomain = d->FPrepFull.mid(nodeSize);
 			}
 			else
 			{
-				d->FPrepDomain = QStringRef(NULL,0,0);
+				d->FPrepDomain = QString();
 				d->FDomainValid = false;
 			}
 
 			if (!d->FPrepFull.isEmpty())
 			{
-				d->FPrepBare = QStringRef(&d->FPrepFull,0,d->FPrepFull.size());
+				d->FPrepBare = d->FPrepFull;
 			}
 			else	
 			{
-				d->FPrepBare = QStringRef(NULL,0,0);
+				d->FPrepBare = QString();
 			}
 
-			if (d->FResource.string())
+			if (!d->FResource.isEmpty())
 			{
 				d->FPrepFull.append(CharSlash);
 				int bareSize = d->FPrepFull.size();
-				QString prepResource = resourcePrepare(d->FResource.toString());
+				QString prepResource = resourcePrepare(d->FResource);
 				if (!prepResource.isEmpty())
 				{
 					d->FPrepFull += prepResource;
@@ -514,24 +514,24 @@ Jid &Jid::parseFromString(const QString &AJidStr)
 				}
 				else
 				{
-					d->FPrepFull += d->FResource.toString();
+					d->FPrepFull += d->FResource;
 					d->FResourceValid = false;
 				}
-				d->FPrepResource = QStringRef(&d->FPrepFull,bareSize,d->FPrepFull.size()-bareSize);
+				d->FPrepResource = d->FPrepFull.mid(bareSize);
 			}
 			else
 			{
-				d->FPrepResource = QStringRef(NULL,0,0);
+				d->FPrepResource = QString();
 				d->FResourceValid = true;
 			}
 		}
 		else
 		{
-			d->FFull = d->FPrepFull = QString::null;
-			d->FBare = d->FPrepBare = QStringRef(NULL,0,0);
-			d->FNode = d->FPrepNode = QStringRef(NULL,0,0);
-			d->FDomain = d->FPrepDomain = QStringRef(NULL,0,0);
-			d->FResource = d->FPrepResource = QStringRef(NULL,0,0);
+			d->FFull = d->FPrepFull = QString();
+			d->FBare = d->FPrepBare = QString();
+			d->FNode = d->FPrepNode = QString();
+			d->FDomain = d->FPrepDomain = QString();
+			d->FResource = d->FPrepResource = QString();
 			d->FNodeValid = d->FDomainValid = d->FResourceValid = false;
 		}
 		JidCache.insert(AJidStr,*this);

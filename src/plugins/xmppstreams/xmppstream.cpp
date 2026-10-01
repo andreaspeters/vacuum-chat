@@ -195,7 +195,7 @@ QString XmppStream::getSessionPassword(bool AAskIfNeed)
 
 		FPasswordDialog = new QInputDialog(NULL,Qt::Dialog);
 		FPasswordDialog->setWindowTitle(tr("Password request"));
-		FPasswordDialog->setLabelText(tr("Enter password for <b>%1</b>").arg(Qt::escape(FStreamJid.uBare())));
+		FPasswordDialog->setLabelText(tr("Enter password for <b>%1</b>").arg(FStreamJid.uBare().toHtmlEscaped()));
 		FPasswordDialog->setTextEchoMode(QLineEdit::Password);
 		if (FPasswordDialog->exec() == QDialog::Accepted)
 			FSessionPassword = FPasswordDialog->textValue();
@@ -386,7 +386,7 @@ void XmppStream::processFeatures()
 
 void XmppStream::clearActiveFeatures()
 {
-	foreach(IXmppFeature *feature, FActiveFeatures.toSet())
+	foreach(IXmppFeature *feature, QSet<IXmppFeature *>(FActiveFeatures.begin(),FActiveFeatures.end()))
 		delete feature->instance();
 	FActiveFeatures.clear();
 }
@@ -423,7 +423,7 @@ bool XmppStream::startFeature(const QString &AFeatureNS, const QDomElement &AFea
 bool XmppStream::processDataHandlers(QByteArray &AData, bool ADataOut)
 {
 	bool hooked = false;
-	QMapIterator<int, IXmppDataHandler *> it(FDataHandlers);
+	QMultiMapIterator<int, IXmppDataHandler *> it(FDataHandlers);
 	if (!ADataOut)
 		it.toBack();
 	while (!hooked && (ADataOut ? it.hasNext() : it.hasPrevious()))
@@ -445,7 +445,7 @@ bool XmppStream::processDataHandlers(QByteArray &AData, bool ADataOut)
 bool XmppStream::processStanzaHandlers(Stanza &AStanza, bool AStanzaOut)
 {
 	bool hooked = false;
-	QMapIterator<int, IXmppStanzaHadler *> it(FStanzaHandlers);
+	QMultiMapIterator<int, IXmppStanzaHadler *> it(FStanzaHandlers);
 	if (!AStanzaOut)
 	{
 		AStanza.setTo(FStreamJid.full());
@@ -573,7 +573,7 @@ void XmppStream::onFeatureFinished(bool ARestart)
 void XmppStream::onFeatureError(const XmppError &AError)
 {
 	if (AError.errorNs()==NS_FEATURE_SASL || AError.toStanzaError().conditionCode()==XmppStanzaError::EC_NOT_AUTHORIZED)
-		FSessionPassword = QString::null;
+		FSessionPassword = QString();
 	abort(AError);
 }
 

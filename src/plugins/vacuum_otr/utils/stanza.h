@@ -42,14 +42,14 @@ public:
 	Stanza &setFrom(const QString &AFrom);
 	QString lang() const;
 	Stanza &setLang(const QString &ALang);
-	QDomElement firstElement(const QString &ATagName = QString::null, const QString &ANamespace = QString::null) const;
-	QDomElement addElement(const QString &ATagName, const QString &ANamespace = QString::null);
-	QDomElement createElement(const QString &ATagName, const QString &ANamespace = QString::null);
+	QDomElement firstElement(const QString &ATagName = QString(), const QString &ANamespace = QString()) const;
+	QDomElement addElement(const QString &ATagName, const QString &ANamespace = QString());
+	QDomElement createElement(const QString &ATagName, const QString &ANamespace = QString());
 	QDomText createTextNode(const QString &AData);
 	QString toString(int AIndent = 1) const;
 	QByteArray toByteArray() const;
 public:
-	static QDomElement findElement(const QDomElement &AParent, const QString &ATagName = QString::null, const QString &ANamespace = QString::null);
+	static QDomElement findElement(const QDomElement &AParent, const QString &ATagName = QString(), const QString &ANamespace = QString());
 private:
 	QSharedDataPointer<StanzaData> d;
 };

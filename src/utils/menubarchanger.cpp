@@ -22,7 +22,9 @@ QMenuBar *MenuBarChanger::menuBar() const
 
 int MenuBarChanger::menuGroup(Menu *AMenu) const
 {
-	QMultiMap<int, Menu *>::const_iterator it = qFind(FMenu.begin(),FMenu.end(),AMenu);
+	QMultiMap<int, Menu *>::const_iterator it = FMenu.constBegin();
+	while (it != FMenu.constEnd() && it.value() != AMenu)
+		++it;
 	if (it != FMenu.constEnd())
 		return it.key();
 	return MBG_NULL;
@@ -37,7 +39,9 @@ QList<Menu *> MenuBarChanger::groupMenus(int AGroup) const
 
 void MenuBarChanger::insertMenu(Menu *AMenu, int AGroup)
 {
-	QMultiMap<int, Menu *>::iterator it = qFind(FMenu.begin(),FMenu.end(),AMenu);
+	QMultiMap<int, Menu *>::iterator it = FMenu.begin();
+	while (it != FMenu.end() && it.value() != AMenu)
+		++it;
 	if (it != FMenu.end())
 	{
 		FMenu.erase(it);
@@ -59,7 +63,9 @@ void MenuBarChanger::insertMenu(Menu *AMenu, int AGroup)
 
 void MenuBarChanger::removeMenu(Menu *AMenu)
 {
-	QMultiMap<int, Menu *>::iterator it = qFind(FMenu.begin(),FMenu.end(),AMenu);
+	QMultiMap<int, Menu *>::iterator it = FMenu.begin();
+	while (it != FMenu.end() && it.value() != AMenu)
+		++it;
 	if (it != FMenu.end())
 	{
 		disconnect(AMenu,SIGNAL(menuDestroyed(Menu *)),this,SLOT(onMenuDestroyed(Menu *)));

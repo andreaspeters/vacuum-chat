@@ -36,6 +36,7 @@ class Annotations :
 	public IRosterDataHolder
 {
 	Q_OBJECT;
+	Q_PLUGIN_METADATA(IID "org.vacuum-im.annotations")
 	Q_INTERFACES(IPlugin IAnnotations IRosterDataHolder);
 public:
 	Annotations();

@@ -1,6 +1,7 @@
 #include "autostatus.h"
 
 #include <QCursor>
+#include <QRegularExpression>
 
 #define IDLE_TIMER_TIMEOUT  1000
 
@@ -104,7 +105,7 @@ QList<QUuid> AutoStatus::rules() const
 {
 	QList<QUuid> rulesIdList;
 	foreach(QString ruleId, Options::node(OPV_AUTOSTARTUS_ROOT).childNSpaces("rule"))
-		rulesIdList.append(ruleId);
+		rulesIdList.append(QUuid::fromString(ruleId));
 	return rulesIdList;
 }
 
@@ -173,12 +174,15 @@ void AutoStatus::removeRule(const QUuid &ARuleId)
 void AutoStatus::replaceDateTime(QString &AText, const QString &APattern, const QDateTime &ADateTime)
 {
 	int pos = 0;
-	QRegExp regExp(APattern);
-	regExp.setMinimal(true);
-	while ((pos = regExp.indexIn(AText, pos)) != -1)
+	QRegularExpression regExp(APattern, QRegularExpression::InvertedGreedinessOption);
+	while (true)
 	{
-		QString replText = !regExp.cap(1).isEmpty() ? ADateTime.toString(regExp.cap(1)) : ADateTime.toString();
-		AText.replace(pos,regExp.matchedLength(),replText);
+		QRegularExpressionMatch match = regExp.match(AText,pos);
+		if (!match.hasMatch())
+			break;
+		QString format = match.captured(1);
+		QString replText = !format.isEmpty() ? ADateTime.toString(format) : ADateTime.toString();
+		AText.replace(match.capturedStart(),match.capturedLength(),replText);
 		pos += replText.size();
 	}
 }
@@ -187,7 +191,7 @@ void AutoStatus::prepareRule(IAutoStatusRule &ARule)
 {
 	replaceDateTime(ARule.text,"\\%\\((.*)\\)",QDateTime::currentDateTime());
 	replaceDateTime(ARule.text,"\\$\\((.*)\\)",QDateTime::currentDateTime().addSecs(0-ARule.time));
-	replaceDateTime(ARule.text,"\\#\\((.*)\\)",QDateTime(QDate::currentDate()).addSecs(ARule.time));
+	replaceDateTime(ARule.text,"\\#\\((.*)\\)",QDateTime(QDate::currentDate(),QTime(0,0)).addSecs(ARule.time));
 }
 
 void AutoStatus::setActiveRule(const QUuid &ARuleId)
@@ -278,4 +282,4 @@ void AutoStatus::onProfileClosed(const QString &AName)
 	setActiveRule(QUuid());
 }
 
-Q_EXPORT_PLUGIN2(plg_autostatus, AutoStatus)
+
