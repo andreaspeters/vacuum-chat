@@ -1581,9 +1581,6 @@ void Matrix::onRosterChanged(const QList<ProtocolRoom> &rooms)
 				{ room.avatarUrl = member.avatarUrl; break; }
 		}
 	}
-	for (const ProtocolRoom &room : FProtocolRooms)
-		if (!room.avatarUrl.isEmpty())
-			loadRoomAvatar(room.id);
 	// Matrix conversations are rooms. A direct room remains one room-list
 	// item; its direct-chat presentation is derived from ProtocolRoom::isDirect.
 	// Do not expose the other member as a second roster item for the same room.

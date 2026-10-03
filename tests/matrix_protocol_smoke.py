@@ -818,6 +818,7 @@ def test_room_avatar_roster_lazy_load_contract():
     avatars_source = (root / "src/plugins/avatars/avatars.cpp").read_text()
     matrix_header = (root / "src/plugins/matrix/matrix.h").read_text()
     matrix_source = (root / "src/plugins/matrix/matrix.cpp").read_text()
+    roster_sync = matrix_source.split("void Matrix::onRosterChanged(", 1)[1].split("\n}\n", 1)[0]
     cached_rooms = matrix_source.split("void Matrix::onCachedRoomsLoaded(", 1)[1].split(
         "void Matrix::onCachedRoomsLoadFailed(", 1)[0]
     assert "loadRoomAvatar(const QString &roomId) const" in roster_interface
@@ -825,12 +826,18 @@ def test_room_avatar_roster_lazy_load_contract():
         "roster rebuild must not prefetch avatars for every room"
     assert "loadRoomAvatar(const QString &roomId) const override" in matrix_header
     assert "void Matrix::loadRoomAvatar(const QString &roomId) const" in matrix_source
+    assert "loadRoomAvatar(" not in roster_sync, \
+        "roster sync must not enqueue avatar cache checks for every room"
     assert 'room.avatarKey = accountId() + QStringLiteral("\\nroom\\n") + room.id;' in cached_rooms
     assert "matrixAvatarCacheExists" not in matrix_source, \
         "avatar cache filesystem checks must not run from the UI-thread adapter"
     avatar_render = avatars_source.split("QVariant Avatars::rosterData(", 1)[1].split(
         "bool Avatars::setRosterData(", 1)[0]
     assert "loadRoomAvatar" in avatar_render, "visible roster avatar queries should trigger lazy loading"
+    avatar_labels = avatars_source.split("QList<quint32> Avatars::rosterLabels(", 1)[1].split(
+        "AdvancedDelegateItem Avatars::rosterLabel(", 1)[0]
+    assert "RDR_AVATAR_IMAGE" not in avatar_labels, \
+        "label discovery must not probe or decode avatar files"
     network_source = (root / "src/plugins/matrix/matrixnetwork.cpp").read_text()
     avatar_request = network_source.split("void MatrixNetwork::requestAvatar(", 1)[1].split(
         "void MatrixNetwork::requestImage(", 1)[0]
@@ -1611,7 +1618,8 @@ def test_favorite_items_use_the_avatar_provider_label():
     avatar_labels = avatars[avatar_start:avatar_end]
     assert "RLID_AVATAR_IMAGE" not in favorite_labels, \
         "RecentContacts must not shadow the Avatars provider's real image label"
-    assert "AIndex->data(RDR_AVATAR_IMAGE)" in avatar_labels
+    assert "RDR_AVATAR_IMAGE" not in avatar_labels
+    assert "RDR_AVATAR_HASH" in avatar_labels and "RDR_AVATAR_KEY" in avatar_labels
     roles_start = recent.index("QList<int> RecentContacts::rosterDataRoles")
     roles_end = recent.index("QList<int> RecentContacts::rosterDataTypes", roles_start)
     assert "RDR_AVATAR_IMAGE" in recent[roles_start:roles_end]

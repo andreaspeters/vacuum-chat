@@ -356,7 +356,9 @@ bool Avatars::setRosterData(IRosterIndex *AIndex, int ARole, const QVariant &AVa
 QList<quint32> Avatars::rosterLabels(int AOrder, const IRosterIndex *AIndex) const
 {
 	QList<quint32> labels;
-	if (AOrder==RLHO_AVATARS_AVATAR && FAvatarsVisible && !AIndex->data(RDR_AVATAR_IMAGE).isNull())
+	if (AOrder==RLHO_AVATARS_AVATAR && FAvatarsVisible &&
+		(FShowEmptyAvatars || !AIndex->data(RDR_AVATAR_HASH).toString().isEmpty() ||
+		!AIndex->data(RDR_AVATAR_KEY).toString().isEmpty()))
 		labels.append(FAvatarLabelId);
 	return labels;
 }
