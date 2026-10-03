@@ -27,26 +27,11 @@ Matrix encryption dependencies are optional. CMake enables Matrix E2EE when it f
 Configure and build the main application from the repository root:
 
 ```sh
-cmake -S . -B build
-cmake --build build --target vacuumu -j1
-```
+mkdir build
+cd build
+cmake -DRUN_FROM_BUILD_DIR=ON -DHAVE_OLM=1 ..
+make
 
-The repository also provides Makefile shortcuts:
-
-```sh
-make build
-```
-
-To build the Matrix plugin explicitly:
-
-```sh
-cmake --build build --target matrix -j1
-```
-
-Use a separate build directory by setting `BUILD_DIR`, for example:
-
-```sh
-BUILD_DIR=build-nix make build
 ```
 
 ## Packaging
@@ -56,13 +41,9 @@ available, its default generator set also creates an Arch Linux
 `.pkg.tar.zst` package:
 
 ```sh
-cpack --config build/CPackConfig.cmake -B build/packages
+cmake -DRUN_FROM_BUILD_DIR=OFF -DHAVE_OLM=1 -DCPACK_BINARY_DEB=true
+make packages
 ```
-
-To request one format explicitly, use `-G DEB` or `-G External`. The Arch
-external generator requires CMake 3.19 or newer plus `bsdtar` and `zstd`.
-Its runtime dependency list can be overridden at configure time with
-`-DCPACK_ARCHLINUX_PACKAGE_DEPENDS="glibc;gcc-libs;qt6-base;..."`.
 
 ## Tests
 

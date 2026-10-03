@@ -35,6 +35,9 @@ set(CPACK_RESOURCE_FILE_WELCOME "${CMAKE_SOURCE_DIR}/CHANGELOG")
 set(CPACK_PACKAGE_FILE_NAME "vacuum-im-${VERSION}-installer")
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+	option(CPACK_BINARY_DEB "Enable to build Debian packages" OFF)
+	option(CPACK_BINARY_ARCH "Enable to build Arch Linux packages" OFF)
+	set(CPACK_PACKAGE_DIRECTORY "${CMAKE_BINARY_DIR}/packages")
 	set(CPACK_MONOLITHIC_INSTALL ON)
 	set(CPACK_DEB_COMPONENT_INSTALL OFF)
 	set(CPACK_DEBIAN_PACKAGE_NAME "vacuum-im")
@@ -74,26 +77,59 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 	find_program(CPACK_ARCHLINUX_ZSTD_EXECUTABLE NAMES zstd)
 	set(CPACK_EXTERNAL_ENABLE_STAGING ON)
 	set(CPACK_EXTERNAL_PACKAGE_SCRIPT "${CMAKE_CURRENT_LIST_DIR}/CPackArchLinux.cmake")
-	if(CPACK_ARCHLINUX_TAR_EXECUTABLE AND CPACK_ARCHLINUX_ZSTD_EXECUTABLE AND CMAKE_VERSION VERSION_GREATER_EQUAL "3.19")
-		if(NOT DEFINED CPACK_GENERATOR OR CPACK_GENERATOR STREQUAL "")
-			set(CPACK_GENERATOR "DEB;External")
+	set(CPACK_EXTERNAL_BUILD_ARCH OFF)
+
+	if(CPACK_BINARY_ARCH)
+		if(NOT CMAKE_VERSION VERSION_GREATER_EQUAL "3.19")
+			message(FATAL_ERROR "CPACK_BINARY_ARCH requires CMake 3.19 or newer")
 		endif()
-	else()
-		if(NOT DEFINED CPACK_GENERATOR OR CPACK_GENERATOR STREQUAL "")
-			set(CPACK_GENERATOR "DEB")
+		if(NOT CPACK_ARCHLINUX_TAR_EXECUTABLE OR NOT CPACK_ARCHLINUX_ZSTD_EXECUTABLE)
+			message(FATAL_ERROR "CPACK_BINARY_ARCH requires bsdtar and zstd")
 		endif()
-		message(STATUS "Arch Linux CPack generator needs bsdtar and zstd")
+		set(CPACK_EXTERNAL_BUILD_ARCH ON)
 	endif()
 
-	find_program(CPACK_DEBIAN_SHLIBDEPS_EXECUTABLE NAMES dpkg-shlibdeps)
-	if(CPACK_DEBIAN_SHLIBDEPS_EXECUTABLE)
-		set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
-	else()
-		set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6, libgcc-s1, libstdc++6, libqt6core6, libqt6dbus6, libqt6gui6, libqt6widgets6, libqt6network6, libqt6xml6, libqt6sql6, libqt6serialport6, libqt6bluetooth6, libssl3, libidn2-0, zlib1g")
+	if(NOT DEFINED CPACK_GENERATOR OR CPACK_GENERATOR STREQUAL "")
+		set(_cpack_generators)
+		if(CPACK_BINARY_DEB)
+			list(APPEND _cpack_generators DEB)
+		endif()
+		if(CPACK_BINARY_ARCH)
+			list(APPEND _cpack_generators External)
+		endif()
+		if(NOT _cpack_generators)
+			list(APPEND _cpack_generators DEB)
+			if(CPACK_ARCHLINUX_TAR_EXECUTABLE AND CPACK_ARCHLINUX_ZSTD_EXECUTABLE AND CMAKE_VERSION VERSION_GREATER_EQUAL "3.19")
+				list(APPEND _cpack_generators External)
+				set(CPACK_EXTERNAL_BUILD_ARCH ON)
+			endif()
+		endif()
+		set(CPACK_GENERATOR "${_cpack_generators}")
 	endif()
+
+	if(CPACK_GENERATOR MATCHES "(^|;)External(;|$)" AND NOT CPACK_BINARY_ARCH)
+		# Preserve the existing default: when no format selector is enabled, External means Arch.
+		set(CPACK_EXTERNAL_BUILD_ARCH ON)
+	endif()
+	if(CPACK_BINARY_ARCH)
+		if(NOT CPACK_GENERATOR MATCHES "(^|;)External(;|$)")
+			message(FATAL_ERROR "CPACK_BINARY_ARCH is ON but CPACK_GENERATOR does not include External")
+		endif()
+	endif()
+
+	# Use explicit runtime dependencies for reliable packages across host environments.
+	# dpkg-shlibdeps may fail for binaries built with private/Nix RUNPATHs.
+	set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS OFF)
+	set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6, libgcc-s1, libstdc++6, libqt6core6, libqt6dbus6, libqt6gui6, libqt6widgets6, libqt6network6, libqt6xml6, libqt6sql6, libqt6serialport6, libqt6bluetooth6, libssl3, libidn2-0, zlib1g")
 endif()
 
 include(CPack)
+
+add_custom_target(packages
+	COMMAND "${CMAKE_CPACK_COMMAND}" --config "${CMAKE_BINARY_DIR}/CPackConfig.cmake"
+	WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+	COMMENT "Generate the configured package(s)"
+	VERBATIM)
 
 cpack_add_component_group(core
 	DISPLAY_NAME "Core components"

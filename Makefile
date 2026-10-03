@@ -6,7 +6,7 @@ CMAKE ?= cmake
 PYTHON ?= python3
 GIT ?= git
 
-.PHONY: all configure build check clean
+.PHONY: all configure build check clean packages
 
 all: build
 
@@ -21,3 +21,6 @@ check: configure
 
 clean:
 	$(CMAKE) --build $(BUILD_DIR) --target clean
+
+packages: configure
+	$(CMAKE) --build $(BUILD_DIR) --target package --parallel 1
