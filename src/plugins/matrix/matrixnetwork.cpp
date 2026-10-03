@@ -1089,12 +1089,13 @@ void MatrixNetwork::requestAvatar(const QString &key, const QString &mxcUrl)
 	QFile cachedFile(cachePath);
 	if (cachedFile.open(QIODevice::ReadOnly)) {
 		const QByteArray cachedData = cachedFile.readAll();
-		if (!cachedData.isEmpty()) {
-			const QImage image = decodeMatrixImage(cachedData, QSize(128, 128));
-			if (!image.isNull())
-				emit avatarImageReceived(key, image);
+		const QImage image = decodeMatrixImage(cachedData, QSize(128, 128));
+		if (!image.isNull()) {
+			emit avatarImageReceived(key, image);
 			return;
 		}
+		cachedFile.close();
+		QFile::remove(cachePath);
 	}
 	if (FAvatarUnavailable.contains(requestKey) || FAccesToken.isEmpty())
 		return;

@@ -61,6 +61,13 @@ if (BUILD_TESTING)
 	target_link_libraries(matrix_join_dialog_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network)
 	add_executable(matrix_context_tests EXCLUDE_FROM_ALL matrixcontext_test.cpp matrixcontext.cpp)
 	target_link_libraries(matrix_context_tests PRIVATE ${VACUUM_UTILS_NAME} Qt6::Core Qt6::Xml)
+	if (OLM_FOUND)
+		add_executable(matrix_avatar_cache_tests EXCLUDE_FROM_ALL
+			matrixavatarcache_test.cpp matrixnetwork.cpp matrixdatabase.cpp matrixdatabaseworker.cpp
+			matrixolm.cpp matrixssss.cpp matrixdirectroom.cpp matrixpublicrooms.cpp)
+		target_link_libraries(matrix_avatar_cache_tests PRIVATE
+			Qt6::Core Qt6::Gui Qt6::Network Qt6::Sql ${ADD_LIBS})
+	endif()
 endif()
 
 if(TARGET matrix)
