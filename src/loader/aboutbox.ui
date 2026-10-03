@@ -104,7 +104,7 @@
      <item>
       <widget class="QLabel" name="lblHomePage">
        <property name="text">
-        <string notr="true">&lt;a href='https://github.com/andreaspeters/vacuum-chat'&gt;https://github.com/andreaspeters/vacuum-chat&lt;/a&gt;</string>
+        <string notr="true"></string>
        </property>
        <property name="textFormat">
         <enum>Qt::RichText</enum>
