@@ -36,7 +36,7 @@ void FileTransfer::pluginInfo(IPluginInfo *APluginInfo)
 	APluginInfo->description = tr("Allows to send a file to another contact");
 	APluginInfo->version = "1.0";
 	APluginInfo->author = "Potapov S.A. aka Lion";
-	APluginInfo->homePage = "http://www.vacuum-im.org";
+	APluginInfo->homePage = "https://github.com/andreaspeters/vacuum-chat";
 	APluginInfo->dependences.append(FILESTREAMSMANAGER_UUID);
 	APluginInfo->dependences.append(DATASTREAMSMANAGER_UUID);
 }

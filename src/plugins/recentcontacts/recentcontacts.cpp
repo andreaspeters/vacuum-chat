@@ -91,7 +91,7 @@ void RecentContacts::pluginInfo(IPluginInfo *APluginInfo)
 	APluginInfo->description = tr("Displays a recently used contacts");
 	APluginInfo->version = "1.0";
 	APluginInfo->author = "Potapov S.A. aka Lion";
-	APluginInfo->homePage = "http://www.vacuum-im.org";
+	APluginInfo->homePage = "https://github.com/andreaspeters/vacuum-chat";
 	APluginInfo->dependences.append(PRIVATESTORAGE_UUID);
 	APluginInfo->dependences.append(ACCOUNTMANAGER_UUID);
 }

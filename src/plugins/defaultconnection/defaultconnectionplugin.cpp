@@ -21,7 +21,7 @@ void DefaultConnectionPlugin::pluginInfo(IPluginInfo *APluginInfo)
 	APluginInfo->description = tr("Allows to set a standard TCP connection to Jabber server");
 	APluginInfo->author = "Potapov S.A. aka Lion";
 	APluginInfo->version = "1.0";
-	APluginInfo->homePage = "http://www.vacuum-im.org";
+	APluginInfo->homePage = "https://github.com/andreaspeters/vacuum-chat";
 }
 
 bool DefaultConnectionPlugin::initConnections(IPluginManager *APluginManager, int &/*AInitOrder*/)

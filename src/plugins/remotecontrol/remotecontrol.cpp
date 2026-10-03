@@ -67,7 +67,7 @@ void RemoteControl::pluginInfo(IPluginInfo *APluginInfo)
 	APluginInfo->description = tr("Allows to remotely control the client");
 	APluginInfo->version = "1.0";
 	APluginInfo->author = "Maxim Ignatenko";
-	APluginInfo->homePage = "http://www.vacuum-im.org";
+	APluginInfo->homePage = "https://github.com/andreaspeters/vacuum-chat";
 	APluginInfo->dependences.append(COMMANDS_UUID);
 	APluginInfo->dependences.append(DATAFORMS_UUID);
 }

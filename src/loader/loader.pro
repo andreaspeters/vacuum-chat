@@ -40,7 +40,7 @@ target.path        = $$INSTALL_BINS
 resources.path     = $$INSTALL_RESOURCES
 resources.files    = ../../resources/*
 documents.path     = $$INSTALL_DOCUMENTS
-documents.files    = ../../AUTHORS ../../CHANGELOG ../../README ../../COPYING ../../TRANSLATORS
+documents.files    = ../../AUTHORS ../../CHANGELOG ../../README.md ../../COPYING ../../TRANSLATORS
 INSTALLS           += target resources documents
 
 #Translation

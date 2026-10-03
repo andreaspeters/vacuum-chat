@@ -27,7 +27,7 @@ void MessageProcessor::pluginInfo(IPluginInfo *APluginInfo)
 	APluginInfo->description = tr("Allows other modules to send and receive messages");
 	APluginInfo->version = "1.0";
 	APluginInfo->author = "Potapov S.A. aka Lion";
-	APluginInfo->homePage = "http://www.vacuum-im.org";
+	APluginInfo->homePage = "https://github.com/andreaspeters/vacuum-chat";
 	APluginInfo->dependences.append(XMPPSTREAMS_UUID);
 	APluginInfo->dependences.append(STANZAPROCESSOR_UUID);
 }

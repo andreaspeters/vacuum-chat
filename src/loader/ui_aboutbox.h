@@ -99,7 +99,7 @@ public:
         horizontalLayout_2->setObjectName(QString::fromUtf8("horizontalLayout_2"));
         lblHomePage = new QLabel(AboutBoxClass);
         lblHomePage->setObjectName(QString::fromUtf8("lblHomePage"));
-        lblHomePage->setText(QString::fromUtf8("<a href='http://www.vacuum-im.org'>www.vacuum-im.org</a>"));
+        lblHomePage->setText(QString::fromUtf8("<a href='https://github.com/andreaspeters/vacuum-chat'>https://github.com/andreaspeters/vacuum-chat</a>"));
         lblHomePage->setTextFormat(Qt::RichText);
         lblHomePage->setAlignment(Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter);
 
@@ -111,7 +111,7 @@ public:
 
         lblSourcePage = new QLabel(AboutBoxClass);
         lblSourcePage->setObjectName(QString::fromUtf8("lblSourcePage"));
-        lblSourcePage->setText(QString::fromUtf8("<a href='http://code.google.com/p/vacuum-im/'>vacuum-im.googlecode.com</a>"));
+        lblSourcePage->setText(QString::fromUtf8("<a href='https://github.com/andreaspeters/vacuum-chat'>https://github.com/andreaspeters/vacuum-chat</a>"));
         lblSourcePage->setTextFormat(Qt::RichText);
         lblSourcePage->setAlignment(Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter);
 

@@ -18,7 +18,7 @@ void CompressPlugin::pluginInfo(IPluginInfo *APluginInfo)
 	APluginInfo->description = tr("Allows to compress a stream of messages sent and received from the server");
 	APluginInfo->version = "1.0";
 	APluginInfo->author = "Potapov S.A. aka Lion";
-	APluginInfo->homePage = "http://www.vacuum-im.org";
+	APluginInfo->homePage = "https://github.com/andreaspeters/vacuum-chat";
 	APluginInfo->dependences.append(XMPPSTREAMS_UUID);
 }
 

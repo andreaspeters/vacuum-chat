@@ -31,7 +31,7 @@ void Emoticons::pluginInfo(IPluginInfo *APluginInfo)
 	APluginInfo->description = tr("Allows to use your smiley images in messages");
 	APluginInfo->version = "1.0";
 	APluginInfo->author = "Potapov S.A. aka Lion";
-	APluginInfo->homePage = "http://www.vacuum-im.org";
+	APluginInfo->homePage = "https://github.com/andreaspeters/vacuum-chat";
 	APluginInfo->dependences.append(MESSAGEWIDGETS_UUID);
 }
 

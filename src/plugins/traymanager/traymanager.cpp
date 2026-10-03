@@ -40,7 +40,7 @@ void TrayManager::pluginInfo(IPluginInfo *APluginInfo)
 	APluginInfo->description = tr("Allows other modules to access the icon and context menu in the tray");
 	APluginInfo->version = "1.0";
 	APluginInfo->author = "Potapov S.A. aka Lion";
-	APluginInfo->homePage = "http://www.vacuum-im.org";
+	APluginInfo->homePage = "https://github.com/andreaspeters/vacuum-chat";
 }
 
 bool TrayManager::initConnections(IPluginManager *APluginManager, int &AInitOrder)

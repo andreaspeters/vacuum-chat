@@ -64,7 +64,7 @@ void MessageArchiver::pluginInfo(IPluginInfo *APluginInfo)
 	APluginInfo->description = tr("Allows to save the history of communications");
 	APluginInfo->version = "1.0";
 	APluginInfo->author = "Potapov S.A. aka Lion";
-	APluginInfo->homePage = "http://www.vacuum-im.org";
+	APluginInfo->homePage = "https://github.com/andreaspeters/vacuum-chat";
 	APluginInfo->dependences.append(XMPPSTREAMS_UUID);
 	APluginInfo->dependences.append(STANZAPROCESSOR_UUID);
 }

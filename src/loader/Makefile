@@ -389,7 +389,7 @@ install_documents: first FORCE
 	@$(CHK_DIR_EXISTS) $(if $(INSTALL_ROOT),$(INSTALL_ROOT),u:)\Projekte\vacuum\src\loader\.\vacuum $(MKDIR) $(if $(INSTALL_ROOT),$(INSTALL_ROOT),u:)\Projekte\vacuum\src\loader\.\vacuum 
 	$(INSTALL_FILE) u:\Projekte\vacuum\AUTHORS $(if $(INSTALL_ROOT),$(INSTALL_ROOT),u:)\Projekte\vacuum\src\loader\vacuum
 	$(INSTALL_FILE) u:\Projekte\vacuum\CHANGELOG $(if $(INSTALL_ROOT),$(INSTALL_ROOT),u:)\Projekte\vacuum\src\loader\vacuum
-	$(INSTALL_FILE) u:\Projekte\vacuum\README $(if $(INSTALL_ROOT),$(INSTALL_ROOT),u:)\Projekte\vacuum\src\loader\vacuum
+	$(INSTALL_FILE) u:\Projekte\vacuum\README.md $(if $(INSTALL_ROOT),$(INSTALL_ROOT),u:)\Projekte\vacuum\src\loader\vacuum
 	$(INSTALL_FILE) u:\Projekte\vacuum\COPYING $(if $(INSTALL_ROOT),$(INSTALL_ROOT),u:)\Projekte\vacuum\src\loader\vacuum
 	$(INSTALL_FILE) u:\Projekte\vacuum\TRANSLATORS $(if $(INSTALL_ROOT),$(INSTALL_ROOT),u:)\Projekte\vacuum\src\loader\vacuum
 
@@ -397,7 +397,7 @@ install_documents: first FORCE
 uninstall_documents:  FORCE
 	-$(DEL_FILE) $(if $(INSTALL_ROOT),$(INSTALL_ROOT),u:)\Projekte\vacuum\src\loader\vacuum\AUTHORS >nul 2>&1 
 	 -$(DEL_FILE) $(if $(INSTALL_ROOT),$(INSTALL_ROOT),u:)\Projekte\vacuum\src\loader\vacuum\CHANGELOG >nul 2>&1 
-	 -$(DEL_FILE) $(if $(INSTALL_ROOT),$(INSTALL_ROOT),u:)\Projekte\vacuum\src\loader\vacuum\README >nul 2>&1 
+	 -$(DEL_FILE) $(if $(INSTALL_ROOT),$(INSTALL_ROOT),u:)\Projekte\vacuum\src\loader\vacuum\README.md >nul 2>&1
 	 -$(DEL_FILE) $(if $(INSTALL_ROOT),$(INSTALL_ROOT),u:)\Projekte\vacuum\src\loader\vacuum\COPYING >nul 2>&1 
 	 -$(DEL_FILE) $(if $(INSTALL_ROOT),$(INSTALL_ROOT),u:)\Projekte\vacuum\src\loader\vacuum\TRANSLATORS >nul 2>&1
 	-$(DEL_DIR) $(if $(INSTALL_ROOT),$(INSTALL_ROOT),u:)\Projekte\vacuum\src\loader\vacuum  >nul 2>&1

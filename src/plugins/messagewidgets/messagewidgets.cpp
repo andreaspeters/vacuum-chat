@@ -31,7 +31,7 @@ void MessageWidgets::pluginInfo(IPluginInfo *APluginInfo)
 	APluginInfo->description = tr("Allows other modules to use standard widgets for messaging");
 	APluginInfo->version = "1.0";
 	APluginInfo->author = "Potapov S.A. aka Lion";
-	APluginInfo->homePage = "http://www.vacuum-im.org";
+	APluginInfo->homePage = "https://github.com/andreaspeters/vacuum-chat";
 }
 
 bool MessageWidgets::initConnections(IPluginManager *APluginManager, int &AInitOrder)

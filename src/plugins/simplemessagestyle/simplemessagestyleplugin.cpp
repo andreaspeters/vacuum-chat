@@ -21,7 +21,7 @@ void SimpleMessageStylePlugin::pluginInfo(IPluginInfo *APluginInfo)
 	APluginInfo->description = tr("Allows to use a simplified style in message design");
 	APluginInfo->version = "1.0";
 	APluginInfo->author = "Potapov S.A. aka Lion";
-	APluginInfo->homePage = "http://www.vacuum-im.org";
+	APluginInfo->homePage = "https://github.com/andreaspeters/vacuum-chat";
 }
 
 bool SimpleMessageStylePlugin::initConnections(IPluginManager *APluginManager, int &AInitOrder)

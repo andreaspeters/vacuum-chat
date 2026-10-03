@@ -36,7 +36,7 @@ void OtrE2E::pluginInfo(IPluginInfo *APluginInfo)
 	APluginInfo->description = tr("Off The Record messaging (OTR) ");
 	APluginInfo->version = "0.1.1";
 	APluginInfo->author = "Naoji Minami";
-	APluginInfo->homePage = "http://code.google.com/p/vacuum-plugins";
+	APluginInfo->homePage = "https://github.com/andreaspeters/vacuum-chat";
 	APluginInfo->dependences.append(MESSAGEPROCESSOR_UUID);
 	APluginInfo->dependences.append(ACCOUNTMANAGER_UUID);
 	APluginInfo->dependences.append(STANZAPROCESSOR_UUID);

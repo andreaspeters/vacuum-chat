@@ -25,7 +25,7 @@ void PEPManager::pluginInfo(IPluginInfo *APluginInfo)
 	APluginInfo->description = tr("Allows other plugins to receive and publish PEP events");
 	APluginInfo->version = "0.9";
 	APluginInfo->author = "Maxim Ignatenko";
-	APluginInfo->homePage = "http://www.vacuum-im.org";
+	APluginInfo->homePage = "https://github.com/andreaspeters/vacuum-chat";
 	APluginInfo->dependences.append(STANZAPROCESSOR_UUID);
 	APluginInfo->dependences.append(SERVICEDISCOVERY_UUID);
 	APluginInfo->dependences.append(XMPPSTREAMS_UUID);

@@ -20,7 +20,7 @@ void DataForms::pluginInfo(IPluginInfo *APluginInfo)
 	APluginInfo->description = tr("Allows other modules to process and display the form with the data intended for user");
 	APluginInfo->version = "1.0";
 	APluginInfo->author = "Potapov S.A. aka Lion";
-	APluginInfo->homePage = "http://www.vacuum-im.org";
+	APluginInfo->homePage = "https://github.com/andreaspeters/vacuum-chat";
 }
 
 bool DataForms::initConnections(IPluginManager *APluginManager, int &/*AInitOrder*/)

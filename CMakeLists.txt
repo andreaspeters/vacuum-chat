@@ -98,7 +98,7 @@ install(DIRECTORY "resources/menuicons"
 include("src/packages/package.cmake")
 
 set(INSTALL_SDK YES CACHE BOOL "Install files needed to build custom plugins")
-set(INSTALL_DOCS YES CACHE BOOL "Install documentation (currently it's only AUTHORS, CHANGELOG, README and COPYING)")
+set(INSTALL_DOCS YES CACHE BOOL "Install documentation (currently it's only AUTHORS, CHANGELOG, README.md and COPYING)")
 set(LANGS "" CACHE STRING "List of languages to build localization for (this variable overrides any of LANG_*)")
 set(USED_LANGS "" CACHE INTERNAL "List of languages actually used for generating targets")
 add_lang_options()
@@ -137,7 +137,7 @@ else ("${LANGS}" STREQUAL "")
 endif ("${LANGS}" STREQUAL "")
 
 if (INSTALL_DOCS)
-	install(FILES "AUTHORS" "CHANGELOG" "README" "COPYING" "TRANSLATORS"
+	install(FILES "AUTHORS" "CHANGELOG" "README.md" "COPYING" "TRANSLATORS"
 		DESTINATION "${INSTALL_DOCUMENTS}")
 endif (INSTALL_DOCS)
 

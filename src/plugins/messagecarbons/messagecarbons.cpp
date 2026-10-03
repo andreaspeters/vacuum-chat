@@ -27,7 +27,7 @@ void MessageCarbons::pluginInfo(IPluginInfo *APluginInfo)
 	APluginInfo->description = tr("Allows to keep all user IM clients engaged in a conversation");
 	APluginInfo->version = "1.0";
 	APluginInfo->author = "Potapov S.A. aka Lion";
-	APluginInfo->homePage = "http://vacuum-im.org";
+	APluginInfo->homePage = "https://github.com/andreaspeters/vacuum-chat";
 	APluginInfo->dependences.append(XMPPSTREAMS_UUID);
 	APluginInfo->dependences.append(STANZAPROCESSOR_UUID);
 	APluginInfo->dependences.append(SERVICEDISCOVERY_UUID);

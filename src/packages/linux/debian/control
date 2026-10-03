@@ -4,7 +4,7 @@ Priority: optional
 Maintainer: Sergey A Potapov <potapov.s.a@gmail.com>
 Build-Depends: cmake, debhelper (>= 7.0.50~), openssl, libqtwebkit-dev | libqt4-dev, libx11-dev, zlib1g-dev, libidn11-dev
 Standards-Version: 3.9.1
-Homepage: http://code.google.com/p/vacuum-im/
+Homepage: https://github.com/andreaspeters/vacuum-chat
 
 Package: vacuum
 Architecture: any

@@ -32,7 +32,7 @@ void BirthdayReminder::pluginInfo(IPluginInfo *APluginInfo)
 	APluginInfo->description = tr("Reminds about birthdays of your friends");
 	APluginInfo->version = "1.0";
 	APluginInfo->author = "Potapov S.A. aka Lion";
-	APluginInfo->homePage = "http://www.vacuum-im.org";
+	APluginInfo->homePage = "https://github.com/andreaspeters/vacuum-chat";
 	APluginInfo->dependences.append(VCARD_UUID);
 }
 
