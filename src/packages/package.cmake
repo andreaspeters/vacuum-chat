@@ -71,7 +71,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 	set(CPACK_ARCHLINUX_PACKAGE_NAME "vacuum-im")
 	set(CPACK_ARCHLINUX_PACKAGE_REL "1")
 	set(CPACK_ARCHLINUX_PACKAGE_LICENSE "GPL3")
-	set(CPACK_ARCHLINUX_PACKAGE_DEPENDS "glibc;gcc-libs;qt6-base;qt6-connectivity;qt6-serialport;openssl;libidn2;zlib" CACHE STRING "Arch Linux runtime package dependencies")
+	set(CPACK_ARCHLINUX_PACKAGE_DEPENDS "glibc;gcc-libs;qt6-base;qt6-connectivity;qt6-serialport;openssl;libidn2;zlib;libolm" CACHE STRING "Arch Linux runtime package dependencies")
+	list(FIND CPACK_ARCHLINUX_PACKAGE_DEPENDS "libolm" _libolm_arch_dependency_index)
+	if(_libolm_arch_dependency_index EQUAL -1)
+		list(APPEND CPACK_ARCHLINUX_PACKAGE_DEPENDS "libolm")
+	endif()
 
 	find_program(CPACK_ARCHLINUX_TAR_EXECUTABLE NAMES bsdtar)
 	find_program(CPACK_ARCHLINUX_ZSTD_EXECUTABLE NAMES zstd)
@@ -120,7 +124,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 	# Use explicit runtime dependencies for reliable packages across host environments.
 	# dpkg-shlibdeps may fail for binaries built with private/Nix RUNPATHs.
 	set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS OFF)
-	set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6, libgcc-s1, libstdc++6, libqt6core6, libqt6dbus6, libqt6gui6, libqt6widgets6, libqt6network6, libqt6xml6, libqt6sql6, libqt6serialport6, libqt6bluetooth6, libssl3, libidn2-0, zlib1g")
+	set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6, libgcc-s1, libstdc++6, libqt6core6, libqt6dbus6, libqt6gui6, libqt6widgets6, libqt6network6, libqt6xml6, libqt6sql6, libqt6serialport6, libqt6bluetooth6, libssl3, libidn2-0, zlib1g, libolm3")
 endif()
 
 include(CPack)
