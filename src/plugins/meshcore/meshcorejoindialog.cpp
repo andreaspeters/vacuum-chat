@@ -1,6 +1,7 @@
 #include "meshcorejoindialog.h"
 
 #include <QComboBox>
+#include <QCryptographicHash>
 #include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QGroupBox>
@@ -54,6 +55,27 @@ MeshCoreJoinDialog::MeshCoreJoinDialog(QWidget *parent)
     channelListLayout->addWidget(FChannels);
     channelListLayout->addWidget(FOpenChannel, 0, Qt::AlignRight);
     channelLayout->addWidget(channelListGroup, 1);
+
+    auto *hashtagGroup = new QGroupBox(tr("Join a public hashtag channel"), channelPage);
+    auto *hashtagForm = new QFormLayout(hashtagGroup);
+    FHashtagChannelName = new QLineEdit(hashtagGroup);
+    FHashtagChannelName->setObjectName(QStringLiteral("meshcoreHashtagChannelName"));
+    FHashtagChannelName->setMaxLength(32);
+    FHashtagChannelName->setPlaceholderText(QStringLiteral("#test"));
+    auto *hashtagDescription = new QLabel(
+        tr("The key is derived from the channel name. Hashtag channels are public, not private."),
+        hashtagGroup);
+    hashtagDescription->setWordWrap(true);
+    FJoinHashtagChannel = new QPushButton(tr("Join public # channel"), hashtagGroup);
+    FJoinHashtagChannel->setObjectName(QStringLiteral("meshcoreJoinHashtagChannelButton"));
+    FHashtagStatus = new QLabel(hashtagGroup);
+    FHashtagStatus->setObjectName(QStringLiteral("meshcoreHashtagChannelStatus"));
+    FHashtagStatus->setWordWrap(true);
+    hashtagForm->addRow(tr("Channel name"), FHashtagChannelName);
+    hashtagForm->addRow(QString(), hashtagDescription);
+    hashtagForm->addRow(QString(), FJoinHashtagChannel);
+    hashtagForm->addRow(QString(), FHashtagStatus);
+    channelLayout->addWidget(hashtagGroup);
 
     auto *channelFormGroup = new QGroupBox(tr("Configure a channel"), channelPage);
     auto *channelForm = new QFormLayout(channelFormGroup);
@@ -140,6 +162,8 @@ MeshCoreJoinDialog::MeshCoreJoinDialog(QWidget *parent)
 
     connect(FConfigureChannel, &QPushButton::clicked,
             this, &MeshCoreJoinDialog::configureChannel);
+    connect(FJoinHashtagChannel, &QPushButton::clicked,
+            this, &MeshCoreJoinDialog::joinHashtagChannel);
     connect(FGenerateKey, &QPushButton::clicked, this, [this]() {
         QByteArray key;
         key.reserve(16);
@@ -185,9 +209,19 @@ void MeshCoreJoinDialog::setChannels(const QList<QPair<QString, QString>> &chann
             ? tr("Channel %1").arg(index) : channel.second;
         auto *item = new QListWidgetItem(name, FChannels);
         item->setData(Qt::UserRole, channel.first);
+        item->setData(Qt::UserRole + 1, channel.second);
         item->setToolTip(tr("Channel slot %1").arg(index));
         if (channel.first == selectedId)
             FChannels->setCurrentItem(item);
+    }
+}
+
+void MeshCoreJoinDialog::setAvailableChannelSlots(const QList<int> &availableSlots)
+{
+    FAvailableChannelSlots.clear();
+    for (int index : availableSlots) {
+        if (index > 0 && index < 8 && !FAvailableChannelSlots.contains(index))
+            FAvailableChannelSlots.append(index);
     }
 }
 
@@ -214,16 +248,18 @@ void MeshCoreJoinDialog::setChannelOperationResult(int channelIndex, bool succes
     if (FPendingAction != ConfigureChannel || FPendingChannelIndex != channelIndex)
         return;
 
+    QLabel *status = FPendingHashtagChannel ? FHashtagStatus : FChannelStatus;
     setPending(false);
     FPendingAction = NoPendingAction;
     FPendingChannelIndex = -1;
+    FPendingHashtagChannel = false;
     if (!success) {
-        setStatus(FChannelStatus,
+        setStatus(status,
                   error.isEmpty() ? tr("The channel could not be configured.") : error, true);
         return;
     }
 
-    setStatus(FChannelStatus, tr("Channel configured."), false);
+    setStatus(status, tr("Channel configured."), false);
     emit conversationReady(QStringLiteral("channel:%1").arg(channelIndex));
     accept();
 }
@@ -276,8 +312,54 @@ void MeshCoreJoinDialog::configureChannel()
 
     FPendingAction = ConfigureChannel;
     FPendingChannelIndex = channelIndex;
+    FPendingHashtagChannel = false;
     setPending(true);
     setStatus(FChannelStatus, tr("Sending channel configuration to the radio…"), false);
+    emit setChannelRequested(channelIndex, name, secret);
+}
+
+void MeshCoreJoinDialog::joinHashtagChannel()
+{
+    if (FPendingAction != NoPendingAction)
+        return;
+
+    const QString name = FHashtagChannelName->text().trimmed();
+    const QByteArray encodedName = name.toUtf8();
+    if (!name.startsWith(QLatin1Char('#')) || name.size() <= 1 ||
+        name.contains(QChar::Null) || encodedName.size() > 32) {
+        setStatus(FHashtagStatus,
+                  tr("Enter a hashtag channel beginning with # and no more than 32 UTF-8 bytes."),
+                  true);
+        return;
+    }
+
+    for (int row = 0; row < FChannels->count(); ++row) {
+        const QListWidgetItem *item = FChannels->item(row);
+        if (item->data(Qt::UserRole + 1).toString() == name) {
+            emit conversationReady(QStringLiteral("channel:") +
+                                   item->data(Qt::UserRole).toString());
+            accept();
+            return;
+        }
+    }
+
+    int channelIndex = -1;
+    for (int candidate = 1; candidate < 8 && channelIndex < 0; ++candidate) {
+        if (FAvailableChannelSlots.contains(candidate))
+            channelIndex = candidate;
+    }
+    if (channelIndex < 0) {
+        setStatus(FHashtagStatus, tr("All hashtag channel slots are occupied."), true);
+        return;
+    }
+
+    const QByteArray secret = QCryptographicHash::hash(
+        encodedName, QCryptographicHash::Sha256).left(16);
+    FPendingAction = ConfigureChannel;
+    FPendingChannelIndex = channelIndex;
+    FPendingHashtagChannel = true;
+    setPending(true);
+    setStatus(FHashtagStatus, tr("Adding the public hashtag channel to the radio…"), false);
     emit setChannelRequested(channelIndex, name, secret);
 }
 
@@ -352,6 +434,8 @@ void MeshCoreJoinDialog::setStatus(QLabel *label, const QString &text, bool erro
 void MeshCoreJoinDialog::setPending(bool pending)
 {
     FConfigureChannel->setEnabled(!pending);
+    FHashtagChannelName->setEnabled(!pending);
+    FJoinHashtagChannel->setEnabled(!pending);
     FAddContact->setEnabled(!pending);
     FGenerateKey->setEnabled(!pending && FChannelIndex->currentData().toInt() != 0);
     FOpenChannel->setEnabled(!pending && FChannels->currentRow() >= 0);

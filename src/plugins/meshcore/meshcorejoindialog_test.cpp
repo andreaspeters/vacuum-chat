@@ -105,6 +105,38 @@ int main(int argc, char **argv)
                     openedPublicChannel == QStringLiteral("channel:0") &&
                     publicChannelDialog.result() == QDialog::Accepted);
 
+    MeshCoreJoinDialog hashtagDialog;
+    hashtagDialog.setChannels({qMakePair(QStringLiteral("0"), QStringLiteral("Public")),
+                               qMakePair(QStringLiteral("1"), QStringLiteral("#existing"))});
+    hashtagDialog.setAvailableChannelSlots(QList<int>() << 3 << 5);
+    QLineEdit *hashtagName = hashtagDialog.findChild<QLineEdit *>(
+        QStringLiteral("meshcoreHashtagChannelName"));
+    QPushButton *joinHashtag = hashtagDialog.findChild<QPushButton *>(
+        QStringLiteral("meshcoreJoinHashtagChannelButton"));
+    int hashtagSlot = -1;
+    QString requestedHashtag;
+    QByteArray hashtagSecret;
+    QString openedHashtag;
+    QObject::connect(&hashtagDialog, &MeshCoreJoinDialog::setChannelRequested,
+                     [&](int index, const QString &name, const QByteArray &secret) {
+        hashtagSlot = index;
+        requestedHashtag = name;
+        hashtagSecret = secret;
+    });
+    QObject::connect(&hashtagDialog, &MeshCoreJoinDialog::conversationReady,
+                     [&](const QString &id) { openedHashtag = id; });
+    if (hashtagName)
+        hashtagName->setText(QStringLiteral("#test"));
+    if (joinHashtag)
+        joinHashtag->click();
+    passed &= check("public hashtag joins derive the key and use the first free non-public slot",
+                    hashtagSlot == 3 && requestedHashtag == QStringLiteral("#test") &&
+                    hashtagSecret.toHex() == QByteArrayLiteral("9cd8fcf22a47333b591d96a2b848b73f"));
+    hashtagDialog.setChannelOperationResult(3, true, QString());
+    passed &= check("successful public hashtag configuration opens its channel conversation",
+                    openedHashtag == QStringLiteral("channel:3") &&
+                    hashtagDialog.result() == QDialog::Accepted);
+
     MeshCoreJoinDialog privateChannelDialog;
     QComboBox *privateChannelIndex = privateChannelDialog.findChild<QComboBox *>(
         QStringLiteral("meshcoreChannelIndex"));

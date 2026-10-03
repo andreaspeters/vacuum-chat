@@ -463,6 +463,7 @@ void MeshCorePlugin::showJoinChatDialog(const QString &boundAccountId)
         for (const MeshCoreChannel &channel : FProtocol->discoverChannels())
             channels.append(qMakePair(channel.id, channel.name));
         dialog.setChannels(channels);
+        dialog.setAvailableChannelSlots(FProtocol->availableChannelSlots());
 
         QList<QPair<QString, QString>> contacts;
         for (const MeshCoreContact &contact : FProtocol->discoverContacts())

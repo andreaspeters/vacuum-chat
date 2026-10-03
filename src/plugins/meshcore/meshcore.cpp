@@ -272,6 +272,7 @@ void MeshCoreProtocol::beginChannelSync()
     awaitingChannelInfo = false;
     requestedChannelIndex = 0;
     pendingChannels.clear();
+    pendingFreeChannelSlots.clear();
     requestNextChannel();
 }
 
@@ -281,6 +282,7 @@ void MeshCoreProtocol::abortChannelSync()
     awaitingChannelInfo = false;
     requestedChannelIndex = 0;
     pendingChannels.clear();
+    pendingFreeChannelSlots.clear();
 }
 
 void MeshCoreProtocol::requestNextChannel()
@@ -290,6 +292,7 @@ void MeshCoreProtocol::requestNextChannel()
 
     if (requestedChannelIndex >= 8) {
         channels = pendingChannels;
+        freeChannelSlots = pendingFreeChannelSlots;
         abortChannelSync();
         emit channelsChanged();
         if ((pendingManagementCommand == SetChannelCommand ||
@@ -343,6 +346,16 @@ void MeshCoreProtocol::handleChannelInfo(const QByteArray &packet)
         channel.id = QString::number(requestedChannelIndex);
         channel.name = name;
         pendingChannels.append(channel);
+    } else {
+        bool hasZeroSecret = true;
+        for (int index = 34; index < 50; ++index) {
+            if (packet.at(index) != '\0') {
+                hasZeroSecret = false;
+                break;
+            }
+        }
+        if (hasZeroSecret)
+            pendingFreeChannelSlots.append(requestedChannelIndex);
     }
     advanceChannelSync();
 }
@@ -350,6 +363,7 @@ void MeshCoreProtocol::handleChannelInfo(const QByteArray &packet)
 void MeshCoreProtocol::handleChannelError()
 {
     // A missing channel index is a valid response when probing all eight slots.
+    pendingFreeChannelSlots.append(requestedChannelIndex);
     advanceChannelSync();
 }
 
@@ -856,6 +870,7 @@ void MeshCoreProtocol::onTransportError(const QString &message)
 QList<MeshCoreDevice> MeshCoreProtocol::discoverDevices() const { return {}; }
 QList<MeshCoreContact> MeshCoreProtocol::discoverContacts() const { return contacts; }
 QList<MeshCoreChannel> MeshCoreProtocol::discoverChannels() const { return channels; }
+QList<int> MeshCoreProtocol::availableChannelSlots() const { return freeChannelSlots; }
 
 bool MeshCoreProtocol::sendMessage(const QString &recipient, const QString &message)
 {

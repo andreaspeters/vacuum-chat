@@ -66,6 +66,7 @@ public:
     QList<MeshCoreDevice> discoverDevices() const;
     QList<MeshCoreContact> discoverContacts() const;
     QList<MeshCoreChannel> discoverChannels() const;
+    QList<int> availableChannelSlots() const;
     bool sendMessage(const QString &recipient, const QString &message);
     bool sendBroadcastMessage(const QString &message);
     bool sendGroupMessage(const QString &channelName, const QString &message);
@@ -132,6 +133,8 @@ private:
     QList<BasicMessage> deferredMessages;
     QList<MeshCoreChannel> channels;
     QList<MeshCoreChannel> pendingChannels;
+    QList<int> freeChannelSlots;
+    QList<int> pendingFreeChannelSlots;
     quint32 expectedContactCount = 0;
     quint8 requestedChannelIndex = 0;
     bool channelSyncInProgress = false;

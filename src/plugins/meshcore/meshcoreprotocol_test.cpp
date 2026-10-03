@@ -143,7 +143,7 @@ QByteArray contactRecord(const QByteArray &name, quint32 lastAdvert,
     return record;
 }
 
-QByteArray channelInfoPacket(quint8 index, const QByteArray &name)
+QByteArray channelInfoPacket(quint8 index, const QByteArray &name, bool zeroSecret = false)
 {
     QByteArray packet(50, '\0');
     packet[0] = static_cast<char>(0x12);
@@ -151,8 +151,10 @@ QByteArray channelInfoPacket(quint8 index, const QByteArray &name)
     const QByteArray encodedName = name.left(32);
     for (int i = 0; i < encodedName.size(); ++i)
         packet[2 + i] = encodedName.at(i);
-    for (int i = 0; i < 16; ++i)
-        packet[34 + i] = static_cast<char>(0xa0 + i); // Must never be exposed as room data.
+    if (!zeroSecret) {
+        for (int i = 0; i < 16; ++i)
+            packet[34 + i] = static_cast<char>(0xa0 + i); // Must never be exposed as room data.
+    }
     return packet;
 }
 
@@ -426,7 +428,10 @@ int main(int argc, char *argv[])
 
     for (quint8 index = 0; index < 8; ++index) {
         const QByteArray name = index == 0 ? QByteArray("Operations") : QByteArray();
-        transport->receivePacket(channelInfoPacket(index, name));
+        if (index == 4)
+            transport->receivePacket(QByteArray(1, static_cast<char>(0x01)));
+        else
+            transport->receivePacket(channelInfoPacket(index, name, index == 2 || index == 3));
         if (index < 7) {
             const QByteArray request = transport->sentPayloads.constLast();
             if (request.size() != 2 || request.at(0) != static_cast<char>(0x1f) ||
@@ -435,6 +440,11 @@ int main(int argc, char *argv[])
                 return 1;
             }
         }
+    }
+
+    if (protocol.availableChannelSlots() != (QList<int>() << 2 << 3 << 4)) {
+        std::cerr << "only empty slots with zero secrets or missing slots were advertised as free\n";
+        return 1;
     }
 
     if (transport->sentPayloads.constLast() != QByteArray(1, static_cast<char>(0x0a))) {

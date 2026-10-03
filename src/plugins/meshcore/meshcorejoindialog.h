@@ -20,6 +20,7 @@ public:
     explicit MeshCoreJoinDialog(QWidget *parent = nullptr);
 
     void setChannels(const QList<QPair<QString, QString>> &channels);
+    void setAvailableChannelSlots(const QList<int> &availableSlots);
     void setContacts(const QList<QPair<QString, QString>> &contacts);
     void setChannelOperationResult(int channelIndex, bool success, const QString &error);
     void setContactOperationResult(const QString &publicKeyHex, bool success,
@@ -32,6 +33,7 @@ signals:
 
 private slots:
     void configureChannel();
+    void joinHashtagChannel();
     void addContact();
     void openSelectedChannel();
     void openSelectedContact();
@@ -51,6 +53,10 @@ private:
     QPushButton *FGenerateKey = nullptr;
     QPushButton *FOpenChannel = nullptr;
     QLabel *FChannelStatus = nullptr;
+    QLineEdit *FHashtagChannelName = nullptr;
+    QPushButton *FJoinHashtagChannel = nullptr;
+    QLabel *FHashtagStatus = nullptr;
+    QList<int> FAvailableChannelSlots;
 
     QLineEdit *FContactName = nullptr;
     QLineEdit *FContactPublicKey = nullptr;
@@ -62,6 +68,7 @@ private:
     PendingAction FPendingAction = NoPendingAction;
     int FCurrentChannelIndex = 0;
     int FPendingChannelIndex = -1;
+    bool FPendingHashtagChannel = false;
     QString FPendingContactPublicKey;
 };
 
