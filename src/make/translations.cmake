@@ -67,7 +67,7 @@ macro(add_translations outvar tsname)
 		set(QMS ${QMS} "${QM}")
 		# Install *.qm
 		install(FILES "${QM}" DESTINATION "${INSTALL_TRANSLATIONS}/${LANG}"
-			COMPONENT ${PLUGIN_NAME}_${LANG})
+			COMPONENT ${PLUGIN_NAME}_${LANG} OPTIONAL)
 		lang_display_name(LANG_NAME ${LANG})
 		cpack_add_component(${PLUGIN_NAME}_${LANG}
 			DISPLAY_NAME "${PLUGIN_DISPLAY_NAME}"

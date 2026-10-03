@@ -30,13 +30,12 @@
 
 
 ### Version
-REVISION="$(svnversion -c | cut -f 2 -d :)"
 VER_NUMBER="$(grep 'CLIENT_VERSION ' src/definitions/version.h | cut -f 2 -d '"')"
-VERSION="${VER_NUMBER}.${REVISION}"
+VERSION="${VER_NUMBER}"
 
 ### Namespace
 ORIG_NAME="vacuum"
-PRODUCT_NAME="Vacuum-IM"
+PRODUCT_NAME="Vacuum Chat"
 DMG_NAME="${PRODUCT_NAME}_${VERSION}_macosx" 
 
 ### Environment
@@ -150,7 +149,7 @@ find "$CONTENTS_DIR" -type d -name .svn | xargs rm -rf
 echo "done!"
 
 echo -e "\033[7m Setting program version to Info.plist and copy InfoPlist.strings... \033[0m"
-sed -i.bak "s/1.0.0.0/$VERSION/" $CONTENTS_DIR/Info.plist ; rm $CONTENTS_DIR/Info.plist.bak
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$CONTENTS_DIR/Info.plist"
 mkdir $CONTENTS_DIR/Resources/en.lproj
 cp $SCRIPT_DIR/InfoPlist.strings $CONTENTS_DIR/Resources/en.lproj/InfoPlist.strings
 echo "done!"

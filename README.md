@@ -1,6 +1,6 @@
-# Vacuum IM
+# Vacuum Chat
 
-Vacuum IM is a Qt 6 desktop instant-messaging client with a modular plugin architecture. The project includes an established XMPP client and a Matrix Client-Server plugin, with shared interfaces for conversations, presence, rosters, notifications, and message display.
+Vacuum Chat 2.0.0 is a Qt 6 desktop messaging application with a modular plugin architecture. It offers XMPP account support and an integrated Matrix plugin, with shared interfaces for conversations, presence, rosters, notifications, and message display.
 
 ## Features
 
@@ -48,6 +48,21 @@ Use a separate build directory by setting `BUILD_DIR`, for example:
 BUILD_DIR=build-nix make build
 ```
 
+## Packaging
+
+On Linux, CPack can create a Debian package; when `bsdtar` and `zstd` are
+available, its default generator set also creates an Arch Linux
+`.pkg.tar.zst` package:
+
+```sh
+cpack --config build/CPackConfig.cmake -B build/packages
+```
+
+To request one format explicitly, use `-G DEB` or `-G External`. The Arch
+external generator requires CMake 3.19 or newer plus `bsdtar` and `zstd`.
+Its runtime dependency list can be overridden at configure time with
+`-DCPACK_ARCHLINUX_PACKAGE_DEPENDS="glibc;gcc-libs;qt6-base;..."`.
+
 ## Tests
 
 Run the project checks with:
@@ -76,4 +91,4 @@ Keep access tokens private; do not commit them or place them in this README.
 
 ## License
 
-Vacuum IM is distributed under the GNU General Public License, version 3. See [`COPYING`](COPYING) for the full license text.
+Vacuum Chat is distributed under the GNU General Public License, version 3. See [`COPYING`](COPYING) for the full license text.

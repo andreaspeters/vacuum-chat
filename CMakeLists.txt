@@ -23,7 +23,7 @@ if (VACUUM_OS2_CROSS_COMPILE AND NOT CMAKE_TOOLCHAIN_FILE)
 		CACHE FILEPATH "CMake toolchain file" FORCE)
 endif()
 
-project(vacuum-im VERSION 1.0 LANGUAGES CXX)
+project(vacuum-im VERSION 2.0.0 LANGUAGES CXX)
 
 set(VACUUM_PYTHON_EXECUTABLE "python3" CACHE STRING "Python interpreter used by the check target")
 set(VACUUM_GIT_EXECUTABLE "git" CACHE STRING "Git executable used by the check target")

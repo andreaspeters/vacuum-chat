@@ -94,7 +94,7 @@ QUuid MeshCorePlugin::pluginUuid() const
 void MeshCorePlugin::pluginInfo(IPluginInfo *APluginInfo)
 {
     APluginInfo->name = "MeshCore Protocol Plugin";
-    APluginInfo->description = "Implements the MeshCore protocol for Vacuum IM";
+    APluginInfo->description = "Implements the MeshCore protocol for Vacuum Chat";
     APluginInfo->version = "1.0";
     APluginInfo->author = "Vacuum Development Team";
     APluginInfo->homePage = "https://github.com/meshcore-dev/MeshCore";

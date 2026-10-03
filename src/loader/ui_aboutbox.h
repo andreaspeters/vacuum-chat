@@ -73,7 +73,7 @@ public:
         QFont font;
         font.setPointSize(18);
         lblName->setFont(font);
-        lblName->setText(QString::fromUtf8("Vacuum-IM"));
+        lblName->setText(QString::fromUtf8("Vacuum Chat"));
 
         horizontalLayout->addWidget(lblName);
 
@@ -89,7 +89,7 @@ public:
 
         lblVersion = new QLabel(AboutBoxClass);
         lblVersion->setObjectName(QString::fromUtf8("lblVersion"));
-        lblVersion->setText(QString::fromUtf8("Version: 1.0.0.0 Revision: 0000"));
+        lblVersion->setText(QString::fromUtf8("Version: 2.0.0"));
         lblVersion->setTextFormat(Qt::PlainText);
 
         verticalLayout->addWidget(lblVersion);
@@ -150,7 +150,7 @@ public:
 
     void retranslateUi(QDialog *AboutBoxClass)
     {
-        AboutBoxClass->setWindowTitle(QApplication::translate("AboutBoxClass", "About the program", 0, QApplication::UnicodeUTF8));
+        AboutBoxClass->setWindowTitle(QApplication::translate("AboutBoxClass", "About Vacuum Chat", 0, QApplication::UnicodeUTF8));
     } // retranslateUi
 
 };

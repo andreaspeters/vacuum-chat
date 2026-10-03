@@ -1,9 +1,9 @@
 <project>
     <shortName>vacuum</shortName>
-    <fullName>Vacuum-IM</fullName>
-    <version>1.2.0</version>
+    <fullName>Vacuum Chat</fullName>
+        <version>2.0.0</version>
     <installerFilename>${product_shortname}_${product_version}_${platform_name}-installer.${platform_exec_suffix}</installerFilename>
-    <readmeFile>../../../README</readmeFile>
+    <readmeFile>../../../README.md</readmeFile>
     <licenseFile>../../../COPYING</licenseFile>
     <logoImage>../../../resources/menuicons/shared/mainwindowlogo48.png</logoImage>
     <defaultLanguage>auto</defaultLanguage>
@@ -23,7 +23,7 @@
             <show>1</show>
             <desktopShortcutList>
                 <shortcut>
-                    <comment>Crossplatform Jabber Client</comment>
+                    <comment>Instant messaging</comment>
                     <exec></exec>
                     <icon></icon>
                     <name>${product_fullname}</name>
@@ -160,7 +160,7 @@
                     <windowsPath>${installdir}</windowsPath>
                 </startMenuShortcut>
                 <startMenuShortcut>
-                    <comment>Crossplatform Jabber Client</comment>
+                    <comment>Instant messaging</comment>
                     <name>${product_fullname}</name>
                     <runInTerminal>0</runInTerminal>
                     <windowsExec>${installdir}/vacuum.exe</windowsExec>

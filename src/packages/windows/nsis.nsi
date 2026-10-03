@@ -1,16 +1,16 @@
 ; nsis.nsi
 ;
-; This script creates Vacuum-IM installer for windows
+; This script creates the Vacuum Chat installer for Windows
 ;--------------------------------
 
 ; Program Version
-!define PROGRAM_VERSION     "1.2.0"
+!define PROGRAM_VERSION     "2.0.0"
 
 ; Install Folder
 !define PROGRAM_FOLDER      "Vacuum-IM"
 
 ; Install Start Menu Folder
-!define PROGRAM_SM_FOLDER   "Vacuum-IM"
+!define PROGRAM_SM_FOLDER   "Vacuum Chat"
 
 ; Registry Key
 !define PROGRAM_REG_KEY     "VacuumIM"
@@ -19,7 +19,7 @@
 !define PROGRAM_BIN_FOLDER  "..\..\.."
 
 ; The name of the installer
-Name "Vacuum-IM"
+Name "Vacuum Chat"
 
 ; The file to write
 OutFile "vacuum_${PROGRAM_VERSION}_windows-installer.exe"
@@ -53,7 +53,7 @@ UninstPage instfiles
 ;--------------------------------
 ; The stuff to install
 ;--------------------------------
-Section "VacuumIM (required)"
+Section "Vacuum Chat (required)"
 
   SectionIn RO
   
@@ -110,7 +110,7 @@ Section "VacuumIM (required)"
   WriteRegStr HKLM "SOFTWARE\${PROGRAM_REG_KEY}" "Install_Dir" "$INSTDIR"
   
   ; Write the uninstall keys for Windows
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PROGRAM_REG_KEY}" "DisplayName" "Vacuum Instant Messenger"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PROGRAM_REG_KEY}" "DisplayName" "Vacuum Chat"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PROGRAM_REG_KEY}" "UninstallString" '"$INSTDIR\uninstall.exe"'
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PROGRAM_REG_KEY}" "NoModify" 1
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PROGRAM_REG_KEY}" "NoRepair" 1
@@ -122,13 +122,13 @@ Section "Start Menu Shortcuts"
 
   CreateDirectory "$SMPROGRAMS\${PROGRAM_SM_FOLDER}"
   CreateShortCut "$SMPROGRAMS\${PROGRAM_SM_FOLDER}\Uninstall.lnk" "$INSTDIR\uninstall.exe" "" "$INSTDIR\uninstall.exe" 0
-  CreateShortCut "$SMPROGRAMS\${PROGRAM_SM_FOLDER}\Vacuum-IM.lnk" "$INSTDIR\vacuum.exe" "" "$INSTDIR\vacuum.exe" 0
+  CreateShortCut "$SMPROGRAMS\${PROGRAM_SM_FOLDER}\Vacuum Chat.lnk" "$INSTDIR\vacuum.exe" "" "$INSTDIR\vacuum.exe" 0
   
 SectionEnd
 
 Section "Desktop Shortcuts"
 
-  CreateShortCut "$DESKTOP\Vacuum-IM.lnk" "$INSTDIR\vacuum.exe" "" "$INSTDIR\vacuum.exe" 0
+  CreateShortCut "$DESKTOP\Vacuum Chat.lnk" "$INSTDIR\vacuum.exe" "" "$INSTDIR\vacuum.exe" 0
   
 SectionEnd
 
@@ -143,7 +143,7 @@ Section "Uninstall"
   DeleteRegKey HKLM "SOFTWARE\${PROGRAM_REG_KEY}"
 
   ; Remove desktop icon
-  Delete "$DESKTOP\Vacuum-IM.lnk"
+  Delete "$DESKTOP\Vacuum Chat.lnk"
 	
   ; Remove directories used
   RMDir /r "$SMPROGRAMS\${PROGRAM_SM_FOLDER}"

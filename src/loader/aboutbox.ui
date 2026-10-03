@@ -11,7 +11,7 @@
    </rect>
   </property>
   <property name="windowTitle">
-   <string>About the program</string>
+   <string>About Vacuum Chat</string>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <property name="sizeConstraint">
@@ -73,7 +73,7 @@
         </font>
        </property>
        <property name="text">
-        <string notr="true">Vacuum-IM</string>
+        <string notr="true">Vacuum Chat</string>
        </property>
       </widget>
      </item>
@@ -92,7 +92,7 @@
    <item>
     <widget class="QLabel" name="lblVersion">
      <property name="text">
-      <string notr="true">Version: 1.0.0.0 Revision: 0000</string>
+      <string notr="true">Version: 2.0.0</string>
      </property>
      <property name="textFormat">
       <enum>Qt::PlainText</enum>

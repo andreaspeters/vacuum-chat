@@ -10,10 +10,8 @@ Package: vacuum
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
 Recommends: nas
-Description: Jabber client using Qt
- Vacuum is a free instant messaging application designed for the Jabber
- (XMPP) IM network (including Google Talk). It has full Unicode support, 
- and supports most important XMPP features.
+Description: Vacuum Chat
+ Vacuum Chat is a desktop messaging application.
 
 Package: vacuum-dev
 Architecture: all
