@@ -25,6 +25,9 @@ endif()
 
 project(vacuum-im VERSION 1.0 LANGUAGES CXX)
 
+set(VACUUM_PYTHON_EXECUTABLE "python3" CACHE STRING "Python interpreter used by the check target")
+set(VACUUM_GIT_EXECUTABLE "git" CACHE STRING "Git executable used by the check target")
+
 if (OS2)
 	list(PREPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 	list(APPEND CMAKE_MODULE_PATH "${CMAKE_PREFIX_PATH}/lib/cmake/Qt6")
@@ -139,6 +142,14 @@ if (INSTALL_DOCS)
 endif (INSTALL_DOCS)
 
 add_subdirectory(src)
+
+add_custom_target(check
+	COMMAND "${VACUUM_PYTHON_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/matrix_protocol_smoke.py"
+	COMMAND "${VACUUM_GIT_EXECUTABLE}" diff --check
+	WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+	COMMENT "Running source and smoke checks"
+	VERBATIM)
+add_dependencies(check chatmessagehandler recentcontacts)
 
 # runtime deps on Windows
 if (WIN32)
