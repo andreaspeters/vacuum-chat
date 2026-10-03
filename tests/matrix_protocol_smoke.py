@@ -501,7 +501,7 @@ def test_redacted_matrix_messages_scrub_format_and_preserve_timestamp():
     assert 'redactedMessage.setBody(QStringLiteral("message deleted"))' in redaction
     assert "sortProtocolMessagesChronologically(*historyIt)" in redaction
     assert "rebuildProtocolConversation(AWindow, AMessaging, historyKey)" in redaction
-    assert "options.time = AMessage.timestamp();" in render
+    assert "options.time = AMessage.timestamp().toLocalTime();" in render
     assert "replaceMessage(displayMessageId" not in redaction
 
 def test_matrix_reaction_render_and_send_contract():
@@ -962,12 +962,31 @@ def test_matrix_cached_history_merges_pending_live_messages_by_full_timestamp():
         "QList<BasicMessage> Matrix::mergeHistoryMessagesChronologically(")
     comparator_end = matrix_source.index("\nvoid Matrix::onRosterChanged", comparator_start)
     comparator = matrix_source[comparator_start:comparator_end]
-    assert "leftTime.date()" in comparator and "rightTime.date()" in comparator, \
-        "message ordering must compare calendar dates explicitly"
-    assert "leftTime.time()" in comparator and "rightTime.time()" in comparator, \
-        "messages on the same date must be ordered by clock time"
+    assert "leftTime.toMSecsSinceEpoch() < rightTime.toMSecsSinceEpoch()" in comparator, \
+        "Matrix history must sort instants by epoch, not mixed local/UTC wall times"
     assert "left.messageId()" not in comparator and "right.messageId()" not in comparator, \
         "unique event IDs must not determine message order"
+
+    chat_handler = (root / "src/plugins/chatmessagehandler/chatmessagehandler.cpp").read_text()
+    chat_sort_start = chat_handler.index(
+        "void ChatMessageHandler::sortProtocolMessagesChronologically(")
+    chat_sort_end = chat_handler.index(
+        "\nvoid ChatMessageHandler::rebuildProtocolConversation", chat_sort_start)
+    chat_sort = chat_handler[chat_sort_start:chat_sort_end]
+    assert "leftTime.toMSecsSinceEpoch() < rightTime.toMSecsSinceEpoch()" in chat_sort, \
+        "rendered history must sort by absolute instants regardless of timezone spec"
+
+    from datetime import datetime, timezone, timedelta
+    outgoing_utc = datetime(2025, 1, 3, 16, 30, tzinfo=timezone.utc)
+    incoming_local = datetime(2025, 1, 3, 18, 0,
+                               tzinfo=timezone(timedelta(hours=2)))
+    mixed_zone = [("outgoing", outgoing_utc), ("incoming", incoming_local)]
+    assert [name for name, _ in sorted(mixed_zone, key=lambda item: item[1].timestamp())] == [
+        "incoming", "outgoing"]
+    wall_clock_order = sorted(mixed_zone, key=lambda item: (
+        item[1].date(), item[1].time().replace(tzinfo=None)))
+    assert [name for name, _ in wall_clock_order] != ["incoming", "outgoing"], \
+        "the fixture must reproduce how local/UTC wall-time sorting reverses this timeline"
 
     # Reverse arrival and deliberately opposing IDs make only date+time yield this order.
     arrivals = [("$z-later", "2025-01-03T18:45:00"),
@@ -982,7 +1001,7 @@ def test_matrix_cached_history_merges_pending_live_messages_by_full_timestamp():
                            ("$a-second", "2025-01-03T11:30:00")]
     assert [event_id for event_id, _ in sorted(equal_time_arrivals, key=lambda item: item[1])] == [
         "$z-first", "$a-second"]
-    print("  ✓ cached/live history sorts by date then time without using event IDs")
+    print("  ✓ cached/live history sorts by absolute time without using event IDs")
 
 def test_matrix_messages_display_full_timestamp():
     print("\n=== Test 21c: Matrix Message Date and Time Display ===")
@@ -992,7 +1011,7 @@ def test_matrix_messages_display_full_timestamp():
     modern_template = (root / "resources/simplemessagestyles/modern-chat/Incoming/Content.html").read_text()
     render = handler.split("void ChatMessageHandler::renderProtocolMessage(", 1)[1].split(
         "void ChatMessageHandler::renderProtocolHistory(", 1)[0]
-    assert "options.time = AMessage.timestamp();" in render
+    assert "options.time = AMessage.timestamp().toLocalTime();" in render
     assert "options.timeFormat" in render and "yyyy-MM-dd hh:mm:ss" in render, \
         "Matrix message metadata must render the date as well as the time"
     fill = style.split("void SimpleMessageStyle::fillContentKeywords(", 1)[1].split(

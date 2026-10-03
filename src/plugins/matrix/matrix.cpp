@@ -1546,11 +1546,7 @@ QList<BasicMessage> Matrix::mergeHistoryMessagesChronologically(
 			return leftTime.isValid();
 		if (!leftTime.isValid())
 			return false;
-		if (leftTime.date() != rightTime.date())
-			return leftTime.date() < rightTime.date();
-		if (leftTime.time() != rightTime.time())
-			return leftTime.time() < rightTime.time();
-		return false;
+		return leftTime.toMSecsSinceEpoch() < rightTime.toMSecsSinceEpoch();
 	});
 	return messages;
 }

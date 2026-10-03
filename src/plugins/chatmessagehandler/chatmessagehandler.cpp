@@ -713,7 +713,7 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 	const bool isVacuumUser = AMessage.direction() == BasicMessage::Outgoing ||
 		AMessage.metadata().value(QStringLiteral("sender_is_self")).toBool();
 	options.direction = isVacuumUser ? IMessageContentOptions::DirectionOut : IMessageContentOptions::DirectionIn;
-	options.time = AMessage.timestamp();
+	options.time = AMessage.timestamp().toLocalTime();
 	options.timeFormat = QStringLiteral("yyyy-MM-dd hh:mm:ss");
 	options.senderId = AMessage.sender();
 	const QString rawSenderName = AMessage.metadata().value(QStringLiteral("sender_name")).toString().isEmpty()
@@ -837,11 +837,7 @@ void ChatMessageHandler::sortProtocolMessagesChronologically(QList<BasicMessage>
 			return leftTime.isValid();
 		if (!leftTime.isValid())
 			return false;
-		if (leftTime.date() != rightTime.date())
-			return leftTime.date() < rightTime.date();
-		if (leftTime.time() != rightTime.time())
-			return leftTime.time() < rightTime.time();
-		return false;
+		return leftTime.toMSecsSinceEpoch() < rightTime.toMSecsSinceEpoch();
 	});
 }
 
