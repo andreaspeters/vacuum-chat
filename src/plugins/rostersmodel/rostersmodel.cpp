@@ -674,18 +674,32 @@ void RostersModel::onProtocolRosterChanged()
 
 void RostersModel::rebuildProtocolRoster(IProtocolRoster *roster)
 {
-	if (!roster || roster->streamId().isEmpty())
+	if (!roster)
 		return;
 	if (FPendingProtocolRoster) {
-		if (FPendingProtocolRoster != roster && !FProtocolRosterRebuildQueue.contains(roster))
+		if (!FProtocolRosterRebuildQueue.contains(roster))
 			FProtocolRosterRebuildQueue.append(roster);
 		return;
 	}
-	IRosterIndex *streamIndex = addProtocolStream(roster->streamId());
+
+	const QString streamId = roster->streamId();
+	const QString previousStreamId = FProtocolRosterStreamIds.value(roster);
+	if (streamId.isEmpty())
+	{
+		FProtocolRosterStreamIds.remove(roster);
+		if (!previousStreamId.isEmpty())
+			onProtocolPresenceClosed(previousStreamId);
+		return;
+	}
+	if (!previousStreamId.isEmpty() && previousStreamId != streamId)
+		onProtocolPresenceClosed(previousStreamId);
+	FProtocolRosterStreamIds.insert(roster, streamId);
+
+	IRosterIndex *streamIndex = addProtocolStream(streamId);
 	if (!streamIndex) return;
-	streamIndex->setData(RDR_NAME, roster->streamId());
+	streamIndex->setData(RDR_NAME, streamId);
 	FPendingProtocolRoster = roster;
-	FPendingProtocolStreamId = roster->streamId();
+	FPendingProtocolStreamId = streamId;
 	FPendingDirectGroup = createGroupIndex(RIT_GROUP, tr("Direct Chats"), QStringLiteral("::"), streamIndex);
 	FPendingRoomGroup = createGroupIndex(RIT_GROUP, tr("Rooms"), QStringLiteral("::"), streamIndex);
 	FPendingProtocolRooms = roster->rooms();

@@ -12,6 +12,8 @@
 #include <interfaces/ipresence.h>
 #include <utils/options.h>
 
+class IAccountManager;
+
 class RecentContacts : 
 	public QObject,
 	public IPlugin,
@@ -159,6 +161,7 @@ protected slots:
 	void onChangeShowOnlyFavorite();
 private:
 	IPluginManager *FPluginManager;
+	IAccountManager *FAccountManager;
 	IPrivateStorage *FPrivateStorage;
 	IRostersModel *FRostersModel;
 	IRostersView *FRostersView;

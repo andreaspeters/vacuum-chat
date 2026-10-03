@@ -1,4 +1,6 @@
 #include "autostatus.h"
+#include "autostatusstreamguard.h"
+#include <interfaces/iprotocolpresence.h>
 
 #include <QCursor>
 #include <QRegularExpression>
@@ -7,6 +9,7 @@
 
 AutoStatus::AutoStatus()
 {
+	FPluginManager = NULL;
 	FStatusChanger = NULL;
 	FAccountManager = NULL;
 	FOptionsManager = NULL;
@@ -32,6 +35,8 @@ void AutoStatus::pluginInfo(IPluginInfo *APluginInfo)
 
 bool AutoStatus::initConnections(IPluginManager *APluginManager, int &/*AInitOrder*/)
 {
+	FPluginManager = APluginManager;
+
 	IPlugin *plugin = APluginManager->pluginInterface("IStatusChanger").value(0,NULL);
 	if (plugin)
 	{
@@ -194,6 +199,42 @@ void AutoStatus::prepareRule(IAutoStatusRule &ARule)
 	replaceDateTime(ARule.text,"\\#\\((.*)\\)",QDateTime(QDate::currentDate(),QTime(0,0)).addSecs(ARule.time));
 }
 
+void AutoStatus::applyProtocolPresence(int AShow, const QString &AStatus)
+{
+	if (!FPluginManager)
+		return;
+
+	IPlugin *plugin = FPluginManager->pluginInterface("IProtocolPresence").value(0,NULL);
+	if (!plugin)
+		return;
+
+	IProtocolPresence *presence = qobject_cast<IProtocolPresence *>(plugin->instance());
+	if (!presence)
+		return;
+
+	const QString streamId = presence->streamId();
+	if (streamId.isEmpty())
+		return;
+
+	const int currentShow = presence->show();
+	const bool eligibleForInitialChange = currentShow == IPresence::Online || currentShow == IPresence::Chat;
+	FProtocolPresenceController.apply(presence, streamId, eligibleForInitialChange, AShow, AStatus);
+}
+
+void AutoStatus::restoreProtocolPresence()
+{
+	if (!FPluginManager)
+		return;
+
+	IPlugin *plugin = FPluginManager->pluginInterface("IProtocolPresence").value(0,NULL);
+	if (!plugin)
+		return;
+
+	IProtocolPresence *presence = qobject_cast<IProtocolPresence *>(plugin->instance());
+	if (presence)
+		FProtocolPresenceController.restore(presence, presence->streamId());
+}
+
 void AutoStatus::setActiveRule(const QUuid &ARuleId)
 {
 	if (FAccountManager && FStatusChanger && ARuleId!=FActiveRule)
@@ -207,9 +248,17 @@ void AutoStatus::setActiveRule(const QUuid &ARuleId)
 				FAutoStatusId = FStatusChanger->addStatusItem(tr("Auto status"),rule.show,rule.text,FStatusChanger->statusItemPriority(STATUS_MAIN_ID));
 				foreach(IAccount *account, FAccountManager->accounts())
 				{
-					if (account->isActive() && account->xmppStream()->isOpen())
+					if (!account || !account->isActive())
+						continue;
+
+					// XMPP stream handling (existing)
+					if (account->protocolKind() == IProtocolAccount::ProtocolXmpp)
 					{
-						Jid streamJid = account->xmppStream()->streamJid();
+						IXmppStream *stream = account->xmppStream();
+						if (!AutoStatusInternal::isXmppStreamOpen(stream))
+							continue;
+
+						Jid streamJid = stream->streamJid();
 						int status = FStatusChanger->streamStatus(streamJid);
 						int show = FStatusChanger->statusItemShow(status);
 						if (show==IPresence::Online || show==IPresence::Chat)
@@ -219,10 +268,25 @@ void AutoStatus::setActiveRule(const QUuid &ARuleId)
 						}
 					}
 				}
+
+				// Apply protocol presence for Matrix (single global instance)
+				if (FPluginManager)
+				{
+					IPlugin *plugin = FPluginManager->pluginInterface("IProtocolPresence").value(0,NULL);
+					if (plugin)
+					{
+						IProtocolPresence *presence = qobject_cast<IProtocolPresence *>(plugin->instance());
+						if (presence && !presence->streamId().isEmpty())
+						{
+							applyProtocolPresence(rule.show, rule.text);
+						}
+					}
+				}
 			}
 			else
 			{
 				FStatusChanger->updateStatusItem(FAutoStatusId,tr("Auto status"),rule.show,rule.text,FStatusChanger->statusItemPriority(STATUS_MAIN_ID));
+				applyProtocolPresence(rule.show, rule.text);
 			}
 		}
 		else
@@ -231,6 +295,9 @@ void AutoStatus::setActiveRule(const QUuid &ARuleId)
 				FStatusChanger->setStreamStatus(streamJid, FStreamStatus.take(streamJid));
 			foreach(Jid streamJid, FStatusChanger->statusStreams(FAutoStatusId))
 				FStatusChanger->setStreamStatus(streamJid,STATUS_MAIN_ID);
+
+			restoreProtocolPresence();
+
 			FStatusChanger->removeStatusItem(FAutoStatusId);
 			FAutoStatusId = STATUS_NULL_ID;
 		}

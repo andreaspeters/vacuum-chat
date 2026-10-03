@@ -16,8 +16,8 @@
 #include <ui_accountoptions.h>
 
 class AccountOptions :
-			public QWidget,
-			public IOptionsWidget
+		public QWidget,
+		public IOptionsWidget
 {
 	Q_OBJECT;
 	Q_INTERFACES(IOptionsWidget);
@@ -59,6 +59,12 @@ private:
 	QLineEdit *FMatrixTargetUser;
 	QLineEdit *FMatrixTargetDevice;
 	QPushButton *FMatrixVerifyButton;
+	
+	// MeshCore fields
+	QWidget *FMeshCoreFields;
+	QComboBox *FMeshCoreTransport;
+	QLineEdit *FMeshCoreMacAddress;
+	QLineEdit *FMeshCorePort;
 };
 
 #endif // ACCOUNTOPTIONS_H

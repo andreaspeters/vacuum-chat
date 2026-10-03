@@ -1,4 +1,6 @@
 #include "chatmessagehandler.h"
+#include "unicodeavatar.h"
+#include "protocolmessagerouting.h"
 #include <utils/matrixhtml.h>
 #include <utils/messagenotificationmute.h>
 #include <interfaces/iemoticons.h>
@@ -310,24 +312,20 @@ bool ChatMessageHandler::rosterIndexDoubleClicked(int AOrder, IRosterIndex *AInd
 		{
 			IProtocolMessaging *selectedMessaging = nullptr;
 			for (IProtocolMessaging *messaging : FProtocolMessaging) {
-				if (!accountId.isEmpty() && messaging->streamId() == accountId) {
+				if (messaging && ProtocolMessageRouting::hasExactStream(
+					messaging->streamId(), accountId)) {
 					selectedMessaging = messaging;
 					break;
 				}
-				if (!selectedMessaging && messaging->protocol() == QStringLiteral("matrix"))
-					selectedMessaging = messaging;
 			}
-			const QString effectiveAccountId = selectedMessaging
-				? selectedMessaging->streamId() : accountId;
-			if (effectiveAccountId.isEmpty())
+			if (!selectedMessaging)
 				return false;
-			IChatWindow *window = FMessageWidgets->getConversationWindow(effectiveAccountId, conversationId);
+			IChatWindow *window = FMessageWidgets->getConversationWindow(
+				selectedMessaging->streamId(), conversationId);
 			if (window)
 			{
-				if (selectedMessaging) {
-					setupProtocolWindow(window, selectedMessaging);
-					renderProtocolHistory(window, selectedMessaging);
-				}
+				setupProtocolWindow(window, selectedMessaging);
+				renderProtocolHistory(window, selectedMessaging);
 				window->showTabPage();
 			}
 			return window != NULL;
@@ -487,9 +485,11 @@ void ChatMessageHandler::onProtocolAvatarUpdated(const QString &key)
 
 void ChatMessageHandler::onProtocolMessageReceived(const BasicMessage &AMessage)
 {
-	for (IProtocolMessaging *messaging : FProtocolMessaging)
+	IProtocolMessaging *messaging = qobject_cast<IProtocolMessaging *>(sender());
+	if (!messaging || !ProtocolMessageRouting::matchesProtocol(
+		AMessage.protocol(), messaging->protocol()) || messaging->streamId().isEmpty())
+		return;
 	{
-		if (AMessage.protocol() != QStringLiteral("matrix") || messaging->streamId().isEmpty()) continue;
 		IChatWindow *window = FMessageWidgets->findConversationWindow(messaging->streamId(), AMessage.conversationId());
 		const QString messageType = AMessage.metadata().value(QStringLiteral("msgtype")).toString();
 		const bool pendingMedia = (messageType == QStringLiteral("m.image") ||
@@ -716,12 +716,18 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 	options.time = AMessage.timestamp();
 	options.timeFormat = QStringLiteral("yyyy-MM-dd hh:mm:ss");
 	options.senderId = AMessage.sender();
-	options.senderName = AMessage.metadata().value(QStringLiteral("sender_name")).toString();
-	if (options.senderName.isEmpty())
-		options.senderName = AMessage.sender();
-	options.senderAvatar = AMessage.metadata().value(QStringLiteral("sender_avatar")).toString();
-	if (options.senderAvatar.isEmpty())
-		options.senderAvatar = AMessaging->userAvatarPath(AMessage.conversationId(), AMessage.sender());
+	const QString rawSenderName = AMessage.metadata().value(QStringLiteral("sender_name")).toString().isEmpty()
+		? AMessage.sender()
+		: AMessage.metadata().value(QStringLiteral("sender_name")).toString();
+	options.senderName = rawSenderName.toHtmlEscaped();
+	QString senderAvatar = AMessage.metadata().value(QStringLiteral("sender_avatar")).toString();
+	if (senderAvatar.isEmpty())
+	{
+		senderAvatar = AMessaging->userAvatarPath(AMessage.conversationId(), AMessage.sender());
+		if (senderAvatar.isEmpty())
+			senderAvatar = UnicodeAvatar::getAvatarPath(rawSenderName);
+	}
+	options.senderAvatar = senderAvatar;
 	options.senderColor = isVacuumUser ? QStringLiteral("red") : QStringLiteral("blue");
 	QString body = AMessage.body();
 	if (body.isEmpty())
@@ -1647,28 +1653,19 @@ void ChatMessageHandler::onMessageReady()
 		const QString body = window->editWidget()->document()->toPlainText();
 		IProtocolMessaging *selectedMessaging = nullptr;
 		for (IProtocolMessaging *messaging : FProtocolMessaging)
-			if (messaging->streamId() == window->accountId()) {
+			if (messaging && ProtocolMessageRouting::hasExactStream(
+				messaging->streamId(), window->accountId())) {
 				selectedMessaging = messaging;
 				break;
 			}
-		if (!selectedMessaging)
-			for (IProtocolMessaging *messaging : FProtocolMessaging)
-				if (messaging->protocol() == QStringLiteral("matrix")) {
-					selectedMessaging = messaging;
-					break;
-				}
 		if (selectedMessaging) {
 			const QString formattedBody = selectedMessaging->formatEmoticonsForSending(body);
-			BasicMessage message(QString(), window->conversationId(), QString(), QString(), formattedBody, QDateTime::currentDateTimeUtc(), QStringLiteral("matrix"), BasicMessage::Outgoing);
-			QVariantMap metadata;
-			metadata.insert(QStringLiteral("msgtype"), QStringLiteral("m.text"));
-			metadata.insert(QStringLiteral("format"), QStringLiteral("org.matrix.custom.html"));
-			metadata.insert(QStringLiteral("formatted_body"),
-				matrixMarkdownToSafeHtml(formattedBody));
-			message.setMetadata(metadata);
+			BasicMessage message(QString(), window->conversationId(), QString(), QString(),
+				formattedBody, QDateTime::currentDateTimeUtc(),
+				selectedMessaging->protocol(), BasicMessage::Outgoing);
 			if (selectedMessaging->sendMessage(message)) { window->editWidget()->clearEditor(); return; }
 		}
-		qWarning() << "Matrix send not routed: conversation=" << window->conversationId()
+		qWarning() << "Protocol text message not routed: conversation=" << window->conversationId()
 			<< "windowAccountSet=" << !window->accountId().isEmpty();
 		return;
 	}

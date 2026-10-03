@@ -10,6 +10,7 @@
 #include <interfaces/iaccountmanager.h>
 #include <interfaces/iprotocolpresence.h>
 #include <interfaces/iprotocolroster.h>
+#include <QHash>
 #include <utils/jid.h>
 #include <utils/options.h>
 #include "rosterindex.h"
@@ -113,6 +114,7 @@ private:
 	IProtocolPresence *FProtocolPresence;
 	IProtocolRoster *FProtocolRoster;
 	QList<IProtocolRoster *> FProtocolRosters;
+	QHash<IProtocolRoster *, QString> FProtocolRosterStreamIds;
 	IPluginManager *FPluginManager;
 	int FProtocolRosterRetryCount;
 private:

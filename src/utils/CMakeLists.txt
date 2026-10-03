@@ -95,3 +95,13 @@ if (INSTALL_SDK)
 			COMPONENT sdk)
 	endif (WIN32 OR OS2)
 endif (INSTALL_SDK)
+
+if (BUILD_TESTING)
+	add_executable(messagenotificationmute_tests EXCLUDE_FROM_ALL
+		messagenotificationmute_test.cpp)
+	target_compile_features(messagenotificationmute_tests PRIVATE cxx_std_11)
+	target_include_directories(messagenotificationmute_tests PRIVATE
+		"${CMAKE_SOURCE_DIR}/src")
+	target_link_libraries(messagenotificationmute_tests PRIVATE
+		${VACUUM_UTILS_NAME} Qt6::Xml)
+endif()

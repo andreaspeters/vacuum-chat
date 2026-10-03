@@ -14,9 +14,11 @@ AccountOptions::AccountOptions(IAccountManager *AManager, IPluginManager *APlugi
 	FAccountType = new QComboBox(this);
 	FAccountType->addItem(tr("Jabber / XMPP"), QStringLiteral("jabber"));
 	FAccountType->addItem(tr("Matrix"), QStringLiteral("matrix"));
+	FAccountType->addItem(tr("MeshCore"), QStringLiteral("meshcore"));
 	if (QVBoxLayout *root = qobject_cast<QVBoxLayout *>(layout()))
 		root->insertWidget(0, FAccountType);
 
+	// Setup Matrix fields
 	FMatrixFields = new QWidget(this);
 	QFormLayout *matrixLayout = new QFormLayout(FMatrixFields);
 	FMatrixInstance = new QLineEdit(FMatrixFields);
@@ -75,15 +77,43 @@ AccountOptions::AccountOptions(IAccountManager *AManager, IPluginManager *APlugi
 	if (QVBoxLayout *root = qobject_cast<QVBoxLayout *>(layout()))
 		root->insertWidget(1, FMatrixFields);
 	FMatrixFields->hide();
+
+	// Setup MeshCore fields
+	FMeshCoreFields = new QWidget(this);
+	QFormLayout *meshcoreLayout = new QFormLayout(FMeshCoreFields);
+	FMeshCoreTransport = new QComboBox(FMeshCoreFields);
+	FMeshCoreTransport->addItem(tr("BLE"), QStringLiteral("ble"));
+	FMeshCoreTransport->addItem(tr("USB"), QStringLiteral("usb"));
+	FMeshCoreMacAddress = new QLineEdit(FMeshCoreFields);
+	FMeshCorePort = new QLineEdit(FMeshCoreFields);
+
+	// Set default values
+	FMeshCoreMacAddress->setText(QStringLiteral("10:BD:A3:5A:6B:E9"));
+	FMeshCorePort->setText(QStringLiteral("/dev/ttyACM0"));
+
+	meshcoreLayout->addRow(tr("Transport:"), FMeshCoreTransport);
+	meshcoreLayout->addRow(tr("BLE MAC Address:"), FMeshCoreMacAddress);
+	meshcoreLayout->addRow(tr("USB Port:"), FMeshCorePort);
+
+	if (QVBoxLayout *root = qobject_cast<QVBoxLayout *>(layout()))
+		root->insertWidget(2, FMeshCoreFields);
+	FMeshCoreFields->hide();
+
 	const auto updateAccountTypeUi = [this](int AIndex) {
 		const bool matrix = FAccountType->itemData(AIndex).toString() == QStringLiteral("matrix");
-		ui.grbAccount->setVisible(!matrix);
+		const bool meshcore = FAccountType->itemData(AIndex).toString() == QStringLiteral("meshcore");
+		ui.grbAccount->setVisible(!matrix && !meshcore);
 		FMatrixFields->setVisible(matrix);
 		FMatrixFields->setEnabled(matrix);
+		FMeshCoreFields->setVisible(meshcore);
+		FMeshCoreFields->setEnabled(meshcore);
 	};
 	connect(FAccountType, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
 		[this, updateAccountTypeUi](int AIndex) {
 			updateAccountTypeUi(AIndex);
+			if (FAccountType->itemData(AIndex).toString() == QStringLiteral("meshcore") &&
+				ui.lneName->text().trimmed() == tr("New Account"))
+				ui.lneName->setText(QStringLiteral("@Meshcore"));
 			emit modified();
 		});
 	updateAccountTypeUi(FAccountType->currentIndex());
@@ -122,6 +152,12 @@ AccountOptions::AccountOptions(IAccountManager *AManager, IPluginManager *APlugi
 	connect(FMatrixPassword,&QLineEdit::textChanged,this,[this](const QString &){ emit modified(); });
 	connect(FMatrixEmojiPack, QOverload<int>::of(&QComboBox::currentIndexChanged),
 		this, [this](int){ emit modified(); });
+	
+	// Connect meshcore signals
+	connect(FMeshCoreTransport, QOverload<int>::of(&QComboBox::currentIndexChanged),
+		this, [this](int){ emit modified(); });
+	connect(FMeshCoreMacAddress,&QLineEdit::textChanged,this,[this](const QString &){ emit modified(); });
+	connect(FMeshCorePort,&QLineEdit::textChanged,this,[this](const QString &){ emit modified(); });
 
 	reset();
 }
@@ -140,15 +176,16 @@ void AccountOptions::apply()
 	if (FAccount)
 	{
 		const bool matrix = FAccountType->currentData().toString() == QStringLiteral("matrix");
+		const bool meshcore = FAccountType->currentData().toString() == QStringLiteral("meshcore");
 		QString name = ui.lneName->text().trimmed();
 		if (name.isEmpty())
-			name = matrix ? FMatrixUsername->text().trimmed() : ui.lneJabberId->text().trimmed();
+			name = matrix ? FMatrixUsername->text().trimmed() : (meshcore ? QStringLiteral("@Meshcore") : ui.lneJabberId->text().trimmed());
 		if (name.isEmpty())
 			name = tr("New Account");
 
 		FAccount->setName(name);
 		OptionsNode accountOptions = FAccount->optionsNode();
-		accountOptions.setValue(matrix ? QStringLiteral("matrix") : QStringLiteral("jabber"), "type");
+		accountOptions.setValue(matrix ? QStringLiteral("matrix") : (meshcore ? QStringLiteral("meshcore") : QStringLiteral("jabber")), "type");
 
 		bool changedJid = false;
 		if (matrix)
@@ -158,6 +195,14 @@ void AccountOptions::apply()
 			accountOptions.setValue(FMatrixEmojiPack->currentData().toString(), "matrix.emoji-pack");
 			accountOptions.setValue(FMatrixDeviceId->text().trimmed(), "matrix.device-id");
 			FAccount->setPassword(FMatrixPassword->text());
+		}
+		else if (meshcore)
+		{
+			// Store meshcore settings under meshcore.* namespace
+			accountOptions.setValue(FMeshCoreTransport->currentData().toString(), "meshcore.transport");
+			accountOptions.setValue(FMeshCoreMacAddress->text().trimmed(), "meshcore.mac");
+			accountOptions.setValue(FMeshCorePort->text().trimmed(), "meshcore.port");
+			FAccount->setPassword(QString()); // Empty password for meshcore
 		}
 		else
 		{
@@ -170,7 +215,7 @@ void AccountOptions::apply()
 
 		if (matrix && (FMatrixInstance->text().trimmed().isEmpty() || FMatrixUsername->text().trimmed().isEmpty()))
 			QMessageBox::warning(this,tr("Invalid Matrix Account"),tr("Account '%1' requires a Matrix instance and username").arg(name));
-		else if (!matrix && !FAccount->isValid())
+		else if (!matrix && !meshcore && !FAccount->isValid())
 			QMessageBox::warning(this,tr("Invalid Account"),tr("Account '%1' is not valid, change its Jabber ID").arg(name));
 		else if (changedJid && FAccount->isActive() && FAccount->xmppStream()->isConnected())
 			QMessageBox::information(NULL,tr("Delayed Apply"),tr("Some options of account '%1' will be applied after disconnect").arg(name));
@@ -201,6 +246,17 @@ void AccountOptions::reset()
 		ui.lneJabberId->setText(FAccount->streamJid().uBare());
 		ui.lneResource->setText(FAccount->streamJid().resource());
 		ui.lnePassword->setText(FAccount->password());
+
+		// Load meshcore settings if needed
+		const QString meshcoreTransport = FAccount->optionsNode().value("meshcore.transport").toString();
+		FMeshCoreTransport->setCurrentIndex(FMeshCoreTransport->findData(
+			meshcoreTransport.isEmpty() ? QStringLiteral("ble") : meshcoreTransport));
+		const QString meshcoreMac = FAccount->optionsNode().value("meshcore.mac").toString();
+		FMeshCoreMacAddress->setText(meshcoreMac.isEmpty()
+			? QStringLiteral("10:BD:A3:5A:6B:E9") : meshcoreMac);
+		const QString meshcorePort = FAccount->optionsNode().value("meshcore.port").toString();
+		FMeshCorePort->setText(meshcorePort.isEmpty()
+			? QStringLiteral("/dev/ttyACM0") : meshcorePort);
 	}
 	emit childReset();
 }

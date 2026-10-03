@@ -21,6 +21,7 @@ bool Account::isValid() const
 {
 	const QString type = FOptionsNode.value("type").toString();
 	const bool matrix = type.compare("matrix", Qt::CaseInsensitive) == 0;
+	const bool meshcore = type.compare("meshcore", Qt::CaseInsensitive) == 0;
 
 	if (matrix)
 	{
@@ -38,6 +39,15 @@ bool Account::isValid() const
 		}
 
 		return valid;
+	}
+	else if (meshcore)
+	{
+		const QString transport = FOptionsNode.value("meshcore.transport").toString().trimmed().toLower();
+		if (transport != QStringLiteral("ble") && transport != QStringLiteral("usb"))
+			return false;
+		if (transport == QStringLiteral("ble"))
+			return !FOptionsNode.value("meshcore.mac").toString().trimmed().isEmpty();
+		return !FOptionsNode.value("meshcore.port").toString().trimmed().isEmpty();
 	}
 	else
 	{
@@ -63,8 +73,9 @@ bool Account::isActive() const
 void Account::setActive(bool AActive)
 {
 	const bool matrix = protocolKind() == ProtocolMatrix;
+	const bool meshcore = protocolKind() == ProtocolMeshCore;
 
-	if (matrix)
+	if (matrix || meshcore)
 	{
 		if (AActive && !FActive && isValid())
 		{
@@ -149,7 +160,8 @@ IXmppStream *Account::xmppStream() const
 IProtocolAccount::ProtocolKind Account::protocolKind() const
 {
 	return FOptionsNode.value("type").toString().compare("matrix", Qt::CaseInsensitive) == 0
-			? ProtocolMatrix : ProtocolXmpp;
+			? ProtocolMatrix : (FOptionsNode.value("type").toString().compare("meshcore", Qt::CaseInsensitive) == 0 
+			? ProtocolMeshCore : ProtocolXmpp);
 }
 
 IProtocolAccount::Capabilities Account::capabilities() const

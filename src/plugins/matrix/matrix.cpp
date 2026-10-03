@@ -2,8 +2,15 @@
 #include "matrixnetwork.h"
 #include "matrixdatabase.h"
 #include "matrixverificationdialog.h"
+#include "matrixjoinroomchatdialog.h"
+#include "matrixcontext.h"
 #include <utils/matrixhtml.h>
+#include <utils/action.h>
+#include <utils/menu.h>
 #include <interfaces/ipresence.h>
+#include <interfaces/imessagewidgets.h>
+#include <definitions/actiongroups.h>
+#include <definitions/rosterindextyperole.h>
 
 #include <QByteArray>
 #include <QNetworkRequest>
@@ -469,6 +476,18 @@ bool Matrix::initConnections(IPluginManager *APluginManager, int &AInitOrder)
 
 		}
 	}
+	plugin = APluginManager->pluginInterface("IRostersViewPlugin").value(0, NULL);
+	if (plugin) {
+		FRostersViewPlugin = qobject_cast<IRostersViewPlugin *>(plugin->instance());
+		if (FRostersViewPlugin && FRostersViewPlugin->rostersView())
+			connect(FRostersViewPlugin->rostersView()->instance(),
+				SIGNAL(indexContextMenu(const QList<IRosterIndex *> &, quint32, Menu *)),
+				SLOT(onRostersViewIndexContextMenu(const QList<IRosterIndex *> &, quint32, Menu *)),
+				Qt::UniqueConnection);
+	}
+	plugin = APluginManager->pluginInterface("IMessageWidgets").value(0, NULL);
+	if (plugin)
+		FMessageWidgets = qobject_cast<IMessageWidgets *>(plugin->instance());
 	plugin = APluginManager->pluginInterface("IOptionsManager").value(0, NULL);
 	if (plugin)
 		FOptionsManager = qobject_cast<IOptionsManager *>(plugin->instance());
@@ -479,6 +498,62 @@ bool Matrix::initConnections(IPluginManager *APluginManager, int &AInitOrder)
 	if (plugin)
 		FEmoticons = qobject_cast<IEmoticons *>(plugin->instance());
 	return true;
+}
+
+void Matrix::onRostersViewIndexContextMenu(const QList<IRosterIndex *> &indexes,
+	quint32 labelId, Menu *menu)
+{
+	if (!menu || labelId != AdvancedDelegateItem::DisplayId || indexes.size() != 1 ||
+		!FAccountManager || !FMatrixAccount)
+		return;
+	IRosterIndex *index = indexes.first();
+	if (!index || index->type() != RIT_STREAM_ROOT)
+		return;
+	const QString clickedStreamId = index->data(RDR_ACCOUNT_ID).toString();
+	IAccount *account = FAccountManager->accountById(FMatrixAccount->accountId());
+	if (!account || !account->isActive() ||
+		!isMatrixAccountContext(clickedStreamId, streamId(), account, FMatrixAccount))
+		return;
+
+	const QString accountId = account->accountId().toString();
+	Action *action = new Action(menu);
+	action->setText(tr("Join Matrix room / start direct chat…"));
+	connect(action, &QAction::triggered, this, [this, accountId](bool) {
+		showRoomChatDialog(accountId);
+	});
+	menu->addAction(action, AG_DEFAULT, true);
+}
+
+void Matrix::showRoomChatDialog(const QString &boundAccountId)
+{
+	if (!FMatrixNetwork || !FMatrixAccount ||
+		FMatrixAccount->accountId().toString() != boundAccountId)
+		return;
+	QWidget *parent = FRostersViewPlugin && FRostersViewPlugin->rostersView()
+		? FRostersViewPlugin->rostersView()->instance() : nullptr;
+	MatrixJoinRoomChatDialog dialog(parent);
+	connect(&dialog, &MatrixJoinRoomChatDialog::publicRoomSearchRequested,
+		FMatrixNetwork, &MatrixNetwork::searchPublicRooms);
+	connect(FMatrixNetwork, &MatrixNetwork::publicRoomsReceived,
+		&dialog, &MatrixJoinRoomChatDialog::setPublicRoomsResult);
+	connect(&dialog, &MatrixJoinRoomChatDialog::joinRoomRequested,
+		FMatrixNetwork, &MatrixNetwork::joinRoom);
+	connect(&dialog, &MatrixJoinRoomChatDialog::startDirectChatRequested,
+		FMatrixNetwork, &MatrixNetwork::startDirectChat);
+	connect(FMatrixNetwork, &MatrixNetwork::directRoomCreated,
+		&dialog, &MatrixJoinRoomChatDialog::setDirectRoomCreated);
+	connect(&dialog, &MatrixJoinRoomChatDialog::conversationReady, this,
+		[this, boundAccountId](const QString &roomId) {
+			if (!FMatrixAccount || FMatrixAccount->accountId().toString() != boundAccountId)
+				return;
+			setActiveConversation(roomId);
+			if (FMessageWidgets) {
+				IChatWindow *window = FMessageWidgets->getConversationWindow(boundAccountId, roomId);
+				if (window)
+					window->showTabPage();
+			}
+		});
+	dialog.exec();
 }
 
 bool Matrix::initObjects()

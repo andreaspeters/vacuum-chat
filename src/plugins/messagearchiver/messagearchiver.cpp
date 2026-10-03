@@ -356,9 +356,11 @@ QMultiMap<int, IOptionsWidget *> MessageArchiver::optionsWidgets(const QString &
 	if (nodeTree.count()==2 && nodeTree.at(0)==OPN_HISTORY)
 	{
 		IAccount *account = FAccountManager!=NULL ? FAccountManager->accountById(QUuid::fromString(nodeTree.at(1))) : NULL;
-		if (account && account->isActive() && isReady(account->xmppStream()->streamJid()))
+		if (account && account->protocolKind() == IProtocolAccount::ProtocolXmpp && account->isActive())
 		{
-			widgets.insertMulti(OWO_HISTORY_STREAM, new ArchiveStreamOptions(this,account->xmppStream()->streamJid(),AParent));
+			IXmppStream *stream = account->xmppStream();
+			if (stream && isReady(stream->streamJid()))
+				widgets.insertMulti(OWO_HISTORY_STREAM, new ArchiveStreamOptions(this,stream->streamJid(),AParent));
 		}
 	}
 	else if(ANodeId == OPN_HISTORY)

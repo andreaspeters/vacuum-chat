@@ -48,6 +48,21 @@ endif()
 include("matrix.cmake")
 include("${CMAKE_SOURCE_DIR}/src/plugins/plugins.cmake")
 
+if (BUILD_TESTING)
+	add_executable(matrix_public_rooms_tests EXCLUDE_FROM_ALL
+		matrixpublicrooms_test.cpp matrixpublicrooms.cpp)
+	target_link_libraries(matrix_public_rooms_tests PRIVATE Qt6::Core Qt6::Network)
+	add_executable(matrix_direct_room_tests EXCLUDE_FROM_ALL
+		matrixdirectroom_test.cpp matrixdirectroom.cpp)
+	target_link_libraries(matrix_direct_room_tests PRIVATE Qt6::Core Qt6::Network)
+	add_executable(matrix_join_dialog_tests EXCLUDE_FROM_ALL
+		matrixjoinroomchatdialog_test.cpp matrixjoinroomchatdialog.cpp matrixdirectroom.cpp
+		matrixpublicrooms.cpp)
+	target_link_libraries(matrix_join_dialog_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network)
+	add_executable(matrix_context_tests EXCLUDE_FROM_ALL matrixcontext_test.cpp matrixcontext.cpp)
+	target_link_libraries(matrix_context_tests PRIVATE ${VACUUM_UTILS_NAME} Qt6::Core Qt6::Xml)
+endif()
+
 if(TARGET matrix)
 	if(OLM_INCLUDE_DIR)
 		target_include_directories(matrix PRIVATE "${OLM_INCLUDE_DIR}")

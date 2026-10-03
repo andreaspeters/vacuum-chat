@@ -15,6 +15,7 @@
 #include <interfaces/iprotocolnotifications.h>
 #include <interfaces/iavatars.h>
 #include <interfaces/iemoticons.h>
+#include <interfaces/irostersview.h>
 #include "matrixnetwork.h"
 #include "matrixdatabaseworker.h"
 #include "matrixverificationdialog.h"
@@ -22,6 +23,8 @@
 #include <QtPlugin>
 #include <QDialog>
 #include <QThread>
+
+class IMessageWidgets;
 
 class Matrix : public QObject, public IPlugin, public IProtocolPresence, public IProtocolRoster, public IProtocolMessaging, public IProtocolNotifications
 {
@@ -115,6 +118,8 @@ private slots:
 	void onRoomNameReceived(const QString &roomId, const QString &roomName);
 	void onNetworkTypingChanged(const ProtocolTypingUpdate &update);
 	void onNetworkNotificationEvent(const MatrixNotificationEvent &event);
+	void onRostersViewIndexContextMenu(const QList<IRosterIndex *> &indexes,
+		quint32 labelId, Menu *menu);
 
 signals:
 	void protocolPresenceChanged(const QString &AStreamId, int AShow, const QString &AStatus);
@@ -137,6 +142,8 @@ private:
 	QThread *FNetworkThread = nullptr;
 	IAccountManager *FAccountManager;
 	IOptionsManager *FOptionsManager;
+	IRostersViewPlugin *FRostersViewPlugin = nullptr;
+	IMessageWidgets *FMessageWidgets = nullptr;
 	IAccount *FMatrixAccount;
 	IAccount *FAccountManagerSlot;
 	IAvatars *FAvatars = nullptr;
@@ -153,6 +160,7 @@ private:
 	bool FNotificationsReady = false;
 
 	void loadRoomsFromDatabase();
+	void showRoomChatDialog(const QString &boundAccountId);
 	void showVerificationDialog(const QString &transactionId, const QString &userId,
 		const QString &deviceId);
 	void onVerificationRequest(const QString &transactionId, const QString &userId,

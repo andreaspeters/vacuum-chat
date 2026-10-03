@@ -16,6 +16,7 @@
 #include <interfaces/ipresence.h>
 #include <utils/options.h>
 #include <utils/systemmanager.h>
+#include "autostatusprotocolpresence.h"
 #include "statusoptionswidget.h"
 
 class AutoStatus :
@@ -59,11 +60,14 @@ protected:
 	void prepareRule(IAutoStatusRule &ARule);
 	void setActiveRule(const QUuid &ARuleId);
 	void updateActiveRule();
+	void applyProtocolPresence(int AShow, const QString &AStatus);
+	void restoreProtocolPresence();
 protected slots:
 	void onSystemIdleChanged(int ASeconds);
 	void onOptionsOpened();
 	void onProfileClosed(const QString &AName);
 private:
+	IPluginManager *FPluginManager;
 	IStatusChanger *FStatusChanger;
 	IAccountManager *FAccountManager;
 	IOptionsManager *FOptionsManager;
@@ -71,6 +75,7 @@ private:
 	int FAutoStatusId;
 	QUuid FActiveRule;
 	QMap<Jid, int> FStreamStatus;
+	AutoStatusInternal::ProtocolPresenceController FProtocolPresenceController;
 };
 
 #endif // AUTOSTATUS_H

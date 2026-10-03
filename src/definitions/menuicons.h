@@ -175,6 +175,9 @@
 #define MNI_RECENT_INSERT_FAVORITE      "recentcontactsInsertFavorite"
 #define MNI_RECENT_REMOVE_FAVORITE      "recentcontactsRemoveFavorite"
 #define MNI_RECENT_REMOVE_RECENT        "recentcontactsRemoveRecent"
+#define MNI_RECENT_PROTOCOL_XMPP        "recentcontactsProtocolXmpp"
+#define MNI_RECENT_PROTOCOL_MATRIX      "recentcontactsProtocolMatrix"
+#define MNI_RECENT_PROTOCOL_MESHCORE    "recentcontactsProtocolMeshCore"
 
 //Registration
 #define MNI_REGISTERATION               "register"

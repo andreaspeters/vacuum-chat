@@ -49,6 +49,7 @@ static QImage decodeMatrixImage(const QByteArray &data, const QSize &maximumSize
 MatrixNetwork::MatrixNetwork(QObject *parent)
 	: QObject(parent), FNetworkAccessManager(nullptr), FAccesToken(), FSyncToken(), FInFlightRequest(RequestNone), FNormalizedServerUrl()
 {
+	qRegisterMetaType<MatrixPublicRooms::Result>();
 	FNetworkAccessManager = new QNetworkAccessManager(this);
 	connect(FNetworkAccessManager, &QNetworkAccessManager::finished,
 		this, &MatrixNetwork::onReplyFinished);
@@ -993,6 +994,46 @@ void MatrixNetwork::sendTextMessage(const QString &roomId, const QString &text, 
 void MatrixNetwork::joinRoom(const QString &roomId)
 {
 	changeRoomMembership(roomId, QStringLiteral("join"));
+}
+
+void MatrixNetwork::searchPublicRooms(const QString &directoryServer, const QString &searchTerm,
+	int limit, const QString &since)
+{
+	MatrixPublicRooms::Result result;
+	if (FAccesToken.isEmpty()) {
+		result.error = QStringLiteral("Public room search requires a logged-in Matrix account");
+		emit publicRoomsReceived(result);
+		return;
+	}
+	const QUrl endpoint(constructUrl(QStringLiteral("/_matrix/client/v3/publicRooms")));
+	QNetworkReply *reply = MatrixPublicRooms::requestPublicRooms(FNetworkAccessManager, endpoint,
+		FAccesToken.toUtf8(), directoryServer, searchTerm, limit, since, FUseHttp2);
+	if (!reply) {
+		result.error = QStringLiteral("Could not create Matrix public-room request");
+		emit publicRoomsReceived(result);
+		return;
+	}
+	reply->setProperty("requestType", QStringLiteral("public_rooms"));
+}
+
+void MatrixNetwork::startDirectChat(const QString &userId)
+{
+	const QString inviteeUserId = userId.trimmed();
+	if (FAccesToken.isEmpty() || !MatrixDirectRoom::isValidUserId(inviteeUserId)) {
+		emit directRoomCreated(inviteeUserId, QString(),
+			QStringLiteral("A logged-in Matrix account and a valid Matrix user ID are required"));
+		return;
+	}
+	const QUrl endpoint(constructUrl(QStringLiteral("/_matrix/client/v3/createRoom")));
+	QNetworkReply *reply = MatrixDirectRoom::requestCreation(FNetworkAccessManager, endpoint,
+		FAccesToken.toUtf8(), inviteeUserId, FUseHttp2, FOlmCrypto.isInitialized());
+	if (!reply) {
+		emit directRoomCreated(inviteeUserId, QString(),
+			QStringLiteral("Could not create Matrix direct-room request"));
+		return;
+	}
+	reply->setProperty("requestType", QStringLiteral("create_direct_room"));
+	reply->setProperty("directUserId", inviteeUserId);
 }
 
 void MatrixNetwork::leaveRoom(const QString &roomId)
@@ -1966,6 +2007,100 @@ void MatrixNetwork::onReplyFinished(QNetworkReply *reply)
 		} else {
 			qWarning() << "Matrix joined-members request failed:" << reply->errorString()
 				<< "httpStatus:" << reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+		}
+		reply->deleteLater();
+	} else if (type == "public_rooms") {
+		MatrixPublicRooms::Result result;
+		if (reply->error() != QNetworkReply::NoError) {
+			const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+			result.error = QStringLiteral("Matrix public-room search failed: %1 (HTTP %2)")
+				.arg(reply->errorString()).arg(status);
+		} else {
+			result = MatrixPublicRooms::parsePublicRoomsResponse(reply->readAll());
+		}
+		emit publicRoomsReceived(result);
+		reply->deleteLater();
+	} else if (type == "create_direct_room") {
+		const QString userId = reply->property("directUserId").toString();
+		QString roomId;
+		QString error;
+		if (reply->error() != QNetworkReply::NoError) {
+			error = QStringLiteral("Matrix could not create the direct room: %1").arg(reply->errorString());
+		} else {
+			roomId = MatrixDirectRoom::parseCreatedRoomId(reply->readAll(), error);
+		}
+		if (!roomId.isEmpty()) {
+			const QString accountPath = QStringLiteral("/_matrix/client/v3/user/%1/account_data/m.direct")
+				.arg(QString::fromUtf8(QUrl::toPercentEncoding(FUserId)));
+			QNetworkRequest request(QUrl(constructUrl(accountPath)));
+			request.setAttribute(QNetworkRequest::Http2AllowedAttribute, FUseHttp2);
+			request.setRawHeader("Authorization", QByteArray("Bearer ") + FAccesToken.toUtf8());
+			QNetworkReply *accountReply = FNetworkAccessManager->get(request);
+			accountReply->setProperty("requestType", QStringLiteral("direct_room_account_data_get"));
+			accountReply->setProperty("directUserId", userId);
+			accountReply->setProperty("directRoomId", roomId);
+		} else {
+			emit directRoomCreated(userId, QString(), error);
+		}
+		reply->deleteLater();
+	} else if (type == "direct_room_account_data_get") {
+		const QString userId = reply->property("directUserId").toString();
+		const QString roomId = reply->property("directRoomId").toString();
+		QJsonObject mapping;
+		const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+		if (reply->error() == QNetworkReply::NoError) {
+			QJsonParseError parseError;
+			const QJsonDocument document = QJsonDocument::fromJson(reply->readAll(), &parseError);
+			if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+				emit directRoomCreated(userId, roomId,
+					QStringLiteral("Room was created, but m.direct account data could not be parsed"));
+				reply->deleteLater();
+				return;
+			}
+			mapping = document.object();
+		} else if (status != 404) {
+			emit directRoomCreated(userId, roomId,
+				QStringLiteral("Room was created, but existing m.direct data could not be read: %1")
+					.arg(reply->errorString()));
+			reply->deleteLater();
+			return;
+		}
+		const QJsonObject updatedMapping = MatrixDirectRoom::addRoomToDirectMapping(mapping, userId, roomId);
+		const QString accountPath = QStringLiteral("/_matrix/client/v3/user/%1/account_data/m.direct")
+			.arg(QString::fromUtf8(QUrl::toPercentEncoding(FUserId)));
+		QNetworkRequest request(QUrl(constructUrl(accountPath)));
+		request.setAttribute(QNetworkRequest::Http2AllowedAttribute, FUseHttp2);
+		request.setRawHeader("Authorization", QByteArray("Bearer ") + FAccesToken.toUtf8());
+		request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+		QNetworkReply *accountReply = FNetworkAccessManager->put(request,
+			QJsonDocument(updatedMapping).toJson(QJsonDocument::Compact));
+		accountReply->setProperty("requestType", QStringLiteral("direct_room_account_data_put"));
+		accountReply->setProperty("directUserId", userId);
+		accountReply->setProperty("directRoomId", roomId);
+		reply->deleteLater();
+	} else if (type == "direct_room_account_data_put") {
+		const QString userId = reply->property("directUserId").toString();
+		const QString roomId = reply->property("directRoomId").toString();
+		if (reply->error() != QNetworkReply::NoError) {
+			emit directRoomCreated(userId, roomId,
+				QStringLiteral("Room was created, but m.direct account data could not be saved: %1")
+					.arg(reply->errorString()));
+		} else {
+			FDirectRoomIds.insert(roomId);
+			FHasDirectRoomData = true;
+			bool directRoomsSaved = false;
+			runDatabase([&](MatrixDatabase &database) {
+				directRoomsSaved = database.saveDirectRooms(FDirectRoomIds);
+			});
+			if (FRooms.contains(roomId))
+				FRooms[roomId].isDirect = true;
+			if (!directRoomsSaved)
+				qWarning() << "Failed to persist newly created Matrix direct-room mapping" << roomId;
+			emitRosterSnapshot();
+			emit directRoomCreated(userId, roomId, directRoomsSaved ? QString() :
+				QStringLiteral("Room created, but the local direct-room cache could not be saved"));
+			if (!FSyncInFlight)
+				sync(true);
 		}
 		reply->deleteLater();
 	} else if (type == "media_upload") {

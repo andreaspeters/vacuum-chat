@@ -1,5 +1,7 @@
 #include "optionsmanager.h"
 
+#include <utils/messagenotificationmute.h>
+
 #include <QtDebug>
 
 #include <QSettings>
@@ -21,6 +23,15 @@
 #define DEFAULT_PROFILE                 "Default"
 
 #define ADR_PROFILE                     Action::DR_Parametr1
+
+static bool setOptionsDocumentContent(QDomDocument &ADocument, const QByteArray &AContent)
+{
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
+	return static_cast<bool>(ADocument.setContent(AContent, QDomDocument::ParseOption::UseNamespaceProcessing));
+#else
+	return ADocument.setContent(AContent, true);
+#endif
+}
 
 OptionsManager::OptionsManager()
 {
@@ -223,14 +234,26 @@ bool OptionsManager::setCurrentProfile(const QString &AProfile, const QString &A
 			if (!profileDir.exists(DIR_BINARY))
 				profileDir.mkdir(DIR_BINARY);
 
-			// Loading options from file
+			// Loading options from file, migrating legacy mute keys before XML parsing.
 			QFile optionsFile(profileDir.filePath(FILE_OPTIONS));
-			if (!optionsFile.open(QFile::ReadOnly) || !FProfileOptions.setContent(optionsFile.readAll(),true))
+			bool optionsLoaded = optionsFile.open(QFile::ReadOnly);
+			if (optionsLoaded)
+			{
+				const QByteArray optionsData = migrateLegacyMessageNotificationMuteOptionsXml(optionsFile.readAll());
+				optionsLoaded = setOptionsDocumentContent(FProfileOptions, optionsData);
+			}
+			if (!optionsLoaded)
 			{
 				// Trying to open valid copy of options
 				optionsFile.close();
 				optionsFile.setFileName(profileDir.filePath(FILE_OPTIONS_COPY));
-				if (!optionsFile.open(QFile::ReadOnly) || !FProfileOptions.setContent(optionsFile.readAll(),true))
+				optionsLoaded = optionsFile.open(QFile::ReadOnly);
+				if (optionsLoaded)
+				{
+					const QByteArray optionsCopyData = migrateLegacyMessageNotificationMuteOptionsXml(optionsFile.readAll());
+					optionsLoaded = setOptionsDocumentContent(FProfileOptions, optionsCopyData);
+				}
+				if (!optionsLoaded)
 				{
 					FProfileOptions.clear();
 					FProfileOptions.appendChild(FProfileOptions.createElement("options")).toElement();

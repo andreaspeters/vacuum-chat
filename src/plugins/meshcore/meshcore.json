@@ -1,0 +1,7 @@
+{
+    "name": "MeshCore Protocol Plugin",
+    "description": "Implements the MeshCore protocol for Vacuum IM",
+    "version": "1.0",
+    "author": "Vacuum Development Team",
+    "homepage": "https://github.com/meshcore-dev/MeshCore"
+}

@@ -1,5 +1,6 @@
 file(GLOB SOURCES "*.cpp")
 list(FILTER SOURCES EXCLUDE REGEX "/moc_[^/]*\\.cpp$")
+list(FILTER SOURCES EXCLUDE REGEX "/messagenotificationmute_test\\.cpp$")
 
 set(HEADERS "action.h"
             "filestorage.h"

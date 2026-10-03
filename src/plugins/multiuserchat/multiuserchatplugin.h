@@ -25,6 +25,7 @@
 #include <definitions/optionwidgetorders.h>
 #include <definitions/xmppurihandlerorders.h>
 #include <interfaces/ipluginmanager.h>
+#include <interfaces/iaccountmanager.h>
 #include <interfaces/imultiuserchat.h>
 #include <interfaces/imessagewidgets.h>
 #include <interfaces/imessageprocessor.h>
@@ -167,6 +168,7 @@ protected slots:
 	void onStatusIconsChanged();
 private:
 	IPluginManager *FPluginManager;
+	IAccountManager *FAccountManager;
 	IMessageWidgets *FMessageWidgets;
 	IMessageProcessor *FMessageProcessor;
 	IRostersViewPlugin *FRostersViewPlugin;

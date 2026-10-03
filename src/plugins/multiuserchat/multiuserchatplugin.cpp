@@ -1,4 +1,5 @@
 #include "multiuserchatplugin.h"
+#include "multiuserchatcontext.h"
 
 #include <utils/messagenotificationmute.h>
 
@@ -18,6 +19,7 @@
 MultiUserChatPlugin::MultiUserChatPlugin()
 {
 	FPluginManager = NULL;
+	FAccountManager = NULL;
 	FMessageWidgets = NULL;
 	FMessageProcessor = NULL;
 	FRostersViewPlugin = NULL;
@@ -53,6 +55,9 @@ bool MultiUserChatPlugin::initConnections(IPluginManager *APluginManager, int &A
 {
 	Q_UNUSED(AInitOrder);
 	FPluginManager = APluginManager;
+	IPlugin *accountPlugin = APluginManager->pluginInterface("IAccountManager").value(0,NULL);
+	if (accountPlugin)
+		FAccountManager = qobject_cast<IAccountManager *>(accountPlugin->instance());
 
 	IPlugin *plugin = APluginManager->pluginInterface("IMessageProcessor").value(0,NULL);
 	if (plugin)
@@ -1208,7 +1213,8 @@ void MultiUserChatPlugin::onRostersViewIndexContextMenu(const QList<IRosterIndex
 		if (index->type()==RIT_STREAM_ROOT)
 		{
 			int show = index->data(RDR_SHOW).toInt();
-			if (show!=IPresence::Offline && show!=IPresence::Error)
+			if (show!=IPresence::Offline && show!=IPresence::Error &&
+				isXmppAccountForStream(FAccountManager, Jid(index->data(RDR_STREAM_JID).toString())))
 			{
 				Action *action = createJoinAction(index->data(RDR_STREAM_JID).toString(),Jid::null,AMenu);
 				AMenu->addAction(action,AG_RVCM_MULTIUSERCHAT_JOIN,true);
@@ -1217,7 +1223,8 @@ void MultiUserChatPlugin::onRostersViewIndexContextMenu(const QList<IRosterIndex
 		else if (index->type() == RIT_GROUP_MUC)
 		{
 			int show = index->parentIndex()->data(RDR_SHOW).toInt();
-			if (show!=IPresence::Offline && show!=IPresence::Error)
+			if (show!=IPresence::Offline && show!=IPresence::Error &&
+				isXmppAccountForStream(FAccountManager, Jid(index->data(RDR_STREAM_JID).toString())))
 			{
 				Action *action = createJoinAction(index->data(RDR_STREAM_JID).toString(),Jid::null,AMenu);
 				AMenu->addAction(action,AG_RVCM_MULTIUSERCHAT_JOIN,true);

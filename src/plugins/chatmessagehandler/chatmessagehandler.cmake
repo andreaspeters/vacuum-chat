@@ -1,2 +1,2 @@
-set(SOURCES chatmessagehandler.cpp usercontextmenu.cpp )
-set(HEADERS chatmessagehandler.h usercontextmenu.h )
+set(SOURCES chatmessagehandler.cpp unicodeavatar.cpp usercontextmenu.cpp )
+set(HEADERS chatmessagehandler.h unicodeavatar.h usercontextmenu.h protocolmessagerouting.h )

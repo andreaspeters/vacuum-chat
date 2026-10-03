@@ -14,7 +14,8 @@ public:
 	{
 		ProtocolUnknown,
 		ProtocolXmpp,
-		ProtocolMatrix
+		ProtocolMatrix,
+		ProtocolMeshCore
 	};
 
 	enum Capability

@@ -20,4 +20,16 @@
     <key>recentcontactsRemoveRecent</key>
     <object mime="image/png">recentcontactsremoverecent.png</object>
   </icon>
+  <icon>
+    <key>recentcontactsProtocolXmpp</key>
+    <object mime="image/png">recentcontactsprotocolxmpp.png</object>
+  </icon>
+  <icon>
+    <key>recentcontactsProtocolMatrix</key>
+    <object mime="image/png">recentcontactsprotocolmatrix.png</object>
+  </icon>
+  <icon>
+    <key>recentcontactsProtocolMeshCore</key>
+    <object mime="image/png">recentcontactsprotocolmeshcore.png</object>
+  </icon>
 </icondef>

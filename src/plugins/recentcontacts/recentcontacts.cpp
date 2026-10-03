@@ -1,5 +1,8 @@
 #include "recentcontacts.h"
+#include "recentcontactsprotocolicon.h"
 
+#include <interfaces/iaccountmanager.h>
+#include <interfaces/iprotocolroster.h>
 #include <utils/messagenotificationmute.h>
 #include <QDir>
 #include <QMap>
@@ -57,6 +60,7 @@ bool recentItemLessThen(const IRecentItem &AItem1, const IRecentItem &AItem2)
 RecentContacts::RecentContacts()
 {
 	FPrivateStorage = NULL;
+	FAccountManager = NULL;
 	FRostersModel = NULL;
 	FRostersView = NULL;
 	FStatusIcons = NULL;
@@ -89,6 +93,7 @@ void RecentContacts::pluginInfo(IPluginInfo *APluginInfo)
 	APluginInfo->author = "Potapov S.A. aka Lion";
 	APluginInfo->homePage = "http://www.vacuum-im.org";
 	APluginInfo->dependences.append(PRIVATESTORAGE_UUID);
+	APluginInfo->dependences.append(ACCOUNTMANAGER_UUID);
 }
 
 bool RecentContacts::initConnections(IPluginManager *APluginManager, int &AInitOrder)
@@ -96,7 +101,11 @@ bool RecentContacts::initConnections(IPluginManager *APluginManager, int &AInitO
 	Q_UNUSED(AInitOrder);
 	FPluginManager = APluginManager;
 
-	IPlugin *plugin = APluginManager->pluginInterface("IPrivateStorage").value(0,NULL);
+	IPlugin *plugin = APluginManager->pluginInterface("IAccountManager").value(0,NULL);
+	if (plugin)
+		FAccountManager = qobject_cast<IAccountManager *>(plugin->instance());
+
+	plugin = APluginManager->pluginInterface("IPrivateStorage").value(0,NULL);
 	if (plugin)
 	{
 		FPrivateStorage = qobject_cast<IPrivateStorage *>(plugin->instance());
@@ -483,15 +492,91 @@ bool RecentContacts::rosterDropAction(const QDropEvent *AEvent, IRosterIndex *AI
 
 QList<quint32> RecentContacts::rosterLabels(int AOrder, const IRosterIndex *AIndex) const
 {
-	Q_UNUSED(AOrder); Q_UNUSED(AIndex);
+	if (AOrder == RLHO_RECENT_FILTER && AIndex != NULL && FFavoritesRootIndex != NULL &&
+		AIndex->parentIndex() == FFavoritesRootIndex)
+	{
+		return RecentContactsProtocolIcon::favoriteLabelIds();
+	}
 	return QList<quint32>();
 }
 
 AdvancedDelegateItem RecentContacts::rosterLabel(int AOrder, quint32 ALabelId, const IRosterIndex *AIndex) const
 {
-	Q_UNUSED(AOrder); Q_UNUSED(ALabelId); Q_UNUSED(AIndex);
-	static AdvancedDelegateItem null = AdvancedDelegateItem();
-	return null;
+	AdvancedDelegateItem null;
+	if (AOrder != RLHO_RECENT_FILTER || AIndex == NULL || FFavoritesRootIndex == NULL ||
+		AIndex->parentIndex() != FFavoritesRootIndex)
+		return null;
+
+	QIcon icon;
+	if (ALabelId == RecentContactsProtocolIcon::protocolLabelId())
+	{
+		IAccount *account = NULL;
+		if (FAccountManager)
+		{
+			const IRecentItem item = rosterIndexItem(AIndex);
+			IRosterIndex *proxy = FIndexToProxy.value(const_cast<IRosterIndex *>(AIndex));
+			const QStringList accountIds = RecentContactsProtocolIcon::accountIdCandidates(
+				item.accountId,
+				proxy != NULL ? proxy->data(RDR_ACCOUNT_ID).toString() : QString(),
+				AIndex->data(RDR_ACCOUNT_ID).toString());
+			foreach (const AccountId &accountId, accountIds)
+			{
+				account = FAccountManager->accountByProtocolId(accountId);
+				if (account != NULL)
+					break;
+			}
+			if (account == NULL && FPluginManager != NULL)
+			{
+				const QList<IPlugin *> rosterPlugins = FPluginManager->pluginInterface(QStringLiteral("IProtocolRoster"));
+				foreach (IPlugin *rosterPlugin, rosterPlugins)
+				{
+					IProtocolRoster *protocolRoster = qobject_cast<IProtocolRoster *>(rosterPlugin->instance());
+					if (protocolRoster == NULL)
+						continue;
+					foreach (const QString &rosterId, accountIds)
+					{
+						const AccountId accountId = RecentContactsProtocolIcon::accountIdForRosterStream(
+							rosterId, protocolRoster->streamId(), protocolRoster->accountId());
+						if (!accountId.isEmpty())
+							account = FAccountManager->accountByProtocolId(accountId);
+						if (account != NULL)
+							break;
+					}
+					if (account != NULL)
+						break;
+				}
+			}
+			if (account == NULL)
+			{
+				const QStringList streamIds = QStringList()
+					<< item.streamJid.pFull()
+					<< (proxy != NULL ? proxy->data(RDR_STREAM_JID).toString() : QString())
+					<< AIndex->data(RDR_STREAM_JID).toString();
+				foreach (const QString &streamId, streamIds)
+				{
+					const Jid streamJid(streamId);
+					if (!streamJid.isEmpty())
+						account = FAccountManager->accountByStream(streamJid);
+					if (account != NULL)
+						break;
+				}
+			}
+		}
+		if (account)
+		{
+			const QString iconKey = RecentContactsProtocolIcon::menuIconKey(account->protocolKind(), true);
+			if (!iconKey.isEmpty())
+				icon = IconStorage::staticStorage(RSR_STORAGE_MENUICONS)->getIcon(iconKey);
+		}
+	}
+
+	if (icon.isNull())
+		return null;
+
+	AdvancedDelegateItem label(ALabelId);
+	label.d->kind = AdvancedDelegateItem::Decoration;
+	label.d->data = icon;
+	return label;
 }
 
 bool RecentContacts::rosterIndexSingleClicked(int AOrder, IRosterIndex *AIndex, const QMouseEvent *AEvent)

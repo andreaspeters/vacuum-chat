@@ -75,6 +75,8 @@ Q_DECLARE_METATYPE(MatrixNotificationEvent)
 #include "matrixdatabase.h"
 #include <functional>
 #include "matrixolm.h"
+#include "matrixdirectroom.h"
+#include "matrixpublicrooms.h"
 class MatrixNetwork : public QObject
 {
 	Q_OBJECT
@@ -126,6 +128,9 @@ public:
 	Q_INVOKABLE void sendRoomEvent(const QString &roomId, const QString &eventType,
 		const QJsonObject &content, const QString &txnId = QString());
 	Q_INVOKABLE void joinRoom(const QString &roomId);
+	Q_INVOKABLE void searchPublicRooms(const QString &directoryServer, const QString &searchTerm,
+		int limit = 25, const QString &since = QString());
+	Q_INVOKABLE void startDirectChat(const QString &userId);
 	Q_INVOKABLE void leaveRoom(const QString &roomId);
 	Q_INVOKABLE void uploadFileAndSend(const QString &roomId, const QString &filePath, const QString &mimeType,
 		const QString &messageType, const QString &body, const QString &txnId);
@@ -174,6 +179,8 @@ signals:
 	void avatarImageReceived(const QString &key, const QImage &image);
 	void displayNameReceived(const QString &userId, const QString &displayName);
 	void roomNameReceived(const QString &roomId, const QString &roomName);
+	void publicRoomsReceived(const MatrixPublicRooms::Result &result);
+	void directRoomCreated(const QString &userId, const QString &roomId, const QString &error);
 	void rosterChanged(const QList<ProtocolRoom> &rooms);
 	void roomKeyRequestReceived(const QString &sender, const QString &deviceId,
 		const QString &roomId, const QString &sessionId, const QString &requestId);
