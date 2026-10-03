@@ -72,6 +72,7 @@ public:
 		QString lastId;
 		QDateTime lastTime;
 		bool scrollStarted;
+		bool followTail;
 	};
 public:
 	SimpleMessageStyle(const QString &AStylePath, QNetworkAccessManager *ANetworkAccessManager, QObject *AParent);

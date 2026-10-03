@@ -434,7 +434,6 @@ void NormalMessageHandler::showStyledMessage(IMessageWindow *AWindow, const Mess
 	options.time = AMessage.dateTime();
 	options.timeFormat = FMessageStyles->timeFormat(options.time);
 	options.direction = IMessageContentOptions::DirectionIn;
-	options.noScroll = true;
 	fillContentOptions(AWindow,options);
 
 	AWindow->setMode(IMessageWindow::ReadMode);

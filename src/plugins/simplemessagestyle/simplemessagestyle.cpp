@@ -131,7 +131,18 @@ bool SimpleMessageStyle::changeOptions(QWidget *AWidget, const IMessageStyleOpti
 		{
 			AClean = true;
 			FWidgetStatus[view].scrollStarted = false;
+			FWidgetStatus[view].followTail = true;
 			view->installEventFilter(this);
+			connect(view, &StyleViewer::userScrollPositionChanged, this,
+				[this, view](int APosition, int AMaximum) {
+					if (FWidgetStatus.contains(view))
+					{
+						WidgetStatus &wstatus = FWidgetStatus[view];
+						wstatus.followTail = APosition >= AMaximum;
+						if (!wstatus.followTail)
+							wstatus.scrollStarted = false;
+					}
+				});
 			connect(view,SIGNAL(anchorClicked(const QUrl &)),SLOT(onLinkClicked(const QUrl &)));
 			connect(view,SIGNAL(destroyed(QObject *)),SLOT(onStyleWidgetDestroyed(QObject *)));
 			emit widgetAdded(AWidget);
@@ -179,16 +190,24 @@ bool SimpleMessageStyle::appendContent(QWidget *AWidget, const QString &AHtml, c
 		fillContentKeywords(html,AOptions,sameSender);
 		html.replace("%message%",prepareMessage(AHtml,AOptions));
 
-		bool scrollAtEnd = view->verticalScrollBar()->sliderPosition()==view->verticalScrollBar()->maximum();
+		WidgetStatus &wstatus = FWidgetStatus[AWidget];
+		const bool shouldFollowTail = wstatus.followTail && !AOptions.noScroll;
 
 		QTextCursor cursor(view->document());
 		cursor.movePosition(QTextCursor::End);
 		cursor.insertHtml(html);
 
-		if (!AOptions.noScroll && scrollAtEnd)
+		if (shouldFollowTail)
+		{
 			view->verticalScrollBar()->setSliderPosition(view->verticalScrollBar()->maximum());
+			wstatus.scrollStarted = true;
+			FScrollTimer.start();
+		}
+		else if (AOptions.noScroll)
+		{
+			wstatus.scrollStarted = false;
+		}
 
-		WidgetStatus &wstatus = FWidgetStatus[AWidget];
 		wstatus.lastKind = AOptions.kind;
 		wstatus.lastId = AOptions.senderId;
 		wstatus.lastTime = AOptions.time;
@@ -499,7 +518,7 @@ bool SimpleMessageStyle::eventFilter(QObject *AWatched, QEvent *AEvent)
 		if (FWidgetStatus.contains(view))
 		{
 			WidgetStatus &wstatus = FWidgetStatus[view];
-			if (!wstatus.scrollStarted && view->verticalScrollBar()->sliderPosition()==view->verticalScrollBar()->maximum())
+			if (!wstatus.scrollStarted && wstatus.followTail)
 			{
 				wstatus.scrollStarted = true;
 				FScrollTimer.start();
@@ -521,10 +540,13 @@ void SimpleMessageStyle::onScrollAfterResize()
 	{
 		if (it->scrollStarted)
 		{
-			StyleViewer *view = qobject_cast<StyleViewer *>(it.key());
-			QScrollBar *scrollBar = view->verticalScrollBar();
-			scrollBar->setSliderPosition(scrollBar->maximum());
 			it->scrollStarted = false;
+			if (it->followTail)
+			{
+				StyleViewer *view = qobject_cast<StyleViewer *>(it.key());
+				QScrollBar *scrollBar = view->verticalScrollBar();
+				scrollBar->setSliderPosition(scrollBar->maximum());
+			}
 		}
 	}
 }
