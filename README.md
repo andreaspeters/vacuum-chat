@@ -11,6 +11,7 @@ Vacuum Chat 2.0.0 is a Qt 6 desktop messaging application with a modular plugin 
 - Extensible functionality provided by loadable plugins
 - Matrix rooms and conversations integrated into the shared chat UI
 - Optional Matrix end-to-end encryption support when `libolm` is available at build time
+- MeshCore account
 
 ## Requirements
 
