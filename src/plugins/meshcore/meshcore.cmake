@@ -7,4 +7,5 @@ if (NOT OS2)
 		${CMAKE_CURRENT_SOURCE_DIR}/meshcorebletransport.cpp)
 	set(HEADERS ${HEADERS}
 		${CMAKE_CURRENT_SOURCE_DIR}/meshcorebletransport.h)
+	add_definitions(-DMESHCORE_WITH_BLE)
 endif()

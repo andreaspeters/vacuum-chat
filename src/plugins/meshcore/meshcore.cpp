@@ -1,7 +1,9 @@
 #include "meshcore.h"
 #include "meshcoretransport.h"
 #include "meshcoreserialtransport.h"
+#ifdef MESHCORE_WITH_BLE
 #include "meshcorebletransport.h"
+#endif
 #include "meshcorecodec.h"
 
 #include <QCryptographicHash>
@@ -214,7 +216,7 @@ MeshCoreTransport* MeshCoreProtocol::createTransport(const QString &backend) con
     if (backend == "usb") {
         return new MeshCoreSerialTransport();
     } else if (backend == "ble") {
-#ifndef OS2
+#ifdef MESHCORE_WITH_BLE
         return new MeshCoreBleTransport();
 #else
         // In OS/2, avoid building BLE support
