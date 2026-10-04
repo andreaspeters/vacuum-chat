@@ -1,13 +1,19 @@
 add_definitions(-DHAVE_HUNSPELL) 
 add_definitions(-DHUNSPELL_STATIC)
 
+if (OS2)
+	set(ADD_LIBS "${CMAKE_SOURCE_DIR}/src/libs/hunspell.lib")
+	message(STATUS "Spellchecker backend: bundled OS/2 OMF Hunspell")
+endif (OS2)
+
 if (WIN32)
 	add_subdirectory(../../thirdparty/hunspell hunspell)
 	set(ADD_LIBS hunspell)
 	message(STATUS "Spellchecker backend: bundled hunspell")
 endif (WIN32)
 
-if (UNIX)
+
+if (UNIX AND NOT OS2)
 	FIND_PACKAGE(PkgConfig)
 	pkg_check_modules(SYSTEM_HUNSPELL hunspell>=1.2.0)
 	if (SYSTEM_HUNSPELL_FOUND)
@@ -19,7 +25,7 @@ if (UNIX)
 		set(ADD_LIBS hunspell)
 		message(STATUS "Spellchecker backend: bundled hunspell")
 endif (SYSTEM_HUNSPELL_FOUND)
-endif (UNIX)
+endif (UNIX AND NOT OS2)
 
 set(SOURCES ${SOURCES} "hunspellchecker.cpp")
 set(HEADERS ${HEADERS} "hunspellchecker.h")

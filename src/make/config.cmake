@@ -1,13 +1,12 @@
 set(VACUUM_LOADER_NAME vacuum)
 set(VACUUM_UTILS_NAME vacuumu)
 
-# qmake has no TARGET_SHORT entry for these plugins, but their normal names
-# exceed the OS/2 8.3 filename limit. Keep the mapping centralized so the
-# CMake and qmake builds can use the same naming policy.
+# CMake only parses OS/2-qualified TARGET_SHORT entries. Keep a centralized
+# fallback for other OS/2 plugin names, matching their qmake/DEF basenames.
 set(OS2_PLUGIN_OUTPUT_NAMES
-    "bookmarks=bookmr"
-    "messagecarbons=msgcarb"
-    "recentcontacts=recent"
+    "bookmarks=bookmark"
+    "messagecarbons=msgcab"
+    "recentcontacts=recentc"
     "spellchecker=spellch")
 
 if (UNIX OR OS2)

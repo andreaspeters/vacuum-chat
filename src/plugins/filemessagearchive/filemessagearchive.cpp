@@ -455,7 +455,7 @@ IArchiveHeader FileMessageArchive::loadHeaderFromFile(const QString &AFileName) 
 			while (!reader.atEnd())
 			{
 				reader.readNext();
-				if (reader.isStartElement() && reader.qualifiedName()=="chat")
+				if (reader.isStartElement() && reader.qualifiedName().toString()==QLatin1String("chat"))
 				{
 					header.engineId = engineId();
 					header.with = reader.attributes().value("with").toString();

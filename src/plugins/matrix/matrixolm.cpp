@@ -1500,7 +1500,8 @@ bool MatrixOlmCrypto::exportOutboundMegolmSessionWithPickle(const QString &roomI
     sessionId = actualSessionId;
     sessionKey = key;
     FOutboundMegolmPickles.insert(roomId, pickle);
-    const QSharedPointer<QByteArray> stableMemory = QSharedPointer<QByteArray>::create(localMemory);
+    const QSharedPointer<QByteArray> stableMemory = QSharedPointer<QByteArray>::create(
+        localMemory.data(), static_cast<qsizetype>(localMemory.size()));
     FOutboundMegolmSessions.insert(roomId, stableMemory);
     FOutboundMegolmSessionIds.insert(roomId, sessionId);
     FOutboundMegolmSessionKeys.insert(roomId, sessionKey);

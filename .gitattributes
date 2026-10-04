@@ -13,3 +13,6 @@ src/plugins/simplemessagestyle/simplemessagestyle.h whitespace=blank-at-eol,blan
 src/plugins/simplemessagestyle/styleviewer.cpp whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 src/plugins/simplemessagestyle/styleviewer.h whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 src/plugins/normalmessagehandler/normalmessagehandler.cpp whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+src/plugins/filemessagearchive/filemessagearchive.cpp whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+src/plugins/optionsmanager/optionsmanager.cpp whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+src/plugins/spellchecker/hunspellchecker.cmake whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

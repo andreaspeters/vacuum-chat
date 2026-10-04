@@ -19,15 +19,13 @@ if (IS_ENABLED)
 	add_definitions(-DQT_PLUGIN -DQT_SHARED)
 
 	add_translations(TRANSLATIONS ${PLUGIN_NAME} ${HEADERS} ${SOURCES} ${UIS})
-	if (OS2)
-		add_library(${PLUGIN_NAME} STATIC ${SOURCES} ${HEADERS} ${UIS} ${TRANSLATIONS})
-	else()
-		add_library(${PLUGIN_NAME} SHARED ${SOURCES} ${HEADERS} ${UIS} ${TRANSLATIONS})
-	endif()
+	add_library(${PLUGIN_NAME} SHARED ${SOURCES} ${HEADERS} ${UIS} ${TRANSLATIONS})
+	target_include_directories(${PLUGIN_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 	if (OS2)
 		# Keep the logical target name for dependencies, but use the qmake
 		# TARGET_SHORT value for the OS/2 8.3 library filename.
 		set(OS2_PROJECT_FILE "${CMAKE_CURRENT_SOURCE_DIR}/${PLUGIN_NAME}.pro")
+		set(OS2_TARGET_SHORT "")
 		if (EXISTS "${OS2_PROJECT_FILE}")
 			file(STRINGS "${OS2_PROJECT_FILE}" OS2_TARGET_SHORT
 				REGEX "^os2:[ 	]*TARGET_SHORT[ 	]*=")
@@ -45,6 +43,20 @@ if (IS_ENABLED)
 		if (OS2_TARGET_SHORT)
 			set_target_properties(${PLUGIN_NAME} PROPERTIES OUTPUT_NAME "${OS2_TARGET_SHORT}")
 		endif (OS2_TARGET_SHORT)
+		if (OS2_TARGET_SHORT)
+			set(_os2_plugin_def_name "${OS2_TARGET_SHORT}")
+		else()
+			set(_os2_plugin_def_name "${PLUGIN_NAME}")
+		endif()
+		set(_os2_plugin_def_source "${CMAKE_CURRENT_SOURCE_DIR}/${_os2_plugin_def_name}.def")
+		if (NOT EXISTS "${_os2_plugin_def_source}" AND NOT _os2_plugin_def_name STREQUAL PLUGIN_NAME)
+			set(_os2_plugin_def_source "${CMAKE_CURRENT_SOURCE_DIR}/${PLUGIN_NAME}.def")
+		endif()
+		if (EXISTS "${_os2_plugin_def_source}")
+			file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/plugins")
+			configure_file("${_os2_plugin_def_source}"
+				"${CMAKE_BINARY_DIR}/plugins/${_os2_plugin_def_name}.def" COPYONLY)
+		endif()
 	endif (OS2)
 	set_target_properties(${PLUGIN_NAME} PROPERTIES
 		LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/plugins"
@@ -53,6 +65,18 @@ if (IS_ENABLED)
 		${VACUUM_UTILS_NAME}
 		Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::Xml Qt6::Sql
 		${ADD_LIBS})
+	if (OS2)
+		find_program(OS2_EMXIMP_EXECUTABLE emximp)
+		if (NOT OS2_EMXIMP_EXECUTABLE)
+			message(FATAL_ERROR "OS/2 plugin target ${PLUGIN_NAME} requires emximp")
+		endif()
+		add_custom_command(TARGET ${PLUGIN_NAME} POST_BUILD
+			COMMAND "${OS2_EMXIMP_EXECUTABLE}" -p128 -o
+				"$<TARGET_LINKER_FILE:${PLUGIN_NAME}>"
+				"$<TARGET_FILE:${PLUGIN_NAME}>"
+			COMMENT "Generating OMF import library for ${PLUGIN_NAME}"
+			VERBATIM)
+	endif (OS2)
 	if (WIN32)
 		install(TARGETS ${PLUGIN_NAME}
 			RUNTIME DESTINATION "${INSTALL_PLUGINS}"

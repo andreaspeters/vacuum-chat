@@ -58,7 +58,7 @@ void OptionsManager::pluginInfo(IPluginInfo *APluginInfo)
 	APluginInfo ->version = "1.0";
 	APluginInfo->author = "Potapov S.A. aka Lion";
 	APluginInfo->homePage = "https://github.com/andreaspeters/vacuum-chat";
-	APluginInfo->conflicts.append(QUuid::fromString("{6030FCB2-9F1E-4ea2-BE2B-B66EBE0C4367}")); // ISettings
+	APluginInfo->conflicts.append(QUuid("{6030FCB2-9F1E-4ea2-BE2B-B66EBE0C4367}"));
 }
 
 bool OptionsManager::initConnections(IPluginManager *APluginManager, int &AInitOrder)
