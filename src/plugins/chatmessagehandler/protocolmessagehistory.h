@@ -28,6 +28,69 @@ inline bool isPendingEncryptedEvent(const BasicMessage &AMessage)
 		!metadata.value(QStringLiteral("redacted")).toBool();
 }
 
+inline int findMessageIndex(const QList<BasicMessage> &AHistory, const QString &AMessageId)
+{
+	if (AMessageId.isEmpty())
+		return -1;
+	const auto it = std::find_if(AHistory.cbegin(), AHistory.cend(),
+		[&AMessageId](const BasicMessage &message) { return message.messageId() == AMessageId; });
+	return it == AHistory.cend() ? -1 : static_cast<int>(std::distance(AHistory.cbegin(), it));
+}
+
+inline int findTransactionEchoIndex(const QList<BasicMessage> &AHistory, const BasicMessage &AMessage)
+{
+	if (AMessage.protocol() != QStringLiteral("matrix"))
+		return -1;
+
+	const QString replacesTxnId = AMessage.metadata().value(QStringLiteral("replaces_txn_id")).toString();
+	if (!replacesTxnId.isEmpty()) {
+		const auto it = std::find_if(AHistory.cbegin(), AHistory.cend(),
+			[&replacesTxnId](const BasicMessage &message) {
+				return message.messageId() == replacesTxnId ||
+					message.metadata().value(QStringLiteral("txn_id")).toString() == replacesTxnId;
+			});
+		return it == AHistory.cend() ? -1 : static_cast<int>(std::distance(AHistory.cbegin(), it));
+	}
+
+	const QString transactionId = AMessage.metadata().value(QStringLiteral("txn_id")).toString();
+	if (transactionId.isEmpty())
+		return -1;
+	const auto it = std::find_if(AHistory.cbegin(), AHistory.cend(),
+		[&transactionId](const BasicMessage &message) {
+			return message.metadata().value(QStringLiteral("replaces_txn_id")).toString() == transactionId;
+		});
+	return it == AHistory.cend() ? -1 : static_cast<int>(std::distance(AHistory.cbegin(), it));
+}
+
+inline bool requiresChronologicalSort(const QList<BasicMessage> &AHistory, int AIndex)
+{
+	if (AIndex < 0 || AIndex >= AHistory.size())
+		return true;
+	const auto precedes = [](const BasicMessage &left, const BasicMessage &right) {
+		const QDateTime leftTime = left.timestamp();
+		const QDateTime rightTime = right.timestamp();
+		if (leftTime.isValid() != rightTime.isValid())
+			return leftTime.isValid();
+		if (!leftTime.isValid())
+			return false;
+		return leftTime.toMSecsSinceEpoch() < rightTime.toMSecsSinceEpoch();
+	};
+	if (AIndex > 0 && precedes(AHistory.at(AIndex), AHistory.at(AIndex - 1)))
+		return true;
+	return AIndex + 1 < AHistory.size() &&
+		precedes(AHistory.at(AIndex + 1), AHistory.at(AIndex));
+}
+
+inline bool requiresTimelineRebuild(int APreviousIndex, int ACurrentIndex,
+	int AHistorySize, bool APreviouslyRendered)
+{
+	if (ACurrentIndex < 0)
+		return true;
+	if (APreviousIndex >= 0 && APreviousIndex != ACurrentIndex)
+		return true;
+	return !APreviouslyRendered && ACurrentIndex != AHistorySize - 1;
+}
+
 inline TransactionEchoMergeResult mergeTransactionEcho(QList<BasicMessage> &AHistory,
 	const BasicMessage &AMessage)
 {

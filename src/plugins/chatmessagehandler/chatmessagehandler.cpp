@@ -616,20 +616,43 @@ void ChatMessageHandler::onProtocolMessageReceived(const BasicMessage &AMessage)
 				}
 				return;
 			}
+			const int previousIndex = ProtocolMessageHistory::findTransactionEchoIndex(history, AMessage);
+			const QString previousMessageId = previousIndex >= 0 ?
+				history.at(previousIndex).messageId() : QString();
+			const QString prefix = messaging->streamId() + QChar('\n') +
+				AMessage.conversationId() + QChar('\n');
+			const QString previousMessageKey = prefix + previousMessageId;
+			const bool previouslyRendered = previousIndex >= 0 &&
+				(FProtocolRenderedMessages.contains(previousMessageKey) ||
+				 FProtocolRenderedMessages.contains(previousMessageKey + QStringLiteral("|image")));
 			const ProtocolMessageHistory::TransactionEchoMergeResult transactionMerge =
 				ProtocolMessageHistory::mergeTransactionEcho(history, AMessage);
 			if (transactionMerge != ProtocolMessageHistory::TransactionEchoMergeResult::NoMatch) {
-				if (transactionMerge == ProtocolMessageHistory::TransactionEchoMergeResult::ReplacedLocalEcho ||
-					transactionMerge == ProtocolMessageHistory::TransactionEchoMergeResult::RetainedLocalEcho ||
-					transactionMerge == ProtocolMessageHistory::TransactionEchoMergeResult::RestoredLocalEcho) {
-					// Reconcile the optimistic entry before ordering. Pending decryption
-					// keeps its plaintext visible until the server echo is decrypted.
+				if (transactionMerge == ProtocolMessageHistory::TransactionEchoMergeResult::IgnoredLocalEcho)
+					return;
+				sortProtocolMessagesChronologically(history);
+				const QString currentMessageId = transactionMerge ==
+					ProtocolMessageHistory::TransactionEchoMergeResult::RetainedLocalEcho ?
+					previousMessageId : AMessage.messageId();
+				int currentIndex = ProtocolMessageHistory::findMessageIndex(history,
+					currentMessageId);
+				if (ProtocolMessageHistory::requiresChronologicalSort(history, currentIndex)) {
 					sortProtocolMessagesChronologically(history);
+					currentIndex = ProtocolMessageHistory::findMessageIndex(history, currentMessageId);
+				}
+				if (ProtocolMessageHistory::requiresTimelineRebuild(previousIndex, currentIndex,
+					history.size(), previouslyRendered)) {
 					rebuildProtocolConversation(window, messaging, historyKey);
+				} else if (transactionMerge ==
+					ProtocolMessageHistory::TransactionEchoMergeResult::ReplacedLocalEcho ||
+					transactionMerge == ProtocolMessageHistory::TransactionEchoMergeResult::RestoredLocalEcho) {
+					renderProtocolMessage(window, messaging, AMessage);
+				} else if (!previouslyRendered && currentIndex >= 0) {
+					renderProtocolMessage(window, messaging, history.at(currentIndex));
 				}
 				return;
-			}
-			const bool outOfOrder = !history.isEmpty() && AMessage.timestamp().isValid() &&
+		}
+		const bool outOfOrder = !history.isEmpty() && AMessage.timestamp().isValid() &&
 				history.last().timestamp().isValid() &&
 				AMessage.timestamp() < history.last().timestamp();
 			history.append(AMessage);

@@ -91,5 +91,47 @@ int main()
 	const auto unmatched = ProtocolMessageHistory::mergeTransactionEcho(unrelated, serverEcho);
 	passed &= check(unmatched == ProtocolMessageHistory::TransactionEchoMergeResult::NoMatch && unrelated.isEmpty(),
 		"unmatched transaction does not mutate the history");
+
+	BasicMessage olderMessage(QStringLiteral("$older-event"), QStringLiteral("!room:test"),
+		QStringLiteral("@other:test"), QString(), QStringLiteral("earlier"),
+		QDateTime::fromMSecsSinceEpoch(500, QTimeZone::utc()),
+		QStringLiteral("matrix"), BasicMessage::Incoming);
+	QList<BasicMessage> samePositionHistory;
+	samePositionHistory.append(olderMessage);
+	samePositionHistory.append(localEcho);
+	const int originalIndex = ProtocolMessageHistory::findTransactionEchoIndex(
+		samePositionHistory, serverEcho);
+	const auto samePositionMerge = ProtocolMessageHistory::mergeTransactionEcho(
+		samePositionHistory, serverEcho);
+	const int currentIndex = ProtocolMessageHistory::findMessageIndex(
+		samePositionHistory, serverEcho.messageId());
+	passed &= check(samePositionMerge == ProtocolMessageHistory::TransactionEchoMergeResult::ReplacedLocalEcho &&
+		originalIndex == 1 && currentIndex == originalIndex,
+		"in-order server echo stays at the rendered local echo position");
+	passed &= check(!ProtocolMessageHistory::requiresTimelineRebuild(
+		originalIndex, currentIndex, samePositionHistory.size(), true),
+		"unchanged rendered position does not require a full timeline rebuild");
+	passed &= check(!ProtocolMessageHistory::requiresChronologicalSort(samePositionHistory, currentIndex),
+		"in-order echo replacement does not sort the full conversation");
+	BasicMessage laterMessage(QStringLiteral("$later-event"), QStringLiteral("!room:test"),
+		QStringLiteral("@other:test"), QString(), QStringLiteral("later"),
+		QDateTime::fromMSecsSinceEpoch(1500, QTimeZone::utc()),
+		QStringLiteral("matrix"), BasicMessage::Incoming);
+	QList<BasicMessage> outOfOrderHistory;
+	outOfOrderHistory.append(laterMessage);
+	outOfOrderHistory.append(localEcho);
+	const int outOfOrderIndex = ProtocolMessageHistory::findTransactionEchoIndex(
+		outOfOrderHistory, serverEcho);
+	ProtocolMessageHistory::mergeTransactionEcho(outOfOrderHistory, serverEcho);
+	const int replacementIndex = ProtocolMessageHistory::findMessageIndex(
+		outOfOrderHistory, serverEcho.messageId());
+	passed &= check(outOfOrderIndex == 1 &&
+		ProtocolMessageHistory::requiresChronologicalSort(outOfOrderHistory, replacementIndex),
+		"out-of-order echo replacement requires sorting before rebuild");
+	passed &= check(ProtocolMessageHistory::requiresTimelineRebuild(1, 0, 2, true),
+		"a transaction echo that moves earlier still requires timeline reordering");
+	passed &= check(ProtocolMessageHistory::requiresTimelineRebuild(-1, 1, 3, false) &&
+		!ProtocolMessageHistory::requiresTimelineRebuild(-1, 2, 3, false),
+		"an unrendered item rebuilds only when it belongs before the visible tail");
 	return passed ? 0 : 1;
 }
