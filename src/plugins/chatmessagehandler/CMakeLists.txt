@@ -13,6 +13,11 @@ if (BUILD_TESTING)
 		matrixreply_test.cpp)
 	target_compile_features(chatmessagehandler_matrix_reply_tests PRIVATE cxx_std_11)
 	target_link_libraries(chatmessagehandler_matrix_reply_tests PRIVATE Qt6::Core)
+	add_executable(chatmessagehandler_matrix_history_tests EXCLUDE_FROM_ALL
+		protocolmessagehistory_test.cpp)
+	target_include_directories(chatmessagehandler_matrix_history_tests PRIVATE "${CMAKE_SOURCE_DIR}/src")
+	target_compile_features(chatmessagehandler_matrix_history_tests PRIVATE cxx_std_11)
+	target_link_libraries(chatmessagehandler_matrix_history_tests PRIVATE Qt6::Core)
 	add_executable(chatmessagehandler_routing_tests EXCLUDE_FROM_ALL
 		protocolmessagerouting_test.cpp)
 	target_compile_features(chatmessagehandler_routing_tests PRIVATE cxx_std_11)

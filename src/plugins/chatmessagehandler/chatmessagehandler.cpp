@@ -1,6 +1,7 @@
 #include "chatmessagehandler.h"
 #include "unicodeavatar.h"
 #include "protocolmessagerouting.h"
+#include "protocolmessagehistory.h"
 #include <interfaces/matrixreply.h>
 #include <utils/systemtimezonecache.h>
 #include <utils/matrixhtml.h>
@@ -586,7 +587,10 @@ void ChatMessageHandler::onProtocolMessageReceived(const BasicMessage &AMessage)
 			renderProtocolHistory(window, messaging);
 		const QString historyKey = messaging->streamId() + QChar('\n') + AMessage.conversationId();
 		if (FProtocolHistoryLoading.contains(historyKey)) {
-			FPendingProtocolHistoryMessages[historyKey].append(AMessage);
+			QList<BasicMessage> &pending = FPendingProtocolHistoryMessages[historyKey];
+			if (ProtocolMessageHistory::mergeTransactionEcho(pending, AMessage) ==
+				ProtocolMessageHistory::TransactionEchoMergeResult::NoMatch)
+				pending.append(AMessage);
 			return;
 		}
 		if (FProtocolHistoryLoaded.contains(historyKey)) {
@@ -609,6 +613,19 @@ void ChatMessageHandler::onProtocolMessageReceived(const BasicMessage &AMessage)
 						rebuildProtocolConversation(window, messaging, historyKey);
 					else
 						renderProtocolMessage(window, messaging, AMessage);
+				}
+				return;
+			}
+			const ProtocolMessageHistory::TransactionEchoMergeResult transactionMerge =
+				ProtocolMessageHistory::mergeTransactionEcho(history, AMessage);
+			if (transactionMerge != ProtocolMessageHistory::TransactionEchoMergeResult::NoMatch) {
+				if (transactionMerge == ProtocolMessageHistory::TransactionEchoMergeResult::ReplacedLocalEcho ||
+					transactionMerge == ProtocolMessageHistory::TransactionEchoMergeResult::RetainedLocalEcho ||
+					transactionMerge == ProtocolMessageHistory::TransactionEchoMergeResult::RestoredLocalEcho) {
+					// Reconcile the optimistic entry before ordering. Pending decryption
+					// keeps its plaintext visible until the server echo is decrypted.
+					sortProtocolMessagesChronologically(history);
+					rebuildProtocolConversation(window, messaging, historyKey);
 				}
 				return;
 			}
@@ -644,6 +661,18 @@ void ChatMessageHandler::onProtocolHistoryLoaded(const QString &ARoomId)
 	QHash<QString, int> messageIndexes;
 	QList<BasicMessage> uniqueMessages;
 	for (const BasicMessage &message : history) {
+		const ProtocolMessageHistory::TransactionEchoMergeResult transactionMerge =
+			ProtocolMessageHistory::mergeTransactionEcho(uniqueMessages, message);
+		if (transactionMerge != ProtocolMessageHistory::TransactionEchoMergeResult::NoMatch) {
+			if (transactionMerge == ProtocolMessageHistory::TransactionEchoMergeResult::ReplacedLocalEcho ||
+				transactionMerge == ProtocolMessageHistory::TransactionEchoMergeResult::RestoredLocalEcho) {
+				messageIndexes.clear();
+				for (int index = 0; index < uniqueMessages.size(); ++index)
+					if (!uniqueMessages.at(index).messageId().isEmpty())
+						messageIndexes.insert(uniqueMessages.at(index).messageId(), index);
+			}
+			continue;
+		}
 		if (message.messageId().isEmpty() || !messageIndexes.contains(message.messageId())) {
 			if (!message.messageId().isEmpty())
 				messageIndexes.insert(message.messageId(), uniqueMessages.size());
@@ -768,15 +797,19 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 	if (!AMessage.messageId().isEmpty()) {
 		const QString historyKey = AMessaging->streamId() + QChar('\n') + AMessage.conversationId();
 		QList<BasicMessage> &history = FProtocolConversationMessages[historyKey];
-		const QString replacedTxnId = AMessage.metadata().value(QStringLiteral("replaces_txn_id")).toString();
-		const QString cachedMessageId = replacedTxnId.isEmpty() ? AMessage.messageId() : replacedTxnId;
-		auto cached = std::find_if(history.begin(), history.end(), [&cachedMessageId](const BasicMessage &message) {
-			return message.messageId() == cachedMessageId;
-		});
-		if (cached == history.end())
-			history.append(AMessage);
-		else
-			*cached = AMessage;
+		const ProtocolMessageHistory::TransactionEchoMergeResult transactionMerge =
+			ProtocolMessageHistory::mergeTransactionEcho(history, AMessage);
+		if (transactionMerge == ProtocolMessageHistory::TransactionEchoMergeResult::IgnoredLocalEcho)
+			return;
+		if (transactionMerge == ProtocolMessageHistory::TransactionEchoMergeResult::NoMatch) {
+			auto cached = std::find_if(history.begin(), history.end(), [&AMessage](const BasicMessage &message) {
+				return message.messageId() == AMessage.messageId();
+			});
+			if (cached == history.end())
+				history.append(AMessage);
+			else
+				*cached = AMessage;
+		}
 	}
 	QString messageKey = prefix + AMessage.messageId();
 	if (!AMessage.metadata().value(QStringLiteral("decoded_image")).value<QImage>().isNull())

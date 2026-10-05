@@ -61,6 +61,10 @@ if (BUILD_TESTING)
 	target_link_libraries(matrix_join_dialog_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network)
 	add_executable(matrix_context_tests EXCLUDE_FROM_ALL matrixcontext_test.cpp matrixcontext.cpp)
 	target_link_libraries(matrix_context_tests PRIVATE ${VACUUM_UTILS_NAME} Qt6::Core Qt6::Xml)
+	add_executable(matrix_timestamp_tests EXCLUDE_FROM_ALL matrix_timestamp_test.cpp)
+	target_include_directories(matrix_timestamp_tests PRIVATE "${CMAKE_SOURCE_DIR}/src")
+	target_compile_features(matrix_timestamp_tests PRIVATE cxx_std_11)
+	target_link_libraries(matrix_timestamp_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Network Qt6::Sql)
 	if (OLM_FOUND)
 		add_executable(matrix_avatar_cache_tests EXCLUDE_FROM_ALL
 			matrixavatarcache_test.cpp matrixnetwork.cpp matrixdatabase.cpp matrixdatabaseworker.cpp

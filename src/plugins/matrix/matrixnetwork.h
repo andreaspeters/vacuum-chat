@@ -3,6 +3,7 @@
 
 #include <QObject>
 #include <QDateTime>
+#include <QTimeZone>
 #include <QString>
 #include <QStringList>
 #include <QNetworkAccessManager>
@@ -33,7 +34,7 @@ struct MatrixTextEvent {
 	BasicMessage toBasicMessage() const
 	{
 		return BasicMessage(eventId, roomId, userId, QString(), content,
-			QDateTime::fromMSecsSinceEpoch(timestamp.toLongLong()),
+			QDateTime::fromMSecsSinceEpoch(timestamp.toLongLong(), QTimeZone::utc()),
 			QStringLiteral("matrix"), BasicMessage::Incoming).setMetadata(metadata);
 	}
 };
