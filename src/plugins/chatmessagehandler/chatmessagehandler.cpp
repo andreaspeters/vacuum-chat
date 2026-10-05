@@ -417,6 +417,24 @@ void ChatMessageHandler::onProtocolViewContextMenu(const QPoint &APosition,
 		targetRelationType == QStringLiteral("m.replace"))
 		return;
 
+	// Add Reply action above React
+	Action *replyAction = new Action(AMenu);
+	replyAction->setText(tr("Reply"));
+	connect(replyAction, &QAction::triggered, this,
+		[this, messaging, parent = window->instance(),
+		 conversationId = window->conversationId(), eventId]() {
+			// Store the reply target event ID in a temporary property for later use
+			parent->setProperty("matrix_reply_target_event_id", eventId);
+			// Focus on the chat window to ensure it's active (no direct focus method on edit widget)
+			IChatWindow *chatWindow = qobject_cast<IChatWindow *>(parent);
+			if (chatWindow) {
+				chatWindow->showTabPage();
+			}
+		});
+	AMenu->addAction(replyAction, AG_DEFAULT, true);
+
+	AMenu->addSeparator(); // Add separator between Reply and React
+
 	QMenu *reactionMenu = AMenu->addMenu(tr("React"));
 	const QStringList quickReactions = {
 		QStringLiteral("👍"), QStringLiteral("👎"), QStringLiteral("😀"),
@@ -747,8 +765,8 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 
 	if (messageType == QStringLiteral("m.text") &&
 		messageFormat == QStringLiteral("org.matrix.custom.html") && !formattedBody.isEmpty())
-		AWindow->viewWidget()->appendHtml(matrixSafeHtml(
-			AMessaging->formatEmoticonsForDisplay(formattedBody)), options);
+		AWindow->viewWidget()->appendHtml(matrixHighlightMentions(matrixSafeHtml(
+			AMessaging->formatEmoticonsForDisplay(formattedBody))), options);
 	else if (messageType == QStringLiteral("m.image") && !decodedImage.isNull() && !resourceUrl.isEmpty())
 	{
 		QTextEdit *view = qobject_cast<QTextEdit *>(AWindow->viewWidget()->styleWidget());
@@ -798,7 +816,7 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 	const QString displayBody = AMessaging->formatEmoticonsForDisplay(body);
 	const QString escapedBody = displayBody.toHtmlEscaped().replace(QStringLiteral("\n"),
 		QStringLiteral("<br/>"));
-	AWindow->viewWidget()->appendHtml(escapedBody, options);
+	AWindow->viewWidget()->appendHtml(matrixHighlightMentions(escapedBody), options);
 	}
 	if (!(messageType == QStringLiteral("m.image") && decodedImage.isNull()) &&
 		!(messageType == QStringLiteral("m.file") &&
@@ -1651,7 +1669,42 @@ void ChatMessageHandler::onMessageReady()
 			BasicMessage message(QString(), window->conversationId(), QString(), QString(),
 				formattedBody, QDateTime::currentDateTimeUtc(),
 				selectedMessaging->protocol(), BasicMessage::Outgoing);
-			if (selectedMessaging->sendMessage(message)) { window->editWidget()->clearEditor(); return; }
+			
+			// Check if this is a reply by looking for the reply target ID
+			const QString replyTargetId = window->instance()->property("matrix_reply_target_event_id").toString();
+			if (!replyTargetId.isEmpty()) {
+				// Prepare reply metadata
+				QVariantMap metadata = message.metadata();
+				metadata.insert(QStringLiteral("msgtype"), QStringLiteral("m.text"));
+				metadata.insert(QStringLiteral("body"), body);
+				
+				// Build the m.relates_to structure for replies
+				QJsonObject relatesTo;
+				relatesTo.insert(QStringLiteral("m.in_reply_to"), QJsonObject{
+					{QStringLiteral("event_id"), replyTargetId}
+				});
+				metadata.insert(QStringLiteral("m.relates_to"), relatesTo);
+				
+				// Add empty m.mentions if not present
+				QJsonObject mentions;
+				metadata.insert(QStringLiteral("m.mentions"), mentions);
+				
+				message.setMetadata(metadata);
+				
+				// Clear the reply target ID property after using it
+				window->instance()->setProperty("matrix_reply_target_event_id", QString());
+			} else {
+				// Regular message without reply structure
+				message.setMetadata(QVariantMap{
+					{QStringLiteral("msgtype"), QStringLiteral("m.text")},
+					{QStringLiteral("body"), body}
+				});
+			}
+			
+			if (selectedMessaging->sendMessage(message)) { 
+				window->editWidget()->clearEditor(); 
+				return; 
+			}
 		}
 		qWarning() << "Protocol text message not routed: conversation=" << window->conversationId()
 			<< "windowAccountSet=" << !window->accountId().isEmpty();
