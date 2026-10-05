@@ -2,6 +2,7 @@
 #include "unicodeavatar.h"
 #include "protocolmessagerouting.h"
 #include "protocolmessagehistory.h"
+#include "roomsidebarstate.h"
 #include <interfaces/matrixreply.h>
 #include <utils/systemtimezonecache.h>
 #include <utils/matrixhtml.h>
@@ -41,6 +42,7 @@
 #include <QUrl>
 #include <QUrlQuery>
 #include <QPointer>
+#include <QHash>
 #include <QThreadPool>
 #include <QRunnable>
 #include <QScrollBar>
@@ -72,6 +74,10 @@ static void loadImagePixmapAsync(QLabel *label, const QString &path, const QSize
 			(image.width() > targetSize.width() || image.height() > targetSize.height()))
 			image = image.scaled(targetSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
 		guardedLabel->setPixmap(QPixmap::fromImage(image));
+		if (guardedLabel->property("matrixAvatarKey").isValid()) {
+			guardedLabel->setProperty("matrixAvatarHasLoaded", true);
+			guardedLabel->setProperty("matrixAvatarIsPlaceholder", false);
+		}
 	});
 }
 
@@ -1453,18 +1459,57 @@ void ChatMessageHandler::setupRoomSidebar(IChatWindow *AWindow, IProtocolMessagi
 		}
 	}
 	if (!AWindow || !AMessaging || !roster) {
-		if (AWindow)
+		if (AWindow) {
+			if (QObject *windowObject = AWindow->instance())
+				for (QWidget *sidebar : windowObject->findChildren<QWidget *>(QStringLiteral("matrixRoomSidebar")))
+					sidebar->setProperty("matrixSidebarCurrent", false);
 			AWindow->setSidebarWidget(nullptr);
+		}
 		return;
 	}
 	AMessaging->loadConversationAvatars(AWindow->conversationId());
 	const ProtocolRoom currentRoom = roster->room(AWindow->conversationId());
 	if (currentRoom.id.isEmpty())
 		return;
+	const QString accountId = AMessaging->streamId();
+	const QByteArray memberSnapshot = RoomSidebarState::snapshot(currentRoom, accountId);
+	QWidget *existingSidebar = nullptr;
+	if (QObject *windowObject = AWindow->instance())
+		for (QWidget *sidebar : windowObject->findChildren<QWidget *>(QStringLiteral("matrixRoomSidebar")))
+			if (sidebar->property("matrixSidebarCurrent").toBool()) {
+				existingSidebar = sidebar;
+				break;
+			}
+	const bool sameSidebarIdentity = existingSidebar &&
+		existingSidebar->property("matrixRoomId").toString() == currentRoom.id &&
+		existingSidebar->property("matrixAccountId").toString() == accountId;
+	if (RoomSidebarState::canReuseSidebar(
+		existingSidebar ? existingSidebar->property("matrixAccountId").toString() : QString(),
+		existingSidebar ? existingSidebar->property("matrixRoomId").toString() : QString(),
+		existingSidebar ? existingSidebar->property("matrixMemberSnapshot").toByteArray() : QByteArray(),
+		accountId, currentRoom.id, memberSnapshot))
+		return;
+	QHash<QString, QPixmap> loadedMemberAvatars;
+	if (sameSidebarIdentity)
+		for (QLabel *avatar : existingSidebar->findChildren<QLabel *>(QStringLiteral("matrixMemberAvatar"))) {
+			if (!avatar->property("matrixAvatarHasLoaded").toBool())
+				continue;
+			const QPixmap pixmap = avatar->pixmap();
+			const QString userId = avatar->property("matrixUserId").toString();
+			if (!userId.isEmpty() && !pixmap.isNull())
+				loadedMemberAvatars.insert(userId, pixmap);
+		}
+	if (existingSidebar)
+		existingSidebar->setProperty("matrixSidebarCurrent", false);
 	QWidget *sidebar = new QWidget;
 	QVBoxLayout *layout = new QVBoxLayout(sidebar);
 	layout->setContentsMargins(12, 12, 12, 12);
 	layout->setSpacing(8);
+	sidebar->setObjectName(QStringLiteral("matrixRoomSidebar"));
+	sidebar->setProperty("matrixRoomId", currentRoom.id);
+	sidebar->setProperty("matrixAccountId", accountId);
+	sidebar->setProperty("matrixMemberSnapshot", memberSnapshot);
+	sidebar->setProperty("matrixSidebarCurrent", true);
 	QLabel *title = new QLabel(currentRoom.name.isEmpty() ? currentRoom.id : currentRoom.name, sidebar);
 	title->setWordWrap(true);
 	title->setStyleSheet(QStringLiteral("font-size:16px; font-weight:600;"));
@@ -1514,9 +1559,29 @@ void ChatMessageHandler::setupRoomSidebar(IChatWindow *AWindow, IProtocolMessagi
 		avatar->setProperty("matrixAccountId", AMessaging->streamId());
 		avatar->setProperty("matrixRoomId", currentRoom.id);
 		avatar->setProperty("matrixUserId", member.id);
-		QPixmap placeholder(32, 32);
-		placeholder.fill(QColor(QStringLiteral("#c8d0d9")));
-		avatar->setPixmap(placeholder);
+		const QString cachedPath = AMessaging->userAvatarPath(currentRoom.id, member.id);
+		if (!cachedPath.isEmpty())
+			loadImagePixmapAsync(avatar, cachedPath, avatar->size());
+		const auto loadedAvatar = loadedMemberAvatars.constFind(member.id);
+		switch (RoomSidebarState::avatarAction(loadedAvatar != loadedMemberAvatars.cend(),
+			!cachedPath.isEmpty())) {
+		case RoomSidebarState::AvatarAction::ReuseLoaded:
+			avatar->setPixmap(loadedAvatar.value());
+			avatar->setProperty("matrixAvatarHasLoaded", true);
+			avatar->setProperty("matrixAvatarIsPlaceholder", false);
+			break;
+		case RoomSidebarState::AvatarAction::LoadCached:
+			avatar->setProperty("matrixAvatarHasLoaded", false);
+			avatar->setProperty("matrixAvatarIsPlaceholder", false);
+			break;
+		case RoomSidebarState::AvatarAction::Placeholder:
+			QPixmap placeholder(32, 32);
+			placeholder.fill(QColor(QStringLiteral("#c8d0d9")));
+			avatar->setPixmap(placeholder);
+			avatar->setProperty("matrixAvatarHasLoaded", false);
+			avatar->setProperty("matrixAvatarIsPlaceholder", true);
+			break;
+		}
 		row->setProperty("matrixUserId", member.id);
 		rowLayout->addWidget(avatar);
 		QString verificationLabel;
