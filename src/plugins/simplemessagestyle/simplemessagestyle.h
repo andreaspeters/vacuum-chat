@@ -8,6 +8,7 @@
 #include <interfaces/imessagestyles.h>
 #include <utils/filestorage.h>
 #include <utils/textmanager.h>
+#include "avatarpathcache.h"
 #include "styleviewer.h"
 
 //Message Style Info Values
@@ -74,6 +75,9 @@ public:
 		bool scrollStarted;
 		bool followTail;
 	};
+private:
+	bool isAvatarExistsCached(const QString &APath) const;
+	AvatarPathExistsCache FAvatarExistsCache;
 public:
 	SimpleMessageStyle(const QString &AStylePath, QNetworkAccessManager *ANetworkAccessManager, QObject *AParent);
 	~SimpleMessageStyle();

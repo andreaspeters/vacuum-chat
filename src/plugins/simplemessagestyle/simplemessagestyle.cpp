@@ -360,6 +360,13 @@ QString SimpleMessageStyle::makeContentTemplate(const IMessageContentOptions &AO
 	return html;
 }
 
+bool SimpleMessageStyle::isAvatarExistsCached(const QString &APath) const
+{
+	return FAvatarExistsCache.exists(APath, [](const QString &path) {
+		return QFile::exists(path);
+	});
+}
+
 void SimpleMessageStyle::fillContentKeywords(QString &AHtml, const IMessageContentOptions &AOptions,
 	bool ASameSender, StyleViewer *AView) const
 {
@@ -436,14 +443,14 @@ void SimpleMessageStyle::fillContentKeywords(QString &AHtml, const IMessageConte
 	AHtml.replace("%shortTime%", displayTime.toString(shortTimeFormat).toHtmlEscaped());
 
 	QString avatar = AOptions.senderAvatar;
-	if (!QFile::exists(avatar))
+	if (!isAvatarExistsCached(avatar))
 	{
 		const QString emptyAvatar = IconStorage::staticStorage(RSR_STORAGE_MENUICONS)->fileFullName(MNI_AVATAR_EMPTY);
-		avatar = QFile::exists(emptyAvatar) ? emptyAvatar :
+		avatar = isAvatarExistsCached(emptyAvatar) ? emptyAvatar :
 			FStylePath+(isDirectionIn ? "/Incoming/buddy_icon.png" : "/Outgoing/buddy_icon.png");
-		if (!isDirectionIn && !QFile::exists(avatar))
+		if (!isDirectionIn && !isAvatarExistsCached(avatar))
 			avatar = FStylePath+"/Incoming/buddy_icon.png";
-		if (!QFile::exists(avatar))
+		if (!isAvatarExistsCached(avatar))
 			avatar = qApp->applicationDirPath()+"/"SHARED_STYLE_PATH"/buddy_icon.png";
 	}
 	AHtml.replace("%userIconPath%", AView->cacheImageResource(avatar).toHtmlEscaped());

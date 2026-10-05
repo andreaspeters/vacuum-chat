@@ -2,6 +2,7 @@ file(GLOB SOURCES "*.cpp")
 list(FILTER SOURCES EXCLUDE REGEX "/moc_[^/]*\\.cpp$")
 list(FILTER SOURCES EXCLUDE REGEX "/messagenotificationmute_test\\.cpp$")
 list(FILTER SOURCES EXCLUDE REGEX "/imageloadscheduler_test\\.cpp$")
+list(FILTER SOURCES EXCLUDE REGEX "/matrixhtml_test\\.cpp$")
 
 set(HEADERS "action.h"
             "filestorage.h"

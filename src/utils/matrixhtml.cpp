@@ -163,3 +163,52 @@ QString matrixSafeHtml(const QString &html)
 	}
 	return sanitize(converted);
 }
+
+QString matrixHighlightMentions(const QString &safeHtml)
+{
+	static const QRegularExpression mention(QStringLiteral("&lt;@[^&<>\\s]+&gt;"));
+	static const QString openTag = QStringLiteral(
+		"<span class=\"matrix-mention\" style=\"background-color:#604a8b;"
+		"color:#ffffff;font-weight:600;\">");
+	auto highlightText = [](const QString &text) {
+		QString result;
+		int copied = 0;
+		QRegularExpressionMatch match = mention.match(text);
+		while (match.hasMatch()) {
+			result += text.mid(copied, match.capturedStart() - copied);
+			result += openTag + match.captured() + QStringLiteral("</span>");
+			copied = match.capturedEnd();
+			match = mention.match(text, copied);
+		}
+		return result + text.mid(copied);
+	};
+
+	QString result;
+	int textStart = 0;
+	int position = 0;
+	while ((position = safeHtml.indexOf(QLatin1Char('<'), position)) >= 0) {
+		result += highlightText(safeHtml.mid(textStart, position - textStart));
+
+		QChar quote;
+		int tagEnd = position + 1;
+		for (; tagEnd < safeHtml.size(); ++tagEnd) {
+			const QChar character = safeHtml.at(tagEnd);
+			if (!quote.isNull()) {
+				if (character == quote)
+					quote = QChar();
+			} else if (character == QLatin1Char('"') || character == QLatin1Char('\'')) {
+				quote = character;
+			} else if (character == QLatin1Char('>')) {
+				break;
+			}
+		}
+		if (tagEnd >= safeHtml.size()) {
+			result += safeHtml.mid(position);
+			return result;
+		}
+		result += safeHtml.mid(position, tagEnd - position + 1);
+		position = tagEnd + 1;
+		textStart = position;
+	}
+	return result + highlightText(safeHtml.mid(textStart));
+}

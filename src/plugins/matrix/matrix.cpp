@@ -5,6 +5,7 @@
 #include "matrixjoinroomchatdialog.h"
 #include "matrixcontext.h"
 #include <utils/matrixhtml.h>
+#include <interfaces/matrixreply.h>
 #include <utils/action.h>
 #include <utils/menu.h>
 #include <interfaces/ipresence.h>
@@ -995,6 +996,8 @@ bool Matrix::sendMessage(const BasicMessage &message)
 		content.insert(QStringLiteral("format"), QStringLiteral("org.matrix.custom.html"));
 		content.insert(QStringLiteral("formatted_body"),
 			matrixSafeHtml(formattedBody.isEmpty() ? matrixMarkdownToSafeHtml(body) : formattedBody));
+		content = MatrixReply::applyRelation(content,
+			metadata.value(QStringLiteral("reply_to_event_id")).toString());
 		const QString roomId = message.conversationId();
 		QMetaObject::invokeMethod(FMatrixNetwork,
 			[this, roomId, content, transactionId]() {

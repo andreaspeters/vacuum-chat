@@ -7,5 +7,7 @@
 // non-URL-loading HTML fragment suitable for chat rendering.
 QString matrixMarkdownToSafeHtml(const QString &markdown);
 QString matrixSafeHtml(const QString &html);
+// Wraps escaped Matrix user-id tokens in safe HTML text nodes only.
+QString matrixHighlightMentions(const QString &text);
 
 #endif // MATRIXHTML_H

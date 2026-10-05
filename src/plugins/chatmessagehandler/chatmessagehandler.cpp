@@ -1,6 +1,7 @@
 #include "chatmessagehandler.h"
 #include "unicodeavatar.h"
 #include "protocolmessagerouting.h"
+#include <interfaces/matrixreply.h>
 #include <utils/matrixhtml.h>
 #include <utils/imageloadscheduler.h>
 #include <utils/messagenotificationmute.h>
@@ -15,6 +16,7 @@
 #include <QInputDialog>
 #include <QMenu>
 #include <QLineEdit>
+#include <algorithm>
 #include <utility>
 
 #include <QVBoxLayout>
@@ -30,6 +32,11 @@
 #include <QRegularExpression>
 #include <QTextEdit>
 #include <QTextDocument>
+#include <QTextBoundaryFinder>
+#include <QCoreApplication>
+#include <QCryptographicHash>
+#include <QImage>
+#include <QUrl>
 #include <QUrlQuery>
 #include <QPointer>
 #include <QThreadPool>
@@ -65,6 +72,39 @@ static void loadImagePixmapAsync(QLabel *label, const QString &path, const QSize
 		guardedLabel->setPixmap(QPixmap::fromImage(image));
 	});
 }
+
+static QString cacheReplyAvatarResource(QTextEdit *view, const QString &path, QObject *receiver)
+{
+	if (!view || path.isEmpty())
+		return QString();
+	const QString key = ImageLoadScheduler::fileKey(path);
+	QUrl resourceUrl;
+	resourceUrl.setScheme(QStringLiteral("vacuum-avatar"));
+	resourceUrl.setPath(QString::fromLatin1(QCryptographicHash::hash(
+		key.toUtf8(), QCryptographicHash::Sha256).toHex()));
+	QTextDocument *document = view->document();
+	if (!document->resource(QTextDocument::ImageResource, resourceUrl).isValid()) {
+		QImage placeholder(1, 1, QImage::Format_ARGB32_Premultiplied);
+		placeholder.fill(Qt::transparent);
+		document->addResource(QTextDocument::ImageResource, resourceUrl, placeholder);
+		if (ImageLoadScheduler *scheduler = ImageLoadScheduler::instance()) {
+			QPointer<QTextEdit> guardedView(view);
+			scheduler->loadFile(path, receiver, [guardedView, resourceUrl](const QImage &image) {
+				if (!guardedView || image.isNull())
+					return;
+				QTextDocument *doc = guardedView->document();
+				doc->addResource(QTextDocument::ImageResource, resourceUrl, image);
+				doc->markContentsDirty(0, doc->characterCount());
+				guardedView->viewport()->update();
+			});
+		}
+	}
+	return resourceUrl.toString(QUrl::FullyEncoded);
+}
+
+static QString buildProtocolReplyPreviewHtml(const QList<BasicMessage> &history,
+	IChatWindow *AWindow, IProtocolMessaging *AMessaging, const QString &AReplyEventId,
+	QObject *receiver);
 
 ChatMessageHandler::ChatMessageHandler()
 {
@@ -391,6 +431,7 @@ void ChatMessageHandler::onProtocolViewContextMenu(const QPoint &APosition,
 	IProtocolMessaging *messaging = nullptr;
 	for (IProtocolMessaging *candidate : std::as_const(FProtocolMessaging))
 		if (candidate && candidate->streamId() == window->accountId() &&
+			candidate->protocol() == QStringLiteral("matrix") &&
 			candidate->supportsReactions(window->conversationId())) {
 			messaging = candidate;
 			break;
@@ -404,7 +445,7 @@ void ChatMessageHandler::onProtocolViewContextMenu(const QPoint &APosition,
 	for (auto it = FProtocolEventMessageIds.constBegin(); it != FProtocolEventMessageIds.constEnd(); ++it)
 		if (it.key().startsWith(eventPrefix) && it.value() == displayedMessageId) {
 			const QString candidateId = it.key().mid(eventPrefix.size());
-			if (candidateId.startsWith(QLatin1Char('$'))) {
+			if (MatrixReply::isEventId(candidateId)) {
 				eventId = candidateId;
 				break;
 			}
@@ -417,19 +458,32 @@ void ChatMessageHandler::onProtocolViewContextMenu(const QPoint &APosition,
 		targetRelationType == QStringLiteral("m.replace"))
 		return;
 
-	// Add Reply action above React
+	QString targetSenderName = tr("Unknown sender");
+	const QString historyKey = messaging->streamId() + QChar('\n') + window->conversationId();
+	for (const BasicMessage &target : FProtocolConversationMessages.value(historyKey))
+		if (target.messageId() == eventId) {
+			targetSenderName = target.metadata().value(QStringLiteral("sender_name")).toString();
+			if (targetSenderName.isEmpty())
+				targetSenderName = target.sender();
+			break;
+		}
+
+	// Add Reply action above React.
 	Action *replyAction = new Action(AMenu);
 	replyAction->setText(tr("Reply"));
 	connect(replyAction, &QAction::triggered, this,
-		[this, messaging, parent = window->instance(),
-		 conversationId = window->conversationId(), eventId]() {
-			// Store the reply target event ID in a temporary property for later use
-			parent->setProperty("matrix_reply_target_event_id", eventId);
-			// Focus on the chat window to ensure it's active (no direct focus method on edit widget)
-			IChatWindow *chatWindow = qobject_cast<IChatWindow *>(parent);
-			if (chatWindow) {
-				chatWindow->showTabPage();
-			}
+		[this, window, eventId, targetSenderName]() {
+			if (!window || !window->editWidget())
+				return;
+			window->showTabPage();
+			QTextEdit *editor = window->editWidget()->textEdit();
+			if (!editor)
+				return;
+			if (editor->property("vacuum.matrix.reply_event_id").toString().isEmpty())
+				editor->setProperty("vacuum.matrix.reply_original_placeholder", editor->placeholderText());
+			editor->setProperty("vacuum.matrix.reply_event_id", eventId);
+			editor->setPlaceholderText(tr("Replying to %1").arg(targetSenderName));
+			editor->setFocus(Qt::OtherFocusReason);
 		});
 	AMenu->addAction(replyAction, AG_DEFAULT, true);
 
@@ -710,6 +764,19 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 				for (const QString &sourceKey : senderIt.value())
 					FProtocolReactionEvents.remove(sourceKey);
 	}
+	if (!AMessage.messageId().isEmpty()) {
+		const QString historyKey = AMessaging->streamId() + QChar('\n') + AMessage.conversationId();
+		QList<BasicMessage> &history = FProtocolConversationMessages[historyKey];
+		const QString replacedTxnId = AMessage.metadata().value(QStringLiteral("replaces_txn_id")).toString();
+		const QString cachedMessageId = replacedTxnId.isEmpty() ? AMessage.messageId() : replacedTxnId;
+		auto cached = std::find_if(history.begin(), history.end(), [&cachedMessageId](const BasicMessage &message) {
+			return message.messageId() == cachedMessageId;
+		});
+		if (cached == history.end())
+			history.append(AMessage);
+		else
+			*cached = AMessage;
+	}
 	QString messageKey = prefix + AMessage.messageId();
 	if (!AMessage.metadata().value(QStringLiteral("decoded_image")).value<QImage>().isNull())
 		messageKey += QStringLiteral("|image");
@@ -762,10 +829,16 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 	const QString resourceUrl = AMessage.metadata().value(QStringLiteral("image_resource_url")).toString();
 	if (body.isEmpty() && messageType != QStringLiteral("m.image"))
 		return;
+	const QString replyEventId = AMessage.metadata().value(
+		QStringLiteral("reply_to_event_id")).toString();
+	const QString historyKey = AMessaging->streamId() + QChar('\n') + AMessage.conversationId();
+	const QString replyHtml = MatrixReply::isEventId(replyEventId)
+		? buildProtocolReplyPreviewHtml(FProtocolConversationMessages.value(historyKey),
+			AWindow, AMessaging, replyEventId, this) : QString();
 
 	if (messageType == QStringLiteral("m.text") &&
 		messageFormat == QStringLiteral("org.matrix.custom.html") && !formattedBody.isEmpty())
-		AWindow->viewWidget()->appendHtml(matrixHighlightMentions(matrixSafeHtml(
+		AWindow->viewWidget()->appendHtml(replyHtml + matrixHighlightMentions(matrixSafeHtml(
 			AMessaging->formatEmoticonsForDisplay(formattedBody))), options);
 	else if (messageType == QStringLiteral("m.image") && !decodedImage.isNull() && !resourceUrl.isEmpty())
 	{
@@ -778,14 +851,14 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 			"<div><img src=\"%1\" alt=\"%2\" "
 			"style=\"max-width:50%; max-width:300px; height:auto;\" /></div>")
 			.arg(escapedUrl, escapedAlt);
-		AWindow->viewWidget()->appendHtml(imageHtml, options);
+		AWindow->viewWidget()->appendHtml(replyHtml + imageHtml, options);
 	}
 	else if (messageType == QStringLiteral("m.image") || messageType == QStringLiteral("m.file"))
 	{
 		const QString filePath = AMessage.metadata().value(QStringLiteral("file_path")).toString();
 		if (!filePath.isEmpty()) {
 			const QString href = QUrl::fromLocalFile(filePath).toString().toHtmlEscaped();
-			AWindow->viewWidget()->appendHtml(QStringLiteral("<a href=\"%1\">%2</a>")
+			AWindow->viewWidget()->appendHtml(replyHtml + QStringLiteral("<a href=\"%1\">%2</a>")
 				.arg(href, body.isEmpty() ? tr("Open attachment") : body.toHtmlEscaped()), options);
 		} else {
 			QUrl requestUrl;
@@ -803,7 +876,7 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 			requestUrl.setQuery(query);
 			const QString label = messageType == QStringLiteral("m.image")
 				? tr("Load image") : tr("Load attachment");
-			AWindow->viewWidget()->appendHtml(QStringLiteral("<a href=\"%1\">%2</a>")
+			AWindow->viewWidget()->appendHtml(replyHtml + QStringLiteral("<a href=\"%1\">%2</a>")
 				.arg(requestUrl.toString(QUrl::FullyEncoded).toHtmlEscaped(), label), options);
 		}
 	}
@@ -816,7 +889,7 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 	const QString displayBody = AMessaging->formatEmoticonsForDisplay(body);
 	const QString escapedBody = displayBody.toHtmlEscaped().replace(QStringLiteral("\n"),
 		QStringLiteral("<br/>"));
-	AWindow->viewWidget()->appendHtml(matrixHighlightMentions(escapedBody), options);
+	AWindow->viewWidget()->appendHtml(replyHtml + matrixHighlightMentions(escapedBody), options);
 	}
 	if (!(messageType == QStringLiteral("m.image") && decodedImage.isNull()) &&
 		!(messageType == QStringLiteral("m.file") &&
@@ -827,6 +900,61 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 	FProtocolMessageRelationTypes.insert(eventKey,
 		AMessage.metadata().value(QStringLiteral("relation_type")).toString());
 	updateProtocolReactionDecoration(AWindow, eventKey, AMessage.messageId());
+}
+
+static QString buildProtocolReplyPreviewHtml(const QList<BasicMessage> &history,
+	IChatWindow *AWindow, IProtocolMessaging *AMessaging, const QString &AReplyEventId,
+	QObject *receiver)
+{
+	if (!AWindow || !AMessaging || AReplyEventId.isEmpty())
+		return QString();
+	bool targetFound = false;
+	BasicMessage target;
+	for (const BasicMessage &candidate : history)
+		if (candidate.messageId() == AReplyEventId) {
+			target = candidate;
+			targetFound = true;
+			break;
+		}
+	const QVariantMap targetMetadata = target.metadata();
+	QString senderName = targetFound
+		? targetMetadata.value(QStringLiteral("sender_name")).toString()
+		: QCoreApplication::translate("ChatMessageHandler", "Unknown sender");
+	if (senderName.isEmpty())
+		senderName = target.sender();
+	if (senderName.isEmpty())
+		senderName = QCoreApplication::translate("ChatMessageHandler", "Unknown sender");
+	QString excerpt = targetFound ? target.body()
+		: QCoreApplication::translate("ChatMessageHandler", "Original message unavailable");
+	if (excerpt.isEmpty())
+		excerpt = targetMetadata.value(QStringLiteral("body")).toString();
+	if (excerpt.isEmpty())
+		excerpt = targetMetadata.value(QStringLiteral("filename")).toString();
+	if (targetMetadata.value(QStringLiteral("redacted")).toBool())
+		excerpt = QCoreApplication::translate("ChatMessageHandler", "Message deleted");
+	else if (excerpt.isEmpty() && targetMetadata.value(QStringLiteral("msgtype")).toString() ==
+		QStringLiteral("m.image"))
+		excerpt = QCoreApplication::translate("ChatMessageHandler", "Image");
+	else if (excerpt.isEmpty() && targetMetadata.value(QStringLiteral("msgtype")).toString() ==
+		QStringLiteral("m.file"))
+		excerpt = QCoreApplication::translate("ChatMessageHandler", "File");
+	else if (excerpt.isEmpty())
+		excerpt = QCoreApplication::translate("ChatMessageHandler", "Message");
+	excerpt = AMessaging->formatEmoticonsForDisplay(excerpt);
+	if (excerpt.size() > 180) {
+		QTextBoundaryFinder boundary(QTextBoundaryFinder::Grapheme, excerpt);
+		boundary.setPosition(180);
+		int end = boundary.toPreviousBoundary();
+		if (end <= 0)
+			end = 180;
+		excerpt = excerpt.left(end) + QChar(0x2026);
+	}
+	QString avatarPath = targetMetadata.value(QStringLiteral("sender_avatar")).toString();
+	if (avatarPath.isEmpty() && targetFound)
+		avatarPath = AMessaging->userAvatarPath(AWindow->conversationId(), target.sender());
+	QTextEdit *view = qobject_cast<QTextEdit *>(AWindow->viewWidget()->styleWidget());
+	const QString avatarResource = cacheReplyAvatarResource(view, avatarPath, receiver);
+	return MatrixReply::previewHtml(senderName, excerpt, avatarResource);
 }
 
 void ChatMessageHandler::renderProtocolHistory(IChatWindow *AWindow, IProtocolMessaging *AMessaging)
@@ -1669,41 +1797,27 @@ void ChatMessageHandler::onMessageReady()
 			BasicMessage message(QString(), window->conversationId(), QString(), QString(),
 				formattedBody, QDateTime::currentDateTimeUtc(),
 				selectedMessaging->protocol(), BasicMessage::Outgoing);
-			
-			// Check if this is a reply by looking for the reply target ID
-			const QString replyTargetId = window->instance()->property("matrix_reply_target_event_id").toString();
-			if (!replyTargetId.isEmpty()) {
-				// Prepare reply metadata
-				QVariantMap metadata = message.metadata();
+			QTextEdit *editor = window->editWidget()->textEdit();
+			const bool isMatrix = selectedMessaging->protocol() == QStringLiteral("matrix");
+			const QString replyTargetId = isMatrix && editor
+				? editor->property("vacuum.matrix.reply_event_id").toString() : QString();
+			if (isMatrix) {
+				QVariantMap metadata;
 				metadata.insert(QStringLiteral("msgtype"), QStringLiteral("m.text"));
 				metadata.insert(QStringLiteral("body"), body);
-				
-				// Build the m.relates_to structure for replies
-				QJsonObject relatesTo;
-				relatesTo.insert(QStringLiteral("m.in_reply_to"), QJsonObject{
-					{QStringLiteral("event_id"), replyTargetId}
-				});
-				metadata.insert(QStringLiteral("m.relates_to"), relatesTo);
-				
-				// Add empty m.mentions if not present
-				QJsonObject mentions;
-				metadata.insert(QStringLiteral("m.mentions"), mentions);
-				
+				if (MatrixReply::isEventId(replyTargetId))
+					metadata.insert(QStringLiteral("reply_to_event_id"), replyTargetId);
 				message.setMetadata(metadata);
-				
-				// Clear the reply target ID property after using it
-				window->instance()->setProperty("matrix_reply_target_event_id", QString());
-			} else {
-				// Regular message without reply structure
-				message.setMetadata(QVariantMap{
-					{QStringLiteral("msgtype"), QStringLiteral("m.text")},
-					{QStringLiteral("body"), body}
-				});
 			}
-			
-			if (selectedMessaging->sendMessage(message)) { 
-				window->editWidget()->clearEditor(); 
-				return; 
+			if (selectedMessaging->sendMessage(message)) {
+				if (!replyTargetId.isEmpty() && editor) {
+					editor->setProperty("vacuum.matrix.reply_event_id", QVariant());
+					editor->setPlaceholderText(
+						editor->property("vacuum.matrix.reply_original_placeholder").toString());
+					editor->setProperty("vacuum.matrix.reply_original_placeholder", QVariant());
+				}
+				window->editWidget()->clearEditor();
+				return;
 			}
 		}
 		qWarning() << "Protocol text message not routed: conversation=" << window->conversationId()

@@ -21,6 +21,10 @@ if (BUILD_TESTING)
 	target_link_libraries(simplemessagestyle_autoscroll_tests PRIVATE
 		${VACUUM_UTILS_NAME}
 		Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::Xml Qt6::Sql)
+	add_executable(simplemessagestyle_avatar_cache_tests EXCLUDE_FROM_ALL
+		avatar_cache_test.cpp avatarpathcache.h)
+	target_compile_features(simplemessagestyle_avatar_cache_tests PRIVATE cxx_std_11)
+	target_link_libraries(simplemessagestyle_avatar_cache_tests PRIVATE Qt6::Core)
 endif()
 
 if (IS_ENABLED)

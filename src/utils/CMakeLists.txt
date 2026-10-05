@@ -118,4 +118,12 @@ if (BUILD_TESTING)
 		"${CMAKE_SOURCE_DIR}/src")
 	target_link_libraries(image_load_scheduler_tests PRIVATE
 		${VACUUM_UTILS_NAME} Qt6::Core Qt6::Gui)
+
+	add_executable(matrixhtml_test EXCLUDE_FROM_ALL
+		matrixhtml_test.cpp)
+	target_compile_features(matrixhtml_test PRIVATE cxx_std_11)
+	target_include_directories(matrixhtml_test PRIVATE
+		"${CMAKE_SOURCE_DIR}/src")
+	target_link_libraries(matrixhtml_test PRIVATE
+		${VACUUM_UTILS_NAME} Qt6::Core Qt6::Gui Qt6::Xml)
 endif()

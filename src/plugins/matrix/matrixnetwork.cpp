@@ -3,6 +3,7 @@
 #include "matrixssss.h"
 #include "interfaces/iprotocolpresence.h"
 #include "interfaces/ichatstates.h"
+#include "interfaces/matrixreply.h"
 #include <utils/imageloadscheduler.h>
 #include <QRandomGenerator>
 #include <QNetworkReply>
@@ -4672,12 +4673,11 @@ void MatrixNetwork::onSyncFinished(QNetworkReply *reply)
 						? event.value(QStringLiteral("redacts")).toString()
 						: contentRedacts);
 			}
-			const QJsonObject relation = eventContent.value(QStringLiteral("m.relates_to")).toObject();
+			const QJsonObject relation = messageContent.value(QStringLiteral("m.relates_to")).toObject();
 			if (!relation.isEmpty()) {
 				const QString relationType = relation.value(QStringLiteral("rel_type")).toString();
 				const QString relatedEventId = relation.value(QStringLiteral("event_id")).toString();
-				const QString inReplyTo = relation.value(QStringLiteral("m.in_reply_to")).toObject()
-					.value(QStringLiteral("event_id")).toString();
+				const QString inReplyTo = MatrixReply::replyEventId(messageContent);
 				matrixEvent.metadata.insert(QStringLiteral("relation_type"), relationType);
 				matrixEvent.metadata.insert(QStringLiteral("related_event_id"), relatedEventId);
 				matrixEvent.metadata.insert(QStringLiteral("reply_to_event_id"), inReplyTo);
@@ -4688,14 +4688,13 @@ void MatrixNetwork::onSyncFinished(QNetworkReply *reply)
 				}
 				if (relationType == QStringLiteral("m.replace"))
 					matrixEvent.metadata.insert(QStringLiteral("replacement_content"),
-					eventContent.value(QStringLiteral("m.new_content")).toObject().toVariantMap());
+					messageContent.value(QStringLiteral("m.new_content")).toObject().toVariantMap());
 				if (relationType == QStringLiteral("m.annotation"))
 					matrixEvent.metadata.insert(QStringLiteral("reaction_key"),
 						relation.value(QStringLiteral("key")).toString());
 			}
 			else {
-				const QString replyEventId = eventContent.value(QStringLiteral("m.in_reply_to"))
-					.toObject().value(QStringLiteral("event_id")).toString();
+				const QString replyEventId = MatrixReply::replyEventId(messageContent);
 				if (!replyEventId.isEmpty())
 					matrixEvent.metadata.insert(QStringLiteral("reply_to_event_id"), replyEventId);
 			}
@@ -4874,6 +4873,9 @@ void MatrixNetwork::retryPendingEncryptedEvents(const QString &roomId, const QSt
 			event.content = content.value(QStringLiteral("body")).toString();
 			event.metadata.insert(QStringLiteral("msgtype"), event.messageType);
 			event.metadata.insert(QStringLiteral("body"), event.content);
+			const QString replyEventId = MatrixReply::replyEventId(content);
+			if (!replyEventId.isEmpty())
+				event.metadata.insert(QStringLiteral("reply_to_event_id"), replyEventId);
 		} else {
 			const QJsonObject relation = content.value(QStringLiteral("m.relates_to")).toObject();
 			event.metadata.insert(QStringLiteral("relation_type"), relation.value(QStringLiteral("rel_type")).toString());
