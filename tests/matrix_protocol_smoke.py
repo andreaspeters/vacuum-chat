@@ -525,6 +525,14 @@ def test_matrix_reaction_render_and_send_contract():
     assert 'vacuum.messageId' in view
     assert 'FProtocolReactionSenders' in renderer_header
     assert 'setMessageDecoration' in view
+    reaction_start = renderer.index('void ChatMessageHandler::updateProtocolReactionDecoration(')
+    reaction_end = renderer.index('bool ChatMessageHandler::messageCheck', reaction_start)
+    reaction_decoration = renderer[reaction_start:reaction_end]
+    assert 'background-color' not in reaction_decoration
+    assert 'border:1px solid' not in reaction_decoration
+    assert 'width=\\\"25%\\\"' in reaction_decoration and 'width=\\\"5%\\\"' in reaction_decoration
+    assert 'width=\\\"36\\\"' in reaction_decoration and 'width=\\\"20%\\\"' in reaction_decoration
+    assert 'align=\\\"right\\\"' in reaction_decoration and 'align=\\\"left\\\"' in reaction_decoration
     history_start = renderer.index('void ChatMessageHandler::renderProtocolHistory')
     history_end = renderer.index('void ChatMessageHandler::addProtocolReaction', history_start)
     history_renderer = renderer[history_start:history_end]

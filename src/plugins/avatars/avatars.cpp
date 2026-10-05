@@ -1,6 +1,7 @@
 #include "avatars.h"
 #include <interfaces/iprotocolroster.h>
 #include <utils/imageloadscheduler.h>
+#include <utils/roundedavatar.h>
 #include <functional>
 
 #include <QFile>
@@ -337,6 +338,8 @@ QVariant Avatars::rosterData(const IRosterIndex *AIndex, int ARole) const
 		}
 		if (avatar.isNull() && FShowEmptyAvatars)
 			avatar = gray ? FGrayEmptyAvatar : FEmptyAvatar;
+		if (!avatar.isNull())
+			avatar = RoundedAvatar::roundImage(avatar, 0.18);
 		return avatar;
 	}
 	else if (ARole == RDR_AVATAR_HASH)

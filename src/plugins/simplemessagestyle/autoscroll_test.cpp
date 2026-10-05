@@ -1,13 +1,19 @@
 #include <QApplication>
+#include <QAbstractTextDocumentLayout>
 #include <QDateTime>
 #include <QEventLoop>
+#include <QFrame>
 #include <QImage>
 #include <QKeyEvent>
 #include <QNetworkAccessManager>
+#include <QPainter>
 #include <QResizeEvent>
 #include <QRegularExpression>
 #include <QScrollBar>
 #include <QTemporaryDir>
+#include <QTextCursor>
+#include <QTextBrowser>
+#include <QTextTable>
 #include <QTimeZone>
 #include <QTimer>
 #include <QWheelEvent>
@@ -37,6 +43,43 @@ void sendWheel(StyleViewer *view, int angleDeltaY)
         QPoint(), QPoint(0, angleDeltaY), Qt::NoButton, Qt::NoModifier,
         Qt::NoScrollPhase, false);
     QCoreApplication::sendEvent(view->viewport(), &event);
+}
+
+bool checkLastBubbleFrame(StyleViewer *view, const QColor &fill, const QString &messageText,
+    const char *description)
+{
+    const QList<QFrame *> frames = view->findChildren<QFrame *>(QStringLiteral("modernChatBubbleFrame"));
+    if (frames.isEmpty())
+        return check(false, description);
+
+    QFrame *frame = frames.constLast();
+    const QRect bubbleRect = frame->geometry();
+    if (!view->viewport()->rect().contains(bubbleRect))
+        return check(false, description);
+
+    QImage image(view->viewport()->size(), QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::white);
+    QPainter painter(&image);
+    view->viewport()->render(&painter);
+
+    const int centerX = bubbleRect.center().x();
+    const int centerY = bubbleRect.center().y();
+    const QPoint corners[] = {bubbleRect.topLeft(), bubbleRect.topRight(),
+        bubbleRect.bottomLeft(), bubbleRect.bottomRight()};
+    bool rounded = bubbleRect.width() > 12 && bubbleRect.height() > 12;
+    for (const QPoint &corner : corners)
+        rounded = rounded && image.pixelColor(corner) != fill;
+    rounded = rounded && image.pixelColor(centerX, bubbleRect.top() + 2) == fill &&
+        image.pixelColor(bubbleRect.left() + 2, centerY) == fill;
+
+    QTextBrowser *content = frame->findChild<QTextBrowser *>(QStringLiteral("modernChatBubbleContent"));
+    const bool containsText = content && content->toPlainText().contains(messageText);
+    const bool transparentContent = content && !content->viewport()->autoFillBackground() &&
+        image.pixelColor(bubbleRect.left() + 7, centerY) == fill;
+    bool passed = check(rounded, description);
+    passed = check(containsText, "QFrame rich-text child preserves message text") && passed;
+    passed = check(transparentContent, "QFrame rich-text child background is transparent") && passed;
+    return passed;
 }
 
 QString tallMessage(int index)
@@ -234,6 +277,9 @@ int main(int argc, char **argv)
         delete view;
         return 2;
     }
+    avatarView->resize(480, 240);
+    avatarView->show();
+    application.processEvents();
     IMessageContentOptions avatarOptions;
     avatarOptions.kind = IMessageContentOptions::KindMessage;
     avatarOptions.senderId = QStringLiteral("same-user");
@@ -267,7 +313,68 @@ int main(int argc, char **argv)
             QTextDocument::ImageResource, avatarResourceUrl).value<QImage>();
         passed &= check(loadedAvatar.cacheKey() == reusedAvatar.cacheKey(),
             "repeated messages reuse the same decoded avatar image object");
+        passed &= check(loadedAvatar.pixelColor(0, 0).alpha() < 64 &&
+            loadedAvatar.pixelColor(loadedAvatar.width() / 2, loadedAvatar.height() / 2).alpha() > 240,
+            "Modern Chat avatar corners are rounded without clipping the center");
     }
+
+    QImage inlineImage(24, 24, QImage::Format_ARGB32_Premultiplied);
+    inlineImage.fill(QColor(220, 30, 40));
+    const QUrl inlineImageUrl(QStringLiteral("vacuum-matrix-image:/rounded-fixture"));
+    avatarView->document()->addResource(QTextDocument::ImageResource, inlineImageUrl, inlineImage);
+    avatarOptions.senderId = QStringLiteral("image-user");
+    avatarOptions.senderName = QStringLiteral("Image User");
+    const QString inlineImageHtml = QStringLiteral(
+        "<img src=\"%1\" width=\"24\" height=\"24\" alt=\"fixture\" />")
+        .arg(inlineImageUrl.toString(QUrl::FullyEncoded).toHtmlEscaped());
+    avatarStyle.appendContent(avatarView, inlineImageHtml, avatarOptions);
+    application.processEvents();
+    const QImage renderedInlineImage = avatarView->document()->resource(
+        QTextDocument::ImageResource, inlineImageUrl).value<QImage>();
+    passed &= check(renderedInlineImage.pixelColor(0, 0).alpha() < 128 &&
+        renderedInlineImage.pixelColor(renderedInlineImage.width() / 2,
+            renderedInlineImage.height() / 2).alpha() > 240,
+        "Modern Chat inline image corners are rounded without clipping the center");
+
+    const int bubbleFrameCountBefore = avatarView->findChildren<QFrame *>(
+        QStringLiteral("modernChatBubbleFrame")).size();
+    avatarStyle.appendContent(avatarView, QStringLiteral("bubble edge probe"), avatarOptions);
+    application.processEvents();
+    passed &= check(avatarView->findChildren<QFrame *>(QStringLiteral("modernChatBubbleFrame")).size() ==
+        bubbleFrameCountBefore + 1, "Modern Chat creates one Qt-styled frame per message bubble");
+    passed &= checkLastBubbleFrame(avatarView, QColor(QStringLiteral("#f1f2f4")),
+        QStringLiteral("bubble edge probe"),
+        "the Qt-styled message frame has rounded pixels and transparent rich-text content");
+    const QUrl bubbleCornerUrl(QStringLiteral("vacuum-bubble:/incoming/top-left"));
+    passed &= check(!avatarView->document()->resource(QTextDocument::ImageResource, bubbleCornerUrl).isValid(),
+        "Modern Chat does not register bitmap resources for bubble corners");
+
+    IMessageContentOptions incomingContentOptions = avatarOptions;
+    incomingContentOptions.senderId = QStringLiteral("incoming-content-user");
+    incomingContentOptions.senderName = QStringLiteral("Incoming Content User");
+    incomingContentOptions.time = QDateTime::currentDateTime();
+    avatarStyle.appendContent(avatarView, QStringLiteral("incoming content corner probe"), incomingContentOptions);
+    application.processEvents();
+    passed &= checkLastBubbleFrame(avatarView, QColor(QStringLiteral("#f1f2f4")),
+        QStringLiteral("incoming content corner probe"),
+        "incoming first-message QFrame renders rounded corners with rich text");
+
+    IMessageContentOptions outgoingOptions = avatarOptions;
+    outgoingOptions.direction = IMessageContentOptions::DirectionOut;
+    outgoingOptions.senderId = QStringLiteral("outgoing-user");
+    outgoingOptions.senderName = QStringLiteral("Outgoing User");
+    outgoingOptions.time = QDateTime::currentDateTime();
+    avatarStyle.appendContent(avatarView, QStringLiteral("outgoing bubble first"), outgoingOptions);
+    application.processEvents();
+    passed &= checkLastBubbleFrame(avatarView, QColor(QStringLiteral("#e8f1ff")),
+        QStringLiteral("outgoing bubble first"),
+        "outgoing first-message QFrame renders rounded corners with rich text");
+    outgoingOptions.time = outgoingOptions.time.addSecs(60);
+    avatarStyle.appendContent(avatarView, QStringLiteral("outgoing bubble probe"), outgoingOptions);
+    application.processEvents();
+    passed &= checkLastBubbleFrame(avatarView, QColor(QStringLiteral("#e8f1ff")),
+        QStringLiteral("outgoing bubble probe"),
+        "outgoing consecutive-message QFrame renders rounded corners with rich text");
     delete avatarView;
 
     delete view;

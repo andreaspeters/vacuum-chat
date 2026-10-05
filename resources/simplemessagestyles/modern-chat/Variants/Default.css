@@ -22,7 +22,6 @@ body {
 }
 
 .xxxavatar img {
-  border: 1px solid #e1e5ea;
   height: 32px;
   width: 32px;
 }
@@ -51,21 +50,28 @@ body {
 }
 
 .xxxbubble {
-  border-collapse: separate;
+  border-collapse: collapse;
   border-spacing: 0;
   border-style: none;
 }
 
+.xxxbubblecorner,
+.xxxbubblefill {
+  padding: 0;
+}
+
+.xxxbubblefill,
+.xxxmessage,
+.outgoing .xxxmessage,
+.outgoing .xxxbubblefill {
+  background-color: transparent;
+}
+
 .xxxmessage {
-  background-color: #f1f2f4;
   color: #343a40;
   padding: 8px 12px;
   text-align: left;
   white-space: pre-wrap;
-}
-
-.outgoing .xxxmessage {
-  background-color: #e8f1ff;
 }
 
 .consecutive {

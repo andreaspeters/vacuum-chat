@@ -1,13 +1,17 @@
 #include "simplemessagestyle.h"
+#include "roundedimage.h"
 
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
+#include <QRegularExpression>
 #include <QScrollBar>
 #include <QTextFrame>
 #include <QTextCursor>
 #include <QDomDocument>
 #include <QCoreApplication>
 #include <QTextDocumentFragment>
+#include <QUrl>
 #include <definitions/menuicons.h>
 #include <utils/iconstorage.h>
 
@@ -27,6 +31,39 @@ static const char *SenderColors[] =  {
 };
 
 static int SenderColorsCount = sizeof(SenderColors)/sizeof(SenderColors[0]);
+
+namespace
+{
+bool isModernChatStyle(const QString &stylePath)
+{
+	return QFileInfo(stylePath).fileName() == QStringLiteral("modern-chat");
+}
+
+void roundModernChatImages(StyleViewer *view, const QString &html)
+{
+	if (!view)
+		return;
+
+	static const QRegularExpression imageSourceExpression(
+		QStringLiteral("<img\\b[^>]*\\bsrc\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)')"),
+		QRegularExpression::CaseInsensitiveOption);
+	QRegularExpressionMatchIterator matches = imageSourceExpression.globalMatch(html);
+	QTextDocument *document = view->document();
+	while (matches.hasNext())
+	{
+		const QRegularExpressionMatch match = matches.next();
+		const QString source = match.captured(1).isEmpty() ? match.captured(2) : match.captured(1);
+		const QUrl url = QUrl::fromEncoded(source.toUtf8());
+		if (url.scheme() != QStringLiteral("vacuum-matrix-image"))
+			continue;
+
+		const QImage image = document->resource(QTextDocument::ImageResource, url).value<QImage>();
+		if (!image.isNull())
+			document->addResource(QTextDocument::ImageResource, url,
+				RoundedImage::withRoundedCorners(image, 0.016));
+	}
+}
+}
 
 SimpleMessageStyle::SimpleMessageStyle(const QString &AStylePath, QNetworkAccessManager *ANetworkAccessManager, QObject *AParent) : QObject(AParent)
 {
@@ -84,7 +121,10 @@ QString SimpleMessageStyle::senderColor(const QString &ASenderId) const
 QTextDocumentFragment SimpleMessageStyle::selection(QWidget *AWidget) const
 {
 	StyleViewer *view = qobject_cast<StyleViewer *>(AWidget);
-	return view!=NULL ? view->textCursor().selection() : QTextDocumentFragment();
+	if (!view)
+		return QTextDocumentFragment();
+	const QTextDocumentFragment bubbleSelection = view->bubbleSelection();
+	return bubbleSelection.isEmpty() ? view->textCursor().selection() : bubbleSelection;
 }
 
 QTextDocumentFragment SimpleMessageStyle::textUnderPosition(const QPoint &APosition, QWidget *AWidget) const
@@ -92,6 +132,13 @@ QTextDocumentFragment SimpleMessageStyle::textUnderPosition(const QPoint &APosit
 	StyleViewer *view = qobject_cast<StyleViewer *>(AWidget);
 	if (view)
 	{
+		const QTextDocumentFragment bubbleSelection = view->bubbleSelection();
+		if (!bubbleSelection.isEmpty())
+			return bubbleSelection;
+		const QTextDocumentFragment bubbleFragment = view->bubbleTextUnderPosition(APosition);
+		if (!bubbleFragment.isEmpty())
+			return bubbleFragment;
+
 		QTextCursor cursor = view->cursorForPosition(APosition);
 		if (view->textCursor().selection().isEmpty() || view->textCursor().selectionStart()>cursor.position() || view->textCursor().selectionEnd()<cursor.position())
 		{
@@ -144,6 +191,8 @@ bool SimpleMessageStyle::changeOptions(QWidget *AWidget, const IMessageStyleOpti
 					}
 				});
 			connect(view,SIGNAL(anchorClicked(const QUrl &)),SLOT(onLinkClicked(const QUrl &)));
+			connect(view, &StyleViewer::bubbleAnchorClicked, this,
+				[this, view](const QUrl &AUrl) { emit urlClicked(view, AUrl); });
 			connect(view,SIGNAL(destroyed(QObject *)),SLOT(onStyleWidgetDestroyed(QObject *)));
 			emit widgetAdded(AWidget);
 		}
@@ -154,6 +203,7 @@ bool SimpleMessageStyle::changeOptions(QWidget *AWidget, const IMessageStyleOpti
 
 		if (AClean)
 		{
+			view->clearMessageBubbles();
 			WidgetStatus &wstatus = FWidgetStatus[view];
 			wstatus.lastKind = -1;
 			wstatus.lastId = QString();
@@ -185,17 +235,54 @@ bool SimpleMessageStyle::appendContent(QWidget *AWidget, const QString &AHtml, c
 	StyleViewer *view = FWidgetStatus.contains(AWidget) ? qobject_cast<StyleViewer *>(AWidget) : NULL;
 	if (view)
 	{
-		bool sameSender = isSameSender(AWidget,AOptions);
+		const bool modernChat = isModernChatStyle(FStylePath);
+		if (modernChat)
+		{
+			roundModernChatImages(view, AHtml);
+		}
+		const bool sameSender = isSameSender(AWidget,AOptions);
 		QString html = makeContentTemplate(AOptions,sameSender);
 		fillContentKeywords(html,AOptions,sameSender,view);
-		html.replace("%message%",prepareMessage(AHtml,AOptions));
+		const QString preparedMessage = prepareMessage(AHtml,AOptions);
+		QString bubbleMarker;
+		if (modernChat && AOptions.kind == IMessageContentOptions::KindMessage)
+		{
+			static quint64 markerSequence = 0;
+			bubbleMarker = QStringLiteral("QFrameMessageMarker-%1").arg(++markerSequence);
+			const QString markerHtml = QStringLiteral(
+				"<span style=\"font-size:0px; line-height:0px; color:transparent;\">%1</span>")
+				.arg(bubbleMarker);
+			html.replace("%message%", markerHtml + preparedMessage);
+		}
+		else
+		{
+			html.replace("%message%", preparedMessage);
+		}
 
 		WidgetStatus &wstatus = FWidgetStatus[AWidget];
 		const bool shouldFollowTail = wstatus.followTail && !AOptions.noScroll;
 
 		QTextCursor cursor(view->document());
 		cursor.movePosition(QTextCursor::End);
+		const int insertionPosition = cursor.position();
 		cursor.insertHtml(html);
+
+		if (!bubbleMarker.isEmpty())
+		{
+			QTextCursor searchCursor(view->document());
+			searchCursor.setPosition(insertionPosition);
+			QTextCursor markerCursor = view->document()->find(bubbleMarker, searchCursor);
+			if (!markerCursor.isNull())
+			{
+				QTextTable *bubbleTable = markerCursor.currentTable();
+				markerCursor.removeSelectedText();
+				QColor fill(AOptions.textBGColor);
+				if (!fill.isValid())
+					fill = AOptions.direction == IMessageContentOptions::DirectionOut
+						? QColor(QStringLiteral("#e8f1ff")) : QColor(QStringLiteral("#f1f2f4"));
+				view->addMessageBubble(bubbleTable, preparedMessage, fill);
+			}
+		}
 
 		if (shouldFollowTail)
 		{
@@ -453,7 +540,8 @@ void SimpleMessageStyle::fillContentKeywords(QString &AHtml, const IMessageConte
 		if (!isAvatarExistsCached(avatar))
 			avatar = qApp->applicationDirPath()+"/"SHARED_STYLE_PATH"/buddy_icon.png";
 	}
-	AHtml.replace("%userIconPath%", AView->cacheImageResource(avatar).toHtmlEscaped());
+	AHtml.replace("%userIconPath%", AView->cacheImageResource(avatar,
+		isModernChatStyle(FStylePath)).toHtmlEscaped());
 
 	QString timeFormat = !AOptions.timeFormat.isEmpty() ? AOptions.timeFormat : tr("hh:mm:ss");
 	QString time = displayTime.toString(timeFormat).toHtmlEscaped();

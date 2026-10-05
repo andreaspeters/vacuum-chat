@@ -2,7 +2,13 @@
 #define STYLEVIEWER_H
 
 #include <QTextBrowser>
+#include <QColor>
+#include <QFrame>
+#include <QList>
+#include <QPointer>
 #include <QSet>
+#include <QTextDocumentFragment>
+#include <QTextTable>
 #include <utils/animatedtextbrowser.h>
 
 class QKeyEvent;
@@ -15,15 +21,28 @@ class StyleViewer:
 public:
 	StyleViewer(QWidget *AParent);
 	~StyleViewer();
-	QString cacheImageResource(const QString &APath);
+	QString cacheImageResource(const QString &APath, bool ARoundCorners = false);
+	void addMessageBubble(QTextTable *ATable, const QString &AHtml, const QColor &AFill);
+	void clearMessageBubbles();
+	QTextDocumentFragment bubbleSelection() const;
+	QTextDocumentFragment bubbleTextUnderPosition(const QPoint &APosition) const;
 signals:
 	void userScrollPositionChanged(int APosition, int AMaximum);
+	void bubbleAnchorClicked(const QUrl &AUrl);
 protected:
 	void wheelEvent(QWheelEvent *AEvent) override;
 	void keyPressEvent(QKeyEvent *AEvent) override;
+	void resizeEvent(QResizeEvent *AEvent) override;
 private:
+	struct BubbleOverlay {
+		QTextTable *table;
+		QPointer<QFrame> frame;
+		QPointer<QTextBrowser> content;
+	};
 	void notifyUserScrollPositionChanged();
+	void updateMessageBubbleGeometry();
 	QSet<QString> FPendingImageResources;
+	QList<BubbleOverlay> FBubbleOverlays;
 };
 
 #endif // STYLEVIEWER_H

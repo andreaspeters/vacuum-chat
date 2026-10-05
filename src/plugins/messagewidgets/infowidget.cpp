@@ -1,6 +1,7 @@
 #include "infowidget.h"
 
 #include <utils/imageloadscheduler.h>
+#include <utils/roundedavatar.h>
 
 #include <QMovie>
 #include <QPointer>
@@ -357,6 +358,7 @@ void InfoWidget::updateFieldLabel(IInfoWidget::InfoField AField)
 					QImage image = sourceImage;
 					if (image.width() > 64 || image.height() > 64)
 						image = image.scaled(QSize(64, 64), Qt::KeepAspectRatio, Qt::SmoothTransformation);
+					image = RoundedAvatar::roundImage(image, 0.18);
 					infoWidget->ui.lblAvatar->setPixmap(QPixmap::fromImage(image));
 				});
 			}

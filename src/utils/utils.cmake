@@ -20,6 +20,7 @@ set(HEADERS "action.h"
             "searchlineedit.h"
             "imagemanager.h"
             "imageloadscheduler.h"
+            "roundedavatar.h"
             "systemtimezonecache.h"
             "advanceditemdelegate.h"
             "matrixhtml.h")

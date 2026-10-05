@@ -7,6 +7,7 @@
 #include <utils/systemtimezonecache.h>
 #include <utils/matrixhtml.h>
 #include <utils/imageloadscheduler.h>
+#include <utils/roundedavatar.h>
 #include <utils/messagenotificationmute.h>
 #include <interfaces/iemoticons.h>
 
@@ -73,6 +74,7 @@ static void loadImagePixmapAsync(QLabel *label, const QString &path, const QSize
 		if (targetSize.isValid() &&
 			(image.width() > targetSize.width() || image.height() > targetSize.height()))
 			image = image.scaled(targetSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+		image = RoundedAvatar::roundImage(image, 0.18);
 		guardedLabel->setPixmap(QPixmap::fromImage(image));
 		if (guardedLabel->property("matrixAvatarKey").isValid()) {
 			guardedLabel->setProperty("matrixAvatarHasLoaded", true);
@@ -1170,14 +1172,21 @@ void ChatMessageHandler::updateProtocolReactionDecoration(IChatWindow *AWindow,
 			if (!senderIt.value().isEmpty())
 				++count;
 		if (count > 0)
-			chips.append(QStringLiteral("<span style=\"background-color:#f1f3f5; border:1px solid #c9d1d9; padding:2px 5px;\">%1&nbsp;%2</span>")
+			chips.append(QStringLiteral("<span>%1&nbsp;%2</span>")
 				.arg(reactionIt.key().toHtmlEscaped()).arg(count));
 	}
 	QString html;
 	if (!chips.isEmpty()) {
 		const bool alignRight = FProtocolMessageDirections.value(targetKey, false);
-		html = QStringLiteral("<p align=\"%1\" style=\"margin:3px 4px 0 40px;\">%2</p>")
-			.arg(alignRight ? QStringLiteral("right") : QStringLiteral("left"), chips.join(QStringLiteral("&nbsp;")));
+		const QString reactionChips = chips.join(QStringLiteral("&nbsp;&nbsp;"));
+		if (alignRight)
+			html = QStringLiteral("<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\"><tr>"
+				"<td width=\"25%\"></td><td align=\"right\">%1</td><td width=\"5%\"></td></tr></table>")
+				.arg(reactionChips);
+		else
+			html = QStringLiteral("<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\"><tr>"
+				"<td width=\"36\"></td><td align=\"left\">%1</td><td width=\"20%\"></td></tr></table>")
+				.arg(reactionChips);
 	}
 	AWindow->viewWidget()->setMessageDecoration(displayMessageId,
 		QStringLiteral("matrix-reactions"), html);
@@ -1600,9 +1609,9 @@ void ChatMessageHandler::setupRoomSidebar(IChatWindow *AWindow, IProtocolMessagi
 			avatar->setProperty("matrixAvatarIsPlaceholder", false);
 			break;
 		case RoomSidebarState::AvatarAction::Placeholder:
-			QPixmap placeholder(32, 32);
+			QImage placeholder(32, 32, QImage::Format_ARGB32_Premultiplied);
 			placeholder.fill(QColor(QStringLiteral("#c8d0d9")));
-			avatar->setPixmap(placeholder);
+			avatar->setPixmap(QPixmap::fromImage(RoundedAvatar::roundImage(placeholder, 0.18)));
 			avatar->setProperty("matrixAvatarHasLoaded", false);
 			avatar->setProperty("matrixAvatarIsPlaceholder", true);
 			break;
