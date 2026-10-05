@@ -126,4 +126,11 @@ if (BUILD_TESTING)
 		"${CMAKE_SOURCE_DIR}/src")
 	target_link_libraries(matrixhtml_test PRIVATE
 		${VACUUM_UTILS_NAME} Qt6::Core Qt6::Gui Qt6::Xml)
+
+	add_executable(system_timezone_cache_tests EXCLUDE_FROM_ALL
+		systemtimezonecache_test.cpp)
+	target_compile_features(system_timezone_cache_tests PRIVATE cxx_std_11)
+	target_include_directories(system_timezone_cache_tests PRIVATE
+		"${CMAKE_SOURCE_DIR}/src")
+	target_link_libraries(system_timezone_cache_tests PRIVATE Qt6::Core)
 endif()

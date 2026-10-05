@@ -1,4 +1,5 @@
 #include "datetime.h"
+#include "systemtimezonecache.h"
 
 #include <QRegularExpression>
 #include <QStringList>
@@ -81,7 +82,7 @@ QDateTime DateTime::toUTC() const
 
 QDateTime DateTime::toLocal() const
 {
-	return toUTC().toLocalTime();
+	return SystemTimeZoneCache::toSystemLocalTime(toUTC());
 }
 
 QString DateTime::toX85TZD() const

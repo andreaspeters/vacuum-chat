@@ -2,6 +2,7 @@
 #include "unicodeavatar.h"
 #include "protocolmessagerouting.h"
 #include <interfaces/matrixreply.h>
+#include <utils/systemtimezonecache.h>
 #include <utils/matrixhtml.h>
 #include <utils/imageloadscheduler.h>
 #include <utils/messagenotificationmute.h>
@@ -798,7 +799,7 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 	const bool isVacuumUser = AMessage.direction() == BasicMessage::Outgoing ||
 		AMessage.metadata().value(QStringLiteral("sender_is_self")).toBool();
 	options.direction = isVacuumUser ? IMessageContentOptions::DirectionOut : IMessageContentOptions::DirectionIn;
-	options.time = AMessage.timestamp().toLocalTime();
+	options.time = SystemTimeZoneCache::toSystemLocalTime(AMessage.timestamp());
 	options.timeFormat = QStringLiteral("yyyy-MM-dd hh:mm:ss");
 	options.senderId = AMessage.sender();
 	const QString rawSenderName = AMessage.metadata().value(QStringLiteral("sender_name")).toString().isEmpty()
