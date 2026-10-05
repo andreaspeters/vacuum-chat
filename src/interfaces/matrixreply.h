@@ -2,7 +2,9 @@
 #define MATRIXREPLY_H
 
 #include <QJsonObject>
+#include <QRegularExpression>
 #include <QString>
+#include <QStringList>
 
 namespace MatrixReply {
 inline bool isEventId(const QString &eventId)
@@ -37,6 +39,32 @@ inline QString replyEventId(const QJsonObject &content)
 		return nestedEventId;
 	return content.value(QStringLiteral("m.in_reply_to")).toObject()
 		.value(QStringLiteral("event_id")).toString();
+}
+
+inline QString stripFallbackText(const QString &body)
+{
+	const QStringList lines = body.split(QLatin1Char('\n'));
+	if (lines.isEmpty() ||
+		!QRegularExpression(QStringLiteral("^> <@[^>\\r\\n]+>"))
+			.match(lines.first()).hasMatch())
+		return body;
+
+	for (int index = 1; index < lines.size(); ++index) {
+		if (lines.at(index).trimmed().isEmpty())
+			return lines.mid(index + 1).join(QLatin1Char('\n'));
+		if (!lines.at(index).startsWith(QLatin1Char('>')))
+			return body;
+	}
+	return body;
+}
+
+inline QString stripFallbackHtml(const QString &html)
+{
+	const QRegularExpression fallback(QStringLiteral(
+		"^\\s*<mx-reply\\b[^>]*>.*?</mx-reply\\s*>\\s*"),
+		QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
+	const QRegularExpressionMatch match = fallback.match(html);
+	return match.hasMatch() ? html.mid(match.capturedLength()) : html;
 }
 
 inline QString previewHtml(const QString &senderName, const QString &excerpt,

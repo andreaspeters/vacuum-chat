@@ -8,6 +8,7 @@ src/packages/windows/bitrock.xml whitespace=blank-at-eol,blank-at-eof,space-befo
 src/packages/windows/nsis.nsi whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 src/plugins/avatars/avatars.cpp whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 src/plugins/avatars/avatars.h whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+src/plugins/chatmessagehandler/chatmessagehandler.h whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 src/plugins/clientinfo/clientinfo.cpp whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 src/plugins/vacuum_otr/definitions/version.h whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 src/plugins/simplemessagestyle/simplemessagestyle.cpp whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

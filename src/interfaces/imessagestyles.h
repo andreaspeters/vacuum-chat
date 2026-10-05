@@ -11,6 +11,7 @@
 #include <utils/jid.h>
 #include <interfaces/identity.h>
 #include <utils/options.h>
+#include <utils/systemtimezonecache.h>
 
 #define MESSAGESTYLES_UUID QUuid("{e3ab1bc7-35a6-431a-9b91-c778451b1eb1}")
 
@@ -137,8 +138,8 @@ public:
 	virtual QString contactAvatarById(const AccountId &AAccountId, const UserId &AUserId) const =0;
 	virtual QString contactNameById(const AccountId &AAccountId, const UserId &AUserId) const =0;
 	virtual QString contactIconById(const AccountId &AAccountId, const UserId &AUserId) const =0;
-	virtual QString dateSeparator(const QDate &ADate, const QDate &ACurDate = QDate::currentDate()) const =0;
-	virtual QString timeFormat(const QDateTime &ATime, const QDateTime &ACurTime = QDateTime::currentDateTime()) const =0;
+	virtual QString dateSeparator(const QDate &ADate, const QDate &ACurDate = SystemTimeZoneCache::currentDate()) const =0;
+	virtual QString timeFormat(const QDateTime &ATime, const QDateTime &ACurTime = SystemTimeZoneCache::currentDateTime()) const =0;
 protected:
 	virtual void styleOptionsChanged(const IMessageStyleOptions &AOptions, int AMessageType, const QString &AContext) const =0;
 };

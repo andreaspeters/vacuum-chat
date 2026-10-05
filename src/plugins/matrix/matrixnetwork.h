@@ -150,6 +150,8 @@ public:
 	Q_INVOKABLE void requestJoinedMembers(const QString &roomId);
 	Q_INVOKABLE void refreshRosterSnapshot();
 	Q_INVOKABLE void setKnownRoomTypes(const QVariantMap &roomTypes);
+	Q_INVOKABLE void requestHistoricalImages(const QString &roomId,
+		const QList<MatrixTimelineEvent> &events);
 	Q_INVOKABLE bool requestSasVerification(const QString &transactionId, const QString &userId,
 		const QString &deviceId);
 	Q_INVOKABLE bool cancelSasVerification(const QString &transactionId, const QString &userId,
@@ -215,6 +217,8 @@ private slots:
 	void onReplyError(QNetworkReply *reply);
 
 private:
+	friend class MatrixNetworkTestAccess;
+
 	void runDatabase(const std::function<void(MatrixDatabase &)> &operation);
 	bool validateAndNormalizeServerUrl(const QString &serverUrl, QString &normalized) const;
 	QString constructUrl(const QString &path) const;
@@ -231,7 +235,7 @@ private:
 	void saveMessageHistory() const;
 	void restorePersistedRooms();
 	void emitRosterSnapshot();
-	bool mergeMessageEvent(const MatrixTextEvent &event);
+	bool mergeMessageEvent(const MatrixTextEvent &event, bool fromHistoryBackfill = false);
 	bool replacePendingEvent(const QString &roomId, const QString &transactionId,
 		const MatrixTextEvent &serverEvent);
 	void retryPendingEncryptedEvents(const QString &roomId, const QString &sessionId);

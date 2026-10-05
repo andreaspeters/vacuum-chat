@@ -1350,6 +1350,39 @@ void MatrixNetwork::requestImage(const MatrixTextEvent &event)
 		});
 }
 
+void MatrixNetwork::requestHistoricalImages(const QString &roomId,
+	const QList<MatrixTimelineEvent> &events)
+{
+	if (roomId.isEmpty() || events.isEmpty())
+		return;
+
+	constexpr int requestLimit = 8;
+	int requested = 0;
+	for (auto it = events.crbegin(); it != events.crend() && requested < requestLimit; ++it) {
+		if (it->roomId != roomId || it->messageType != QStringLiteral("m.image"))
+			continue;
+		const QString mxcUrl = it->metadata.value(QStringLiteral("url")).toString();
+		const QUrl mxc(mxcUrl);
+		if (it->eventId.isEmpty() || mxc.scheme() != QStringLiteral("mxc") || mxc.host().isEmpty())
+			continue;
+
+		MatrixTextEvent event;
+		event.eventId = it->eventId;
+		event.roomId = it->roomId;
+		event.userId = it->sender;
+		event.content = it->content;
+		event.timestamp = QString::number(it->originTs);
+		event.eventType = it->eventType;
+		event.messageType = it->messageType;
+		event.attachments = it->attachments;
+		for (auto metadataIt = it->metadata.cbegin(); metadataIt != it->metadata.cend(); ++metadataIt)
+			event.metadata.insert(metadataIt.key(), metadataIt.value());
+		event.metadata.insert(QStringLiteral("historical"), true);
+		requestImage(event);
+		++requested;
+	}
+}
+
 void MatrixNetwork::requestRoomName(const QString &roomId)
 {
 	if (roomId.isEmpty() || FAccesToken.isEmpty() || FRoomNameRequests.contains(roomId))
@@ -4900,7 +4933,9 @@ void MatrixNetwork::retryPendingEncryptedEvents(const QString &roomId, const QSt
 		});
 		updated.append(event);
 	}
-	emit messageHistoryChanged(roomId, history);
+	// Updated events are emitted individually below. Re-emitting the full room
+	// history on every retry turns a no-op key retry into a burst of queued UI
+	// messages proportional to the room history size.
 	for (const MatrixTextEvent &event : updated)
 		emit messageReceived(event.toBasicMessage());
 }
@@ -4986,7 +5021,7 @@ QList<MatrixTextEvent> MatrixNetwork::historyBackfill(const QString &roomId, int
 		stored.content = evt.content;
 
 		// Deduplication via existing method
-		if (mergeMessageEvent(evt)) {
+		if (mergeMessageEvent(evt, true)) {
 			persistedEvents.append(stored);
 			result.append(evt);
 		}
@@ -5019,7 +5054,7 @@ QList<MatrixTextEvent> MatrixNetwork::historyBackfill(const QString &roomId, int
 	return result;
 }
 
-bool MatrixNetwork::mergeMessageEvent(const MatrixTextEvent &event)
+bool MatrixNetwork::mergeMessageEvent(const MatrixTextEvent &event, bool fromHistoryBackfill)
 {
 	if (event.eventId.isEmpty())
 		return false;
@@ -5033,7 +5068,10 @@ bool MatrixNetwork::mergeMessageEvent(const MatrixTextEvent &event)
 		const qint64 rightTs = right.timestamp.toLongLong();
 		return leftTs == rightTs ? left.eventId < right.eventId : leftTs < rightTs;
 	});
-	emit messageHistoryChanged(event.roomId, history);
+
+	// A history snapshot replays every event to the UI; new events should be incremental.
+	if (!fromHistoryBackfill)
+		emit messageReceived(event.toBasicMessage());
 	return true;
 }
 
@@ -5679,3 +5717,4 @@ void MatrixNetwork::onReplyError(QNetworkReply *reply)
 	// This is a fallback error handler for all reply types
 	// The actual errors are handled in the specific_*Finished methods above
 }
+

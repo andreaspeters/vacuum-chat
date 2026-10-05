@@ -4,9 +4,13 @@
 #include <interfaces/imessage.h>
 
 #include <QList>
+#include <QHash>
 #include <QString>
+#include <QTimer>
 
 #include <algorithm>
+#include <functional>
+#include <utility>
 
 namespace ProtocolMessageHistory
 {
@@ -17,6 +21,37 @@ enum class TransactionEchoMergeResult
 	RetainedLocalEcho,
 	RestoredLocalEcho,
 	IgnoredLocalEcho
+};
+
+class ConversationRebuildScheduler
+{
+public:
+	explicit ConversationRebuildScheduler(int AIntervalMs = 25) : FIntervalMs(AIntervalMs)
+	{
+		FTimer.setSingleShot(true);
+		QObject::connect(&FTimer, &QTimer::timeout, &FTimer, [this]() {
+			QHash<QString, std::function<void()>> callbacks;
+			callbacks.swap(FCallbacks);
+			for (auto it = callbacks.cbegin(); it != callbacks.cend(); ++it)
+				if (it.value())
+					it.value()();
+		});
+	}
+
+	void request(const QString &AConversationKey, std::function<void()> ACallback)
+	{
+		if (AConversationKey.isEmpty() || !ACallback)
+			return;
+		FCallbacks.insert(AConversationKey, std::move(ACallback));
+		// Keep a fixed batch window so continuous traffic cannot starve a rebuild.
+		if (!FTimer.isActive())
+			FTimer.start(qMax(0, FIntervalMs));
+	}
+
+private:
+	QTimer FTimer;
+	QHash<QString, std::function<void()>> FCallbacks;
+	int FIntervalMs;
 };
 
 inline bool isPendingEncryptedEvent(const BasicMessage &AMessage)
@@ -35,6 +70,48 @@ inline int findMessageIndex(const QList<BasicMessage> &AHistory, const QString &
 	const auto it = std::find_if(AHistory.cbegin(), AHistory.cend(),
 		[&AMessageId](const BasicMessage &message) { return message.messageId() == AMessageId; });
 	return it == AHistory.cend() ? -1 : static_cast<int>(std::distance(AHistory.cbegin(), it));
+}
+
+inline int replaceExistingMessage(QList<BasicMessage> &AHistory, const BasicMessage &AMessage)
+{
+	const int index = findMessageIndex(AHistory, AMessage.messageId());
+	if (index >= 0)
+		AHistory[index] = AMessage;
+	return index;
+}
+
+inline bool hasMediaPayload(const BasicMessage &AMessage)
+{
+	const QVariantMap metadata = AMessage.metadata();
+	const QString messageType = metadata.value(QStringLiteral("msgtype")).toString();
+	if (messageType == QStringLiteral("m.image")) {
+		const QVariant decodedImage = metadata.value(QStringLiteral("decoded_image"));
+		return (decodedImage.isValid() && !decodedImage.isNull()) ||
+			!metadata.value(QStringLiteral("file_path")).toString().isEmpty();
+	}
+	return messageType == QStringLiteral("m.file") &&
+		!metadata.value(QStringLiteral("file_path")).toString().isEmpty();
+}
+
+inline bool isMediaHydrationUpdate(const BasicMessage &AExisting, const BasicMessage &AUpdated)
+{
+	if (AExisting.protocol() != QStringLiteral("matrix") ||
+		AUpdated.protocol() != QStringLiteral("matrix") ||
+		AExisting.messageId().isEmpty() || AExisting.messageId() != AUpdated.messageId() ||
+		AExisting.conversationId() != AUpdated.conversationId())
+		return false;
+	const QVariantMap oldMetadata = AExisting.metadata();
+	const QVariantMap newMetadata = AUpdated.metadata();
+	const QString oldType = oldMetadata.value(QStringLiteral("msgtype")).toString();
+	const QString newType = newMetadata.value(QStringLiteral("msgtype")).toString();
+	if (oldType != newType ||
+		(oldType != QStringLiteral("m.image") && oldType != QStringLiteral("m.file")))
+		return false;
+	const QString oldUrl = oldMetadata.value(QStringLiteral("url")).toString();
+	const QString newUrl = newMetadata.value(QStringLiteral("url")).toString();
+	if (!oldUrl.isEmpty() && oldUrl != newUrl)
+		return false;
+	return !hasMediaPayload(AExisting) && hasMediaPayload(AUpdated);
 }
 
 inline int findTransactionEchoIndex(const QList<BasicMessage> &AHistory, const BasicMessage &AMessage)

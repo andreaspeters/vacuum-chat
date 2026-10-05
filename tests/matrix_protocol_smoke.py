@@ -500,8 +500,8 @@ def test_redacted_matrix_messages_scrub_format_and_preserve_timestamp():
     assert "BasicMessage redactedMessage = *target" in redaction
     assert 'redactedMessage.setBody(QStringLiteral("message deleted"))' in redaction
     assert "sortProtocolMessagesChronologically(*historyIt)" in redaction
-    assert "rebuildProtocolConversation(AWindow, AMessaging, historyKey)" in redaction
-    assert "options.time = AMessage.timestamp().toLocalTime();" in render
+    assert "scheduleProtocolConversationRebuild(AWindow, AMessaging, historyKey," in redaction
+    assert "options.time = SystemTimeZoneCache::toSystemLocalTime(AMessage.timestamp());" in render
     assert "replaceMessage(displayMessageId" not in redaction
 
 def test_matrix_reaction_render_and_send_contract():
@@ -841,9 +841,8 @@ def test_room_avatar_roster_lazy_load_contract():
     network_source = (root / "src/plugins/matrix/matrixnetwork.cpp").read_text()
     avatar_request = network_source.split("void MatrixNetwork::requestAvatar(", 1)[1].split(
         "void MatrixNetwork::requestImage(", 1)[0]
-    assert 'emit avatarImageReceived(key, image);' in avatar_request
+    assert 'emit avatarImageReceived(key, avatarImage);' in avatar_request
     assert "cacheFile.commit()" in avatar_request
-    assert 'emit avatarImageReceived(key, image);' in avatar_request
     avatar_callback = matrix_source.split("void Matrix::onAvatarImageReceived(", 1)[1].split(
         "void Matrix::onDisplayNameReceived(", 1)[0]
     assert "FAvatars->setCustomImageByKey(key, image);" in avatar_callback
@@ -894,9 +893,11 @@ def test_matrix_media_reads_and_decodes_off_ui_lazily():
     assert "QFile::exists" not in avatar_enqueue, "cache probes must be on MatrixNetworkThread"
     assert "loadRoomAvatar(room.id)" not in roster_model, "roster rebuild must not prefetch all room avatars"
     assert "loadRoomAvatar" in avatars_source, "visible avatar data requests should trigger lazy room loads"
-    assert "QImageReader" in image_request and "decoded_image" in image_request, \
-        "image decoding must happen in the Matrix network worker"
-    assert "requested >= 8" in history_loader, "history media hydration must remain bounded"
+    assert "decodeFileAsync(cachePath" in image_request and "decodeDataAsync(data" in image_request \
+        and "decoded_image" in image_request, \
+        "image reads and decoding must use the shared media worker"
+    assert "constexpr int requestLimit = 8" in history_loader and "requested < requestLimit" in history_loader, \
+        "history media hydration must remain bounded"
     assert "event.roomId == FActiveRoomId" in sync_media, "live media for inactive rooms must not be fetched"
     assert "vacuum-media" in renderer and "addResource" in renderer, \
         "unloaded media should be a lazy link and decoded images should use in-memory resources"
@@ -907,19 +908,22 @@ def test_late_hydrated_image_rebuilds_chronological_history():
     root = Path(__file__).resolve().parents[1]
     network = (root / "src/plugins/matrix/matrixnetwork.cpp").read_text()
     handler = (root / "src/plugins/chatmessagehandler/chatmessagehandler.cpp").read_text()
+    render_message = handler.split("void ChatMessageHandler::renderProtocolMessage(", 1)[1].split(
+        "void ChatMessageHandler::renderProtocolHistory(", 1)[0]
     image_request = network.split("void MatrixNetwork::requestImage(", 1)[1].split(
         "void MatrixNetwork::requestHistoricalImages(", 1)[0]
     message_dispatch = handler.split("void ChatMessageHandler::onProtocolMessageReceived(", 1)[1].split(
         "void ChatMessageHandler::onProtocolHistoryLoaded(", 1)[0]
-    duplicate_start = message_dispatch.index("if (duplicate != history.end())")
-    duplicate_end = message_dispatch.index("\n\t\t\t\treturn;\n\t\t\t}\n\t\t\tconst bool outOfOrder", duplicate_start)
+    duplicate_start = message_dispatch.index("if (duplicateIndex >= 0)")
+    duplicate_end = message_dispatch.index("\n\t\tif (FProtocolHistoryLoaded.contains(historyKey))", duplicate_start)
     duplicate_path = message_dispatch[duplicate_start:duplicate_end]
     assert "MatrixTextEvent imageEvent = event;" in image_request
     assert "emit messageReceived(imageEvent.toBasicMessage());" in image_request
-    assert "const bool outOfOrder" in duplicate_path
-    assert "std::next(duplicate) != history.end()" in duplicate_path
-    assert "rebuildProtocolConversation(window, messaging, historyKey)" in duplicate_path
+    assert "ProtocolMessageHistory::isMediaHydrationUpdate" in message_dispatch
+    assert "scheduleProtocolConversationRebuild(window, messaging, historyKey, sender());" in duplicate_path
     assert "renderProtocolMessage(window, messaging, AMessage)" in duplicate_path
+    assert "FProtocolRenderedMessages.insert(prefix + AMessage.messageId());" in render_message
+    assert "FProtocolRenderedMessages.insert(messageKey);" in render_message
     print("  ✓ delayed image hydration rebuilds the timeline at the event's original position")
 
 def test_conversation_history_replay_contract():
@@ -1011,13 +1015,13 @@ def test_matrix_messages_display_full_timestamp():
     modern_template = (root / "resources/simplemessagestyles/modern-chat/Incoming/Content.html").read_text()
     render = handler.split("void ChatMessageHandler::renderProtocolMessage(", 1)[1].split(
         "void ChatMessageHandler::renderProtocolHistory(", 1)[0]
-    assert "options.time = AMessage.timestamp().toLocalTime();" in render
+    assert "options.time = SystemTimeZoneCache::toSystemLocalTime(AMessage.timestamp());" in render
     assert "options.timeFormat" in render and "yyyy-MM-dd hh:mm:ss" in render, \
         "Matrix message metadata must render the date as well as the time"
     fill = style.split("void SimpleMessageStyle::fillContentKeywords(", 1)[1].split(
         "QString SimpleMessageStyle::prepareMessage(", 1)[0]
     assert "shortTimeFormat = AOptions.timeFormat.isEmpty()" in fill and \
-        'AOptions.time.toString(shortTimeFormat)' in fill, \
+        'displayTime.toString(shortTimeFormat)' in fill, \
         "styles using %shortTime% must honor the Matrix full date-time format"
     assert "%shortTime%" in modern_template, "the default modern style must display the formatted timestamp"
     print("  ✓ Matrix messages render full date and time from their timestamp")
@@ -1058,8 +1062,8 @@ def test_matrix_live_event_waits_for_cached_history_before_chat_render():
         "cached and live messages must be sorted together before the first render"
     assert "protocolHistoryLoaded" in handler, \
         "the async history completion must release buffered messages"
-    assert "FProtocolHistoryLoaded" in received and "rebuildProtocolConversation" in received, \
-        "a late out-of-order backfill must trigger a chronological conversation rebuild"
+    assert "FProtocolHistoryLoaded" in received and "scheduleProtocolConversationRebuild" in received, \
+        "a late out-of-order backfill must schedule a chronological conversation rebuild"
     assert "void ChatMessageHandler::rebuildProtocolConversation(" in handler
     # Regression scenario: DB history is yesterday 22:00; the first live event is today 08:00.
     history_and_live = [("live-08", "2025-01-03T08:00:00"),
@@ -1744,7 +1748,7 @@ def test_encrypted_matrix_formatted_body_contract():
     assert 'const QJsonObject messageContent = wasEncrypted ? decryptedContent : eventContent;' in network
     assert 'for (const QString &formattedField : {QStringLiteral("format"), QStringLiteral("formatted_body")})' in network
     assert 'messageContent.value(formattedField).toVariant()' in network
-    assert 'matrixSafeHtml(' in renderer and 'AMessaging->formatEmoticonsForDisplay(formattedBody)' in renderer
+    assert 'matrixSafeHtml(' in renderer and 'AMessaging->formatEmoticonsForDisplay(formattedBodyForDisplay)' in renderer
     print("  ✓ decrypted Matrix formatted_body reaches the sanitized HTML renderer")
 
 def run_smoke_test():

@@ -1,1 +1,1 @@
-#define SVN_REVISION "Unversioned directory"
+#define SVN_REVISION "Nicht versioniertes Verzeichnis"

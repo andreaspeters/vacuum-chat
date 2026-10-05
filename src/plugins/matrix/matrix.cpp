@@ -825,6 +825,12 @@ void Matrix::onCachedRoomsLoadFailed(const QString &error)
 void Matrix::onCachedHistoryLoaded(const QString &roomId,
 	const QList<MatrixTimelineEvent> &events)
 {
+	if (FMatrixNetwork && !events.isEmpty()) {
+		MatrixNetwork *network = FMatrixNetwork;
+		QMetaObject::invokeMethod(network, [network, roomId, events]() {
+			network->requestHistoricalImages(roomId, events);
+		}, Qt::QueuedConnection);
+	}
 	QList<BasicMessage> cachedMessages;
 	for (const MatrixTimelineEvent &event : events) {
 		BasicMessage message(event.eventId, roomId, event.sender, QString(), event.content,

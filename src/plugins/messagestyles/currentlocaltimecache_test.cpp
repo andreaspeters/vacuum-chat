@@ -1,4 +1,4 @@
-#include "currentlocaltimecache.h"
+#include <utils/systemtimezonecache.h>
 
 #include <cstdio>
 
@@ -13,7 +13,7 @@ bool check(bool condition, const char *message)
 
 int main()
 {
-	CurrentLocalTimeCache cache;
+	SystemTimeZoneCache::CurrentDateTimeCache cache;
 	qint64 epochSecond = 1791240000;
 	int localTimeCalls = 0;
 	const QDateTime firstLocalTime(QDate(2026, 10, 5), QTime(12, 0), QTimeZone::utc());

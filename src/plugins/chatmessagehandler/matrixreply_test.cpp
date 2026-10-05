@@ -59,5 +59,21 @@ int main()
 		"reply preview uses the shared cached image as a small avatar");
 	passed &= check(html.contains(QStringLiteral("color:#9a9a9a")),
 		"reply excerpt uses a muted text color");
+
+	const QString plainFallback = QStringLiteral(
+		"> <@andreas:matrix.aventer.biz> Nimmst auch im sport an die hände\n"
+		"> zweite zitierte Zeile\n\nAhh okay");
+	passed &= check(MatrixReply::stripFallbackText(plainFallback) == QStringLiteral("Ahh okay"),
+		"plain Matrix fallback quote is removed while the actual reply remains");
+	const QString ordinaryQuote = QStringLiteral("> an ordinary quote\n\nreply text");
+	passed &= check(MatrixReply::stripFallbackText(ordinaryQuote) == ordinaryQuote,
+		"ordinary user blockquotes without a Matrix sender are preserved");
+	const QString htmlFallback = QStringLiteral(
+		"<mx-reply><blockquote>quoted text</blockquote></mx-reply><p>Ahh okay</p>");
+	passed &= check(MatrixReply::stripFallbackHtml(htmlFallback) == QStringLiteral("<p>Ahh okay</p>"),
+		"formatted Matrix mx-reply fallback is removed before rendering");
+	const QString incompleteHtmlFallback = QStringLiteral("<mx-reply>incomplete quote");
+	passed &= check(MatrixReply::stripFallbackHtml(incompleteHtmlFallback) == incompleteHtmlFallback,
+		"incomplete mx-reply markup is left intact rather than truncating the answer");
 	return passed ? 0 : 1;
 }

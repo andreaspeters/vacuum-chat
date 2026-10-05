@@ -3,9 +3,48 @@
 
 #include <QDateTime>
 #include <QByteArray>
+#include <QMutex>
+#include <QMutexLocker>
 #include <QTimeZone>
 
 namespace SystemTimeZoneCache {
+class CurrentDateTimeCache
+{
+public:
+	template <typename EpochSecondsProvider, typename LocalTimeProvider>
+	QDateTime currentTime(EpochSecondsProvider epochSecondsProvider,
+		LocalTimeProvider localTimeProvider) const
+	{
+		QMutexLocker<QMutex> locker(&FMutex);
+		const qint64 epochSecond = epochSecondsProvider();
+		if (!FHasCachedTime || epochSecond != FCachedEpochSecond) {
+			FCachedTime = localTimeProvider();
+			FCachedEpochSecond = epochSecond;
+			FHasCachedTime = true;
+		}
+		return FCachedTime;
+	}
+
+private:
+	mutable QMutex FMutex;
+	mutable bool FHasCachedTime = false;
+	mutable qint64 FCachedEpochSecond = 0;
+	mutable QDateTime FCachedTime;
+};
+
+inline QDateTime currentDateTime()
+{
+	static CurrentDateTimeCache cache;
+	return cache.currentTime(
+		[]() { return QDateTime::currentSecsSinceEpoch(); },
+		[]() { return QDateTime::currentDateTime(); });
+}
+
+inline QDate currentDate()
+{
+	return currentDateTime().date();
+}
+
 inline bool matchesLocalTime(const QDateTime &utcTime, const QTimeZone &timeZone)
 {
 	const QDateTime expected = utcTime.toLocalTime();

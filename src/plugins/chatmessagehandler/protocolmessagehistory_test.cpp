@@ -1,6 +1,9 @@
 #include "protocolmessagehistory.h"
 
+#include <QCoreApplication>
+#include <QEventLoop>
 #include <QTimeZone>
+#include <QTimer>
 #include <iostream>
 
 namespace {
@@ -12,8 +15,9 @@ bool check(bool condition, const char *description)
 }
 }
 
-int main()
+int main(int argc, char **argv)
 {
+	QCoreApplication app(argc, argv);
 	const QString transactionId = QStringLiteral("txn-reply-1");
 	BasicMessage localEcho(QStringLiteral("txn-reply-1"), QStringLiteral("!room:test"),
 		QStringLiteral("@me:test"), QString(), QStringLiteral("answer"),
@@ -133,5 +137,69 @@ int main()
 	passed &= check(ProtocolMessageHistory::requiresTimelineRebuild(-1, 1, 3, false) &&
 		!ProtocolMessageHistory::requiresTimelineRebuild(-1, 2, 3, false),
 		"an unrendered item rebuilds only when it belongs before the visible tail");
+
+	BasicMessage imagePlaceholder(QStringLiteral("$old-image"), QStringLiteral("!room:test"),
+		QStringLiteral("@other:test"), QString(), QStringLiteral("photo.png"),
+		QDateTime::fromMSecsSinceEpoch(3000, QTimeZone::utc()),
+		QStringLiteral("matrix"), BasicMessage::Incoming);
+	imagePlaceholder.setMetadata({{QStringLiteral("msgtype"), QStringLiteral("m.image")},
+		{QStringLiteral("historical"), true},
+		{QStringLiteral("url"), QStringLiteral("mxc://media.example.org/photo")}});
+	BasicMessage hydratedImage = imagePlaceholder;
+	hydratedImage.setMetadata({{QStringLiteral("msgtype"), QStringLiteral("m.image")},
+		{QStringLiteral("historical"), true}, {QStringLiteral("file_path"), QStringLiteral("/cache/photo.bin")},
+		{QStringLiteral("url"), QStringLiteral("mxc://media.example.org/photo")},
+		{QStringLiteral("decoded_image"), QStringLiteral("decoded-payload")}});
+	passed &= check(ProtocolMessageHistory::isMediaHydrationUpdate(imagePlaceholder, hydratedImage),
+		"same-event image payload is recognized as media hydration");
+	passed &= check(!ProtocolMessageHistory::isMediaHydrationUpdate(hydratedImage, hydratedImage),
+		"repeated image hydration is idempotent");
+	BasicMessage differentImage = hydratedImage;
+	differentImage.setMessageId(QStringLiteral("$different-image"));
+	passed &= check(!ProtocolMessageHistory::isMediaHydrationUpdate(imagePlaceholder, differentImage),
+		"a different Matrix event is not treated as media hydration");
+	QList<BasicMessage> partiallyLoadedHistory{imagePlaceholder, laterMessage};
+	const int replacedImageIndex = ProtocolMessageHistory::replaceExistingMessage(
+		partiallyLoadedHistory, hydratedImage);
+	passed &= check(replacedImageIndex == 0 && partiallyLoadedHistory.size() == 2 &&
+		partiallyLoadedHistory.first().messageId() == QStringLiteral("$old-image") &&
+		partiallyLoadedHistory.first().metadata().value(QStringLiteral("decoded_image")).toString() ==
+			QStringLiteral("decoded-payload") &&
+		partiallyLoadedHistory.last().messageId() == laterMessage.messageId(),
+		"hydrating a historical image replaces its existing event without appending it");
+	passed &= check(ProtocolMessageHistory::replaceExistingMessage(partiallyLoadedHistory,
+		serverEcho) == -1 && partiallyLoadedHistory.size() == 2,
+		"a different event ID is not mistaken for a media update");
+
+	ProtocolMessageHistory::ConversationRebuildScheduler rebuildScheduler(25);
+	QEventLoop rebuildLoop;
+	int staleWindowRebuilds = 0;
+	int currentWindowRebuilds = 0;
+	int otherConversationRebuilds = 0;
+	auto finishRebuildBatch = [&rebuildLoop, &currentWindowRebuilds, &otherConversationRebuilds]() {
+		if (currentWindowRebuilds + otherConversationRebuilds == 2)
+			rebuildLoop.quit();
+	};
+	rebuildScheduler.request(QStringLiteral("matrix\n!room:test"), [&staleWindowRebuilds]() {
+		++staleWindowRebuilds;
+	});
+	rebuildScheduler.request(QStringLiteral("matrix\n!room:test"), [&currentWindowRebuilds, &finishRebuildBatch]() {
+		++currentWindowRebuilds;
+		finishRebuildBatch();
+	});
+	rebuildScheduler.request(QStringLiteral("matrix\n!other:test"), [&otherConversationRebuilds, &finishRebuildBatch]() {
+		++otherConversationRebuilds;
+		finishRebuildBatch();
+	});
+	passed &= check(staleWindowRebuilds == 0 && currentWindowRebuilds == 0 &&
+		otherConversationRebuilds == 0,
+		"timeline rebuilds are deferred until the bounded batch timer fires");
+	QTimer::singleShot(1000, &rebuildLoop, &QEventLoop::quit);
+	rebuildLoop.exec();
+	passed &= check(staleWindowRebuilds == 0 && currentWindowRebuilds == 1,
+		"a burst schedules only the latest rebuild callback for that conversation");
+	passed &= check(otherConversationRebuilds == 1,
+		"rebuilds for distinct conversations are both preserved");
+
 	return passed ? 0 : 1;
 }

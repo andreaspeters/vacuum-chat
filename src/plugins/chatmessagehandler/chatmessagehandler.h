@@ -1,6 +1,8 @@
 #ifndef CHATMESSAGEHANDLER_H
 #define CHATMESSAGEHANDLER_H
 
+#include "protocolmessagehistory.h"
+
 #define CHATMESSAGEHANDLER_UUID QUuid("{b60cc0e4-8006-4909-b926-fcb3cbc506f0}")
 
 #include <QTimer>
@@ -115,6 +117,8 @@ protected:
 	void renderProtocolHistory(IChatWindow *AWindow, IProtocolMessaging *AMessaging);
 	void rebuildProtocolConversation(IChatWindow *AWindow, IProtocolMessaging *AMessaging,
 		const QString &AHistoryKey);
+	void scheduleProtocolConversationRebuild(IChatWindow *AWindow, IProtocolMessaging *AMessaging,
+		const QString &AHistoryKey, QObject *AProtocolObject);
 	void sortProtocolMessagesChronologically(QList<BasicMessage> &AMessages) const;
 	void addProtocolReaction(IChatWindow *AWindow, IProtocolMessaging *AMessaging,
 		const BasicMessage &AMessage);
@@ -187,6 +191,7 @@ private:
 	QSet<QString> FProtocolHistoryLoaded;
 	QMap<QString, QList<BasicMessage>> FPendingProtocolHistoryMessages;
 	QMap<QString, QList<BasicMessage>> FProtocolConversationMessages;
+	ProtocolMessageHistory::ConversationRebuildScheduler FProtocolRebuildScheduler;
 private:
 	QMap<QString, IChatWindow *> FHistoryRequests;
 	QMap<IChatWindow *, QList<Message> > FPendingMessages;

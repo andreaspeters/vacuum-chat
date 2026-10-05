@@ -599,29 +599,32 @@ void ChatMessageHandler::onProtocolMessageReceived(const BasicMessage &AMessage)
 				pending.append(AMessage);
 			return;
 		}
-		if (FProtocolHistoryLoaded.contains(historyKey)) {
-			QList<BasicMessage> &history = FProtocolConversationMessages[historyKey];
-			auto duplicate = std::find_if(history.begin(), history.end(), [&AMessage](const BasicMessage &message) {
-				return !AMessage.messageId().isEmpty() && message.messageId() == AMessage.messageId();
-			});
-			if (duplicate != history.end()) {
-				const QString prefix = messaging->streamId() + QChar('\n') +
-					AMessage.conversationId() + QChar('\n');
-				const QString messageKey = prefix + AMessage.messageId();
-				if (!FProtocolRenderedMessages.contains(messageKey) &&
-					!FProtocolRenderedMessages.contains(messageKey + QStringLiteral("|image"))) {
-					// A late media payload can make an older event renderable only after
-					// later messages are already displayed. Rebuild from sorted history.
-					const bool outOfOrder = std::next(duplicate) != history.end();
-					*duplicate = AMessage;
-					sortProtocolMessagesChronologically(history);
-					if (outOfOrder)
-						rebuildProtocolConversation(window, messaging, historyKey);
-					else
-						renderProtocolMessage(window, messaging, AMessage);
-				}
-				return;
+		QList<BasicMessage> &history = FProtocolConversationMessages[historyKey];
+		const int existingIndex = ProtocolMessageHistory::findMessageIndex(history,
+			AMessage.messageId());
+		const bool mediaHydration = existingIndex >= 0 &&
+			ProtocolMessageHistory::isMediaHydrationUpdate(history.at(existingIndex), AMessage);
+		const int duplicateIndex = ProtocolMessageHistory::replaceExistingMessage(history, AMessage);
+		if (duplicateIndex >= 0) {
+			const QString prefix = messaging->streamId() + QChar('\n') +
+				AMessage.conversationId() + QChar('\n');
+			const QString messageKey = prefix + AMessage.messageId();
+			const bool alreadyRendered = FProtocolRenderedMessages.contains(messageKey) ||
+				FProtocolRenderedMessages.contains(messageKey + QStringLiteral("|image"));
+			sortProtocolMessagesChronologically(history);
+			if (mediaHydration) {
+				// Replace the rendered placeholder by rebuilding the timeline from the updated event.
+				scheduleProtocolConversationRebuild(window, messaging, historyKey, sender());
+			} else if (!alreadyRendered) {
+				const bool outOfOrder = duplicateIndex + 1 < history.size();
+				if (outOfOrder)
+					scheduleProtocolConversationRebuild(window, messaging, historyKey, sender());
+				else
+					renderProtocolMessage(window, messaging, AMessage);
 			}
+			return;
+		}
+		if (FProtocolHistoryLoaded.contains(historyKey)) {
 			const int previousIndex = ProtocolMessageHistory::findTransactionEchoIndex(history, AMessage);
 			const QString previousMessageId = previousIndex >= 0 ?
 				history.at(previousIndex).messageId() : QString();
@@ -648,7 +651,7 @@ void ChatMessageHandler::onProtocolMessageReceived(const BasicMessage &AMessage)
 				}
 				if (ProtocolMessageHistory::requiresTimelineRebuild(previousIndex, currentIndex,
 					history.size(), previouslyRendered)) {
-					rebuildProtocolConversation(window, messaging, historyKey);
+					scheduleProtocolConversationRebuild(window, messaging, historyKey, sender());
 				} else if (transactionMerge ==
 					ProtocolMessageHistory::TransactionEchoMergeResult::ReplacedLocalEcho ||
 					transactionMerge == ProtocolMessageHistory::TransactionEchoMergeResult::RestoredLocalEcho) {
@@ -657,19 +660,17 @@ void ChatMessageHandler::onProtocolMessageReceived(const BasicMessage &AMessage)
 					renderProtocolMessage(window, messaging, history.at(currentIndex));
 				}
 				return;
+			}
 		}
 		const bool outOfOrder = !history.isEmpty() && AMessage.timestamp().isValid() &&
-				history.last().timestamp().isValid() &&
-				AMessage.timestamp() < history.last().timestamp();
-			history.append(AMessage);
-			sortProtocolMessagesChronologically(history);
-			if (outOfOrder)
-				rebuildProtocolConversation(window, messaging, historyKey);
-			else
-				renderProtocolMessage(window, messaging, AMessage);
-			return;
-		}
-		renderProtocolMessage(window, messaging, AMessage);
+			history.last().timestamp().isValid() &&
+			AMessage.timestamp() < history.last().timestamp();
+		history.append(AMessage);
+		sortProtocolMessagesChronologically(history);
+		if (outOfOrder) {
+			scheduleProtocolConversationRebuild(window, messaging, historyKey, sender());
+		} else
+			renderProtocolMessage(window, messaging, AMessage);
 		return;
 	}
 }
@@ -729,7 +730,7 @@ void ChatMessageHandler::onProtocolHistoryLoaded(const QString &ARoomId)
 			}
 	}
 	if (hasOutOfOrderNewMessage) {
-		rebuildProtocolConversation(window, messaging, historyKey);
+		scheduleProtocolConversationRebuild(window, messaging, historyKey, sender());
 		return;
 	}
 	for (const BasicMessage &message : uniqueMessages)
@@ -797,7 +798,8 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 					}), historyIt->end());
 				if (changed) {
 					sortProtocolMessagesChronologically(*historyIt);
-					rebuildProtocolConversation(AWindow, AMessaging, historyKey);
+					scheduleProtocolConversationRebuild(AWindow, AMessaging, historyKey,
+						dynamic_cast<QObject *>(AMessaging));
 				}
 			}
 		}
@@ -898,11 +900,15 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 	const QString replyHtml = MatrixReply::isEventId(replyEventId)
 		? buildProtocolReplyPreviewHtml(FProtocolConversationMessages.value(historyKey),
 			AWindow, AMessaging, replyEventId, this) : QString();
+	const QString bodyForDisplay = !replyHtml.isEmpty()
+		? MatrixReply::stripFallbackText(body) : body;
+	const QString formattedBodyForDisplay = !replyHtml.isEmpty()
+		? MatrixReply::stripFallbackHtml(formattedBody) : formattedBody;
 
 	if (messageType == QStringLiteral("m.text") &&
-		messageFormat == QStringLiteral("org.matrix.custom.html") && !formattedBody.isEmpty())
+		messageFormat == QStringLiteral("org.matrix.custom.html") && !formattedBodyForDisplay.isEmpty())
 		AWindow->viewWidget()->appendHtml(replyHtml + matrixHighlightMentions(matrixSafeHtml(
-			AMessaging->formatEmoticonsForDisplay(formattedBody))), options);
+			AMessaging->formatEmoticonsForDisplay(formattedBodyForDisplay))), options);
 	else if (messageType == QStringLiteral("m.image") && !decodedImage.isNull() && !resourceUrl.isEmpty())
 	{
 		QTextEdit *view = qobject_cast<QTextEdit *>(AWindow->viewWidget()->styleWidget());
@@ -949,15 +955,14 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 	// the text in the legacy Message type and sends it through the XMPP
 	// MessageProcessor, which can discard the body because no legacy message
 	// type is set.  Render the already selected plain text directly instead.
-	const QString displayBody = AMessaging->formatEmoticonsForDisplay(body);
+	const QString displayBody = AMessaging->formatEmoticonsForDisplay(bodyForDisplay);
 	const QString escapedBody = displayBody.toHtmlEscaped().replace(QStringLiteral("\n"),
 		QStringLiteral("<br/>"));
 	AWindow->viewWidget()->appendHtml(replyHtml + matrixHighlightMentions(escapedBody), options);
 	}
-	if (!(messageType == QStringLiteral("m.image") && decodedImage.isNull()) &&
-		!(messageType == QStringLiteral("m.file") &&
-			AMessage.metadata().value(QStringLiteral("file_path")).toString().isEmpty()))
-		FProtocolRenderedMessages.insert(messageKey);
+	if (!AMessage.messageId().isEmpty())
+		FProtocolRenderedMessages.insert(prefix + AMessage.messageId());
+	FProtocolRenderedMessages.insert(messageKey);
 	FProtocolEventMessageIds.insert(eventKey, AMessage.messageId());
 	FProtocolMessageDirections.insert(eventKey, options.direction == IMessageContentOptions::DirectionOut);
 	FProtocolMessageRelationTypes.insert(eventKey,
@@ -1075,6 +1080,26 @@ void ChatMessageHandler::rebuildProtocolConversation(IChatWindow *AWindow,
 	const QList<BasicMessage> history = FProtocolConversationMessages.value(AHistoryKey);
 	for (const BasicMessage &message : history)
 		renderProtocolMessage(AWindow, AMessaging, message);
+}
+
+void ChatMessageHandler::scheduleProtocolConversationRebuild(IChatWindow *AWindow,
+	IProtocolMessaging *AMessaging, const QString &AHistoryKey, QObject *AProtocolObject)
+{
+	if (!AWindow || !AMessaging || AHistoryKey.isEmpty() || !AProtocolObject)
+		return;
+
+	const QPointer<QObject> windowObject(AWindow->instance());
+	const QPointer<QObject> protocolObject(AProtocolObject);
+	if (!windowObject || !protocolObject)
+		return;
+
+	FProtocolRebuildScheduler.request(AHistoryKey,
+		[this, windowObject, protocolObject, AHistoryKey]() {
+			IChatWindow *window = qobject_cast<IChatWindow *>(windowObject.data());
+			IProtocolMessaging *messaging = qobject_cast<IProtocolMessaging *>(protocolObject.data());
+			if (window && messaging)
+				rebuildProtocolConversation(window, messaging, AHistoryKey);
+		});
 }
 
 void ChatMessageHandler::addProtocolReaction(IChatWindow *AWindow, IProtocolMessaging *AMessaging,
