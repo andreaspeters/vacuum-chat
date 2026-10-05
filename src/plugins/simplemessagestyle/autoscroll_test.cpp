@@ -75,7 +75,6 @@ bool checkLastBubbleFrame(StyleViewer *view, const QColor &fill, const QString &
     image.fill(Qt::white);
     QPainter painter(&image);
     view->viewport()->render(&painter);
-
     const int centerX = bubbleRect.center().x();
     const int centerY = bubbleRect.center().y();
     const QPoint corners[] = {bubbleRect.topLeft(), bubbleRect.topRight(),
@@ -89,10 +88,18 @@ bool checkLastBubbleFrame(StyleViewer *view, const QColor &fill, const QString &
     QTextBrowser *content = frame->findChild<QTextBrowser *>(QStringLiteral("modernChatBubbleContent"));
     const bool containsText = content && content->toPlainText().contains(messageText);
     const bool transparentContent = content && !content->viewport()->autoFillBackground() &&
-        image.pixelColor(bubbleRect.left() + 7, centerY) == fill;
+        image.pixelColor(bubbleRect.right() - 7, centerY) == fill;
     bool passed = check(rounded, description);
     passed = check(containsText, "QFrame rich-text child preserves message text") && passed;
     passed = check(transparentContent, "QFrame rich-text child background is transparent") && passed;
+    if (content)
+    {
+        const qreal heightSlack = frame->height() - content->document()->size().height();
+        if (heightSlack < 8.0 || heightSlack > 18.0)
+            std::cerr << "bubble vertical padding=" << heightSlack << "px; expected 8–18px\n";
+        passed = check(heightSlack >= 8.0 && heightSlack <= 18.0,
+            "bubble height contains only its intended vertical padding") && passed;
+    }
     return passed;
 }
 
