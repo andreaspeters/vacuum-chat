@@ -20,6 +20,13 @@
 #include <interfaces/iprotocolnotifications.h>
 #include <interfaces/iprotocolpresence.h>
 
+namespace MatrixTimestamps {
+inline QDateTime fromUnixMilliseconds(qint64 timestamp)
+{
+	return QDateTime::fromMSecsSinceEpoch(timestamp, QTimeZone::utc());
+}
+}
+
 struct MatrixTextEvent {
 	QString eventId;
 	QString roomId;
@@ -34,7 +41,7 @@ struct MatrixTextEvent {
 	BasicMessage toBasicMessage() const
 	{
 		return BasicMessage(eventId, roomId, userId, QString(), content,
-			QDateTime::fromMSecsSinceEpoch(timestamp.toLongLong(), QTimeZone::utc()),
+			MatrixTimestamps::fromUnixMilliseconds(timestamp.toLongLong()),
 			QStringLiteral("matrix"), BasicMessage::Incoming).setMetadata(metadata);
 	}
 };

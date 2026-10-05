@@ -828,7 +828,7 @@ void Matrix::onCachedHistoryLoaded(const QString &roomId,
 	QList<BasicMessage> cachedMessages;
 	for (const MatrixTimelineEvent &event : events) {
 		BasicMessage message(event.eventId, roomId, event.sender, QString(), event.content,
-			QDateTime::fromMSecsSinceEpoch(event.originTs), QStringLiteral("matrix"),
+			MatrixTimestamps::fromUnixMilliseconds(event.originTs), QStringLiteral("matrix"),
 			BasicMessage::Incoming);
 		QVariantMap metadata;
 		for (auto it = event.metadata.constBegin(); it != event.metadata.constEnd(); ++it)
@@ -1408,7 +1408,7 @@ void Matrix::onNetworkNotificationEvent(const MatrixNotificationEvent &event)
 	notification.conversationId = event.roomId;
 	notification.title = event.sender;
 	notification.protocol = protocol();
-	notification.timestamp = QDateTime::fromMSecsSinceEpoch(event.timestamp);
+	notification.timestamp = MatrixTimestamps::fromUnixMilliseconds(event.timestamp);
 	const QString membership = event.content.value(QStringLiteral("membership")).toString();
 	if (event.type == QStringLiteral("m.room.member") &&
 		event.content.value(QStringLiteral("membership")).toString() == QStringLiteral("invite")) {

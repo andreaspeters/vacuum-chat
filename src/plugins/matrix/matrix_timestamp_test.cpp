@@ -16,9 +16,14 @@ int main()
 	const bool preservesEpoch = message.timestamp().toMSecsSinceEpoch() == epochMs;
 	const bool hasExplicitZone = message.timestamp().timeSpec() != Qt::LocalTime &&
 		message.timestamp().timeZone() == QTimeZone::utc();
+	const QDateTime cachedHistoryTimestamp = MatrixTimestamps::fromUnixMilliseconds(epochMs);
+	const bool historyUsesExplicitUtc = cachedHistoryTimestamp.timeSpec() != Qt::LocalTime &&
+		cachedHistoryTimestamp.timeZone() == QTimeZone::utc();
 	if (!preservesEpoch)
 		std::cerr << "Matrix event timestamp changed its epoch value\n";
 	if (!hasExplicitZone)
 		std::cerr << "Matrix event timestamp must be represented in explicit UTC\n";
-	return preservesEpoch && hasExplicitZone ? 0 : 1;
+	if (!historyUsesExplicitUtc)
+		std::cerr << "Cached Matrix event timestamps must be represented in explicit UTC\n";
+	return preservesEpoch && hasExplicitZone && historyUsesExplicitUtc ? 0 : 1;
 }
