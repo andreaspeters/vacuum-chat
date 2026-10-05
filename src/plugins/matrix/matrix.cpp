@@ -824,7 +824,6 @@ void Matrix::onCachedRoomsLoadFailed(const QString &error)
 void Matrix::onCachedHistoryLoaded(const QString &roomId,
 	const QList<MatrixTimelineEvent> &events)
 {
-	QList<MatrixTimelineEvent> imageEvents;
 	QList<BasicMessage> cachedMessages;
 	for (const MatrixTimelineEvent &event : events) {
 		BasicMessage message(event.eventId, roomId, event.sender, QString(), event.content,
@@ -838,9 +837,6 @@ void Matrix::onCachedHistoryLoaded(const QString &roomId,
 			FNetworkUserId == event.sender);
 		message.setMetadata(metadata);
 		cachedMessages.append(message);
-		if (event.messageType == QStringLiteral("m.image") ||
-			event.messageType == QStringLiteral("m.file"))
-			imageEvents.append(event);
 	}
 	const QList<BasicMessage> pendingMessages = FPendingHistoryMessages.take(roomId);
 	const QList<BasicMessage> mergedMessages =
@@ -853,12 +849,6 @@ void Matrix::onCachedHistoryLoaded(const QString &roomId,
 	} else {
 		finishHistoryLoad(roomId);
 	}
-	if (FMatrixNetwork && !imageEvents.isEmpty())
-		QMetaObject::invokeMethod(FMatrixNetwork,
-			[this, imageEvents]() {
-				if (FMatrixNetwork)
-					FMatrixNetwork->requestHistoricalImages(imageEvents);
-			}, Qt::QueuedConnection);
 	if (!FCachedHistoryBatchScheduled) {
 		FCachedHistoryBatchScheduled = true;
 		QTimer::singleShot(0, this, &Matrix::emitCachedHistoryBatch);

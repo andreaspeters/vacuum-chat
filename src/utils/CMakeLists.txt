@@ -110,4 +110,12 @@ if (BUILD_TESTING)
 		"${CMAKE_SOURCE_DIR}/src")
 	target_link_libraries(messagenotificationmute_tests PRIVATE
 		${VACUUM_UTILS_NAME} Qt6::Xml)
+
+	add_executable(image_load_scheduler_tests EXCLUDE_FROM_ALL
+		imageloadscheduler_test.cpp)
+	target_compile_features(image_load_scheduler_tests PRIVATE cxx_std_11)
+	target_include_directories(image_load_scheduler_tests PRIVATE
+		"${CMAKE_SOURCE_DIR}/src")
+	target_link_libraries(image_load_scheduler_tests PRIVATE
+		${VACUUM_UTILS_NAME} Qt6::Core Qt6::Gui)
 endif()

@@ -2,6 +2,7 @@
 #define AVATARS_H
 
 #include <QDir>
+#include <QSet>
 #include <definitions/namespaces.h>
 #include <definitions/actiongroups.h>
 #include <definitions/stanzahandlerorders.h>
@@ -144,6 +145,8 @@ private:
 	QMap<Jid, QString> FStreamAvatars;
 	mutable QHash<QString, QMap<QSize,QImage> > FAvatarImages;
 	mutable QHash<QString, QMap<QSize,QImage> > FGrayAvatarImages;
+	mutable QSet<QString> FPendingAvatarImages;
+	mutable QSet<QString> FFailedAvatarImages;
 };
 
 #endif // AVATARS_H

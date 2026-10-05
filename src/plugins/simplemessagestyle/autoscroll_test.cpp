@@ -1,9 +1,14 @@
 #include <QApplication>
+#include <QDateTime>
 #include <QEventLoop>
+#include <QImage>
 #include <QKeyEvent>
 #include <QNetworkAccessManager>
 #include <QResizeEvent>
+#include <QRegularExpression>
 #include <QScrollBar>
+#include <QTemporaryDir>
+#include <QTimeZone>
 #include <QTimer>
 #include <QWheelEvent>
 #include <iostream>
@@ -168,6 +173,102 @@ int main(int argc, char **argv)
     waitForTimeout(180);
     passed &= check(scrollBar->value() < scrollBar->maximum(),
         "keyboard scrolling up also cancels pending automatic scrolling");
+
+    style.changeOptions(view, styleOptions, true);
+    IMessageContentOptions groupedOptions;
+    groupedOptions.kind = IMessageContentOptions::KindMessage;
+    groupedOptions.senderId = QStringLiteral("peer");
+    groupedOptions.senderName = QStringLiteral("Peer");
+    groupedOptions.timeFormat = QStringLiteral("HH:mm");
+    groupedOptions.time = QDateTime(QDate(2026, 10, 4), QTime(12, 34), QTimeZone::utc());
+    style.appendContent(view, QStringLiteral("first"), groupedOptions);
+    groupedOptions.time = groupedOptions.time.addSecs(60);
+    style.appendContent(view, QStringLiteral("consecutive"), groupedOptions);
+    groupedOptions.time = groupedOptions.time.addSecs(25 * 60);
+    style.appendContent(view, QStringLiteral("later"), groupedOptions);
+    groupedOptions.senderId = QStringLiteral("another-peer");
+    groupedOptions.time = groupedOptions.time.addSecs(60);
+    style.appendContent(view, QStringLiteral("new sender"), groupedOptions);
+    const QString groupedHtml = view->document()->toHtml();
+    passed &= check(groupedHtml.contains(QStringLiteral("12:34")),
+        "the first message in a consecutive group displays its time");
+    passed &= check(!groupedHtml.contains(QStringLiteral("12:35")),
+        "a consecutive message from the same sender omits its time");
+    passed &= check(groupedHtml.contains(QStringLiteral("13:00")) &&
+        groupedHtml.contains(QStringLiteral("13:01")),
+        "a later message or a new sender starts a timestamped group");
+
+    QTemporaryDir avatarDirectory;
+    if (!avatarDirectory.isValid())
+    {
+        std::cerr << "avatar image fixture directory could not be created\n";
+        delete view;
+        return 2;
+    }
+    QImage avatarImage(16, 16, QImage::Format_ARGB32_Premultiplied);
+    avatarImage.fill(Qt::magenta);
+    const QString avatarPath = avatarDirectory.filePath(QStringLiteral("sender.png"));
+    if (!avatarImage.save(avatarPath))
+    {
+        std::cerr << "avatar image fixture could not be saved\n";
+        delete view;
+        return 2;
+    }
+
+    SimpleMessageStyle avatarStyle(QStringLiteral(AVATAR_STYLE_PATH), &networkAccessManager, nullptr);
+    if (!avatarStyle.isValid())
+    {
+        std::cerr << "avatar message-style fixture is invalid\n";
+        delete view;
+        return 2;
+    }
+    IMessageStyleOptions avatarStyleOptions;
+    avatarStyleOptions.extended.insert(MSO_STYLE_ID, avatarStyle.styleId());
+    avatarStyleOptions.extended.insert(MSO_VARIANT,
+        avatarStyle.infoValues().value(MSIV_DEFAULT_VARIANT).toString());
+    StyleViewer *avatarView = qobject_cast<StyleViewer *>(
+        avatarStyle.createWidget(avatarStyleOptions, nullptr));
+    if (!avatarView)
+    {
+        std::cerr << "avatar message-style widget was not created\n";
+        delete view;
+        return 2;
+    }
+    IMessageContentOptions avatarOptions;
+    avatarOptions.kind = IMessageContentOptions::KindMessage;
+    avatarOptions.senderId = QStringLiteral("same-user");
+    avatarOptions.senderName = QStringLiteral("Same User");
+    avatarOptions.senderAvatar = avatarPath;
+    avatarOptions.time = QDateTime::currentDateTime();
+    avatarOptions.timeFormat = QStringLiteral("HH:mm");
+    avatarStyle.appendContent(avatarView, QStringLiteral("avatar message one"), avatarOptions);
+    avatarOptions.time = avatarOptions.time.addSecs(3 * 60);
+    avatarStyle.appendContent(avatarView, QStringLiteral("avatar message two"), avatarOptions);
+    application.processEvents();
+
+    const QString avatarHtml = avatarView->document()->toHtml();
+    passed &= check(avatarHtml.count(QStringLiteral("vacuum-avatar:")) == 2,
+        "both messages from the same user reference one shared avatar resource");
+    const QRegularExpression avatarResourceExpression(QStringLiteral("src=\\\"(vacuum-avatar:[^\\\"]+)\\\""));
+    const QRegularExpressionMatch avatarResourceMatch = avatarResourceExpression.match(avatarHtml);
+    passed &= check(avatarResourceMatch.hasMatch(),
+        "message avatars use a shared in-memory resource URL instead of a file path");
+    passed &= check(!avatarHtml.contains(avatarPath),
+        "message HTML does not reopen the sender avatar file for each message");
+    if (avatarResourceMatch.hasMatch())
+    {
+        const QUrl avatarResourceUrl(avatarResourceMatch.captured(1));
+        waitForTimeout(1500);
+        const QImage loadedAvatar = avatarView->document()->resource(
+            QTextDocument::ImageResource, avatarResourceUrl).value<QImage>();
+        passed &= check(!loadedAvatar.isNull(),
+            "the shared message avatar resource is populated asynchronously");
+        const QImage reusedAvatar = avatarView->document()->resource(
+            QTextDocument::ImageResource, avatarResourceUrl).value<QImage>();
+        passed &= check(loadedAvatar.cacheKey() == reusedAvatar.cacheKey(),
+            "repeated messages reuse the same decoded avatar image object");
+    }
+    delete avatarView;
 
     delete view;
     return passed ? 0 : 1;

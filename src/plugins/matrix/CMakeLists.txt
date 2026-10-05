@@ -66,7 +66,7 @@ if (BUILD_TESTING)
 			matrixavatarcache_test.cpp matrixnetwork.cpp matrixdatabase.cpp matrixdatabaseworker.cpp
 			matrixolm.cpp matrixssss.cpp matrixdirectroom.cpp matrixpublicrooms.cpp)
 		target_link_libraries(matrix_avatar_cache_tests PRIVATE
-			Qt6::Core Qt6::Gui Qt6::Network Qt6::Sql ${ADD_LIBS})
+			${VACUUM_UTILS_NAME} Qt6::Core Qt6::Gui Qt6::Network Qt6::Sql ${ADD_LIBS})
 	endif()
 endif()
 

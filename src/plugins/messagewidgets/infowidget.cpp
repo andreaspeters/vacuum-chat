@@ -1,7 +1,10 @@
 #include "infowidget.h"
 
+#include <utils/imageloadscheduler.h>
+
 #include <QMovie>
-#include <QImageReader>
+#include <QPointer>
+#include <QPixmap>
 
 InfoWidget::InfoWidget(IMessageWidgets *AMessageWidgets, const Jid& AStreamJid, const Jid &AContactJid, QWidget *AParent) : QWidget(AParent)
 {
@@ -334,24 +337,30 @@ void InfoWidget::updateFieldLabel(IInfoWidget::InfoField AField)
 	}
 	case ContactAvatar:
 	{
-		if (ui.lblAvatar->movie()!=NULL)
-			ui.lblAvatar->movie()->deleteLater();
-
-		QString fileName = field(AField).toString();
-		if (!fileName.isEmpty())
-		{
-			QMovie *movie = new QMovie(fileName,QByteArray(),ui.lblAvatar);
-			QSize size = QImageReader(fileName).size();
-			size.scale(QSize(64,64),Qt::KeepAspectRatio);
-			movie->setScaledSize(size);
-			ui.lblAvatar->setMovie(movie);
-			movie->start();
-		}
-		else
-		{
+		if (QMovie *movie = ui.lblAvatar->movie()) {
 			ui.lblAvatar->setMovie(NULL);
+			movie->deleteLater();
 		}
+		ui.lblAvatar->clear();
+		const QString fileName = field(AField).toString();
+		ui.lblAvatar->setProperty("vacuum.imageLoad.path", fileName);
 		ui.lblAvatar->setVisible(isFieldVisible(AField) && !fileName.isEmpty());
+		if (!fileName.isEmpty()) {
+			ImageLoadScheduler *scheduler = ImageLoadScheduler::instance();
+			if (scheduler) {
+				QPointer<InfoWidget> infoWidget(this);
+				scheduler->loadFile(fileName, this, [infoWidget, fileName](const QImage &sourceImage) {
+					if (!infoWidget || infoWidget->field(ContactAvatar).toString() != fileName ||
+						infoWidget->ui.lblAvatar->property("vacuum.imageLoad.path").toString() != fileName ||
+						sourceImage.isNull())
+						return;
+					QImage image = sourceImage;
+					if (image.width() > 64 || image.height() > 64)
+						image = image.scaled(QSize(64, 64), Qt::KeepAspectRatio, Qt::SmoothTransformation);
+					infoWidget->ui.lblAvatar->setPixmap(QPixmap::fromImage(image));
+				});
+			}
+		}
 
 		break;
 	}

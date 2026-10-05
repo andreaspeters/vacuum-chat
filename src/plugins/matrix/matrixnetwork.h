@@ -137,7 +137,6 @@ public:
 	Q_INVOKABLE void retryFailedOutbox();
 	Q_INVOKABLE void requestAvatar(const QString &key, const QString &mxcUrl);
 	Q_INVOKABLE void requestImage(const MatrixTextEvent &event);
-	void requestHistoricalImages(const QList<MatrixTimelineEvent> &events);
 	Q_INVOKABLE void requestDisplayName(const QString &userId);
 	Q_INVOKABLE void requestRoomName(const QString &roomId);
 	Q_INVOKABLE void requestJoinedMembers(const QString &roomId);

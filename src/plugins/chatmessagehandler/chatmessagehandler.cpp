@@ -2,6 +2,7 @@
 #include "unicodeavatar.h"
 #include "protocolmessagerouting.h"
 #include <utils/matrixhtml.h>
+#include <utils/imageloadscheduler.h>
 #include <utils/messagenotificationmute.h>
 #include <interfaces/iemoticons.h>
 
@@ -30,7 +31,6 @@
 #include <QTextEdit>
 #include <QTextDocument>
 #include <QUrlQuery>
-#include <QImageReader>
 #include <QPointer>
 #include <QThreadPool>
 #include <QRunnable>
@@ -48,22 +48,22 @@ static void loadImagePixmapAsync(QLabel *label, const QString &path, const QSize
 	if (!label || path.isEmpty())
 		return;
 	QPointer<QLabel> guardedLabel(label);
-	QCoreApplication *application = QCoreApplication::instance();
-	QThreadPool::globalInstance()->start(QRunnable::create([guardedLabel, application, path, targetSize]() {
-		QImageReader reader(path);
-		reader.setAutoTransform(true);
-		const QSize sourceSize = reader.size();
-		if (sourceSize.isValid() &&
-			(sourceSize.width() > targetSize.width() || sourceSize.height() > targetSize.height()))
-			reader.setScaledSize(sourceSize.scaled(targetSize, Qt::KeepAspectRatio));
-		const QImage image = reader.read();
-		if (image.isNull() || !application)
+	const QString identity = path + QLatin1Char('|') + QString::number(targetSize.width()) +
+		QLatin1Char('x') + QString::number(targetSize.height());
+	label->setProperty("vacuum.imageLoad.identity", identity);
+	ImageLoadScheduler *scheduler = ImageLoadScheduler::instance();
+	if (!scheduler)
+		return;
+	scheduler->loadFile(path, label, [guardedLabel, identity, targetSize](const QImage &sourceImage) {
+		if (!guardedLabel || guardedLabel->property("vacuum.imageLoad.identity").toString() != identity ||
+			sourceImage.isNull())
 			return;
-		QMetaObject::invokeMethod(application, [guardedLabel, image]() {
-			if (guardedLabel)
-				guardedLabel->setPixmap(QPixmap::fromImage(image));
-		}, Qt::QueuedConnection);
-	}));
+		QImage image = sourceImage;
+		if (targetSize.isValid() &&
+			(image.width() > targetSize.width() || image.height() > targetSize.height()))
+			image = image.scaled(targetSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+		guardedLabel->setPixmap(QPixmap::fromImage(image));
+	});
 }
 
 ChatMessageHandler::ChatMessageHandler()
@@ -476,7 +476,7 @@ void ChatMessageHandler::onProtocolAvatarUpdated(const QString &key)
 		for (IProtocolMessaging *messaging : FProtocolMessaging)
 			if (messaging && messaging->streamId() == window->accountId()) {
 				const QString avatarPath = messaging->conversationAvatarPath(window->conversationId());
-				if (!avatarPath.isEmpty() && QFile::exists(avatarPath))
+				if (!avatarPath.isEmpty())
 					window->infoWidget()->setField(IInfoWidget::ContactAvatar, avatarPath);
 				break;
 			}
@@ -1198,11 +1198,6 @@ void ChatMessageHandler::updateWindow(IChatWindow *AWindow)
 	QIcon icon;
 	if (AWindow->tabPageNotifier() && AWindow->tabPageNotifier()->activeNotify()>0)
 		icon = AWindow->tabPageNotifier()->notifyById(AWindow->tabPageNotifier()->activeNotify()).icon;
-	if (icon.isNull()) {
-		const QString avatarPath = AWindow->infoWidget()->field(IInfoWidget::ContactAvatar).toString();
-		if (!avatarPath.isEmpty() && QFile::exists(avatarPath))
-			icon = QIcon(avatarPath);
-	}
 	if (FStatusIcons && icon.isNull() && AWindow->conversationId().isEmpty())
 		icon = FStatusIcons->iconByJid(AWindow->streamJid(),AWindow->contactJid());
 
@@ -1319,9 +1314,6 @@ void ChatMessageHandler::setupRoomSidebar(IChatWindow *AWindow, IProtocolMessagi
 		QPixmap placeholder(32, 32);
 		placeholder.fill(QColor(QStringLiteral("#c8d0d9")));
 		avatar->setPixmap(placeholder);
-		const QString avatarPath = AMessaging->userAvatarPath(currentRoom.id, member.id);
-		if (!avatarPath.isEmpty() && QFile::exists(avatarPath))
-			loadImagePixmapAsync(avatar, avatarPath, avatar->size());
 		row->setProperty("matrixUserId", member.id);
 		rowLayout->addWidget(avatar);
 		QString verificationLabel;
@@ -1414,7 +1406,7 @@ void ChatMessageHandler::setupProtocolWindow(IChatWindow *AWindow, IProtocolMess
 	if (!displayName.isEmpty())
 		AWindow->infoWidget()->setField(IInfoWidget::ContactName, displayName);
 	const QString avatarPath = AMessaging->conversationAvatarPath(AWindow->conversationId());
-	if (!avatarPath.isEmpty() && QFile::exists(avatarPath))
+	if (!avatarPath.isEmpty())
 		AWindow->infoWidget()->setField(IInfoWidget::ContactAvatar, avatarPath);
 	setupRoomSidebar(AWindow, AMessaging);
 

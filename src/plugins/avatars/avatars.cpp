@@ -1,5 +1,6 @@
 #include "avatars.h"
 #include <interfaces/iprotocolroster.h>
+#include <utils/imageloadscheduler.h>
 #include <functional>
 
 #include <QFile>
@@ -8,6 +9,7 @@
 #include <QFileDialog>
 #include <QImageReader>
 #include <QCryptographicHash>
+#include <QPointer>
 
 #define DIR_AVATARS               "avatars"
 
@@ -453,6 +455,7 @@ QString Avatars::saveAvatarData(const QByteArray &AData) const
 	if (!AData.isEmpty())
 	{
 		QString hash = QCryptographicHash::hash(AData,QCryptographicHash::Sha1).toHex();
+		FFailedAvatarImages.remove(hash);
 		if (!hasAvatar(hash))
 		{
 			if (saveToFile(avatarFileName(hash),AData))
@@ -522,24 +525,50 @@ QString Avatars::setCustomPictire(const Jid &AContactJid, const QByteArray &ADat
 
 QImage Avatars::loadAvatarImage(const QString &AHash, const QSize &AMaxSize, bool AGray) const
 {
-	QImage image;
+	if (AHash.isEmpty() || AHash == EMPTY_AVATAR)
+		return QImage();
 	QMap<QSize,QImage> &images = AGray ? FGrayAvatarImages[AHash] : FAvatarImages[AHash];
 	if (images.contains(AMaxSize))
 		return images.value(AMaxSize);
-	QString fileName = avatarFileName(AHash);
-	if (!AHash.isEmpty() && QFile::exists(fileName))
-	{
-		image.load(fileName);
-		if (!image.isNull())
-		{
-			if (AMaxSize.isValid() && (image.height()>AMaxSize.height() || image.width()>AMaxSize.width()))
-				image = image.scaled(AMaxSize,Qt::KeepAspectRatio,Qt::SmoothTransformation);
-			if (AGray)
-				image = ImageManager::opacitized(ImageManager::grayscaled(image));
-		}
-		images.insert(AMaxSize,image);
+	if (images.contains(QSize())) {
+		QImage image = images.value(QSize());
+		if (AMaxSize.isValid() && (image.height() > AMaxSize.height() || image.width() > AMaxSize.width()))
+			image = image.scaled(AMaxSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+		images.insert(AMaxSize, image);
+		return image;
 	}
-	return image;
+	if (FPendingAvatarImages.contains(AHash) || FFailedAvatarImages.contains(AHash))
+		return QImage();
+	const QString fileName = avatarFileName(AHash);
+	ImageLoadScheduler *scheduler = ImageLoadScheduler::instance();
+	if (!scheduler)
+		return QImage();
+	FPendingAvatarImages.insert(AHash);
+	QPointer<Avatars> avatars(const_cast<Avatars *>(this));
+	scheduler->loadFile(fileName, avatars.data(), [avatars, AHash](const QImage &sourceImage) {
+		if (!avatars)
+			return;
+		avatars->FPendingAvatarImages.remove(AHash);
+		if (sourceImage.isNull()) {
+			avatars->FFailedAvatarImages.insert(AHash);
+			return;
+		}
+		avatars->FAvatarImages[AHash].insert(QSize(), sourceImage);
+		avatars->FGrayAvatarImages[AHash].insert(QSize(),
+			ImageManager::opacitized(ImageManager::grayscaled(sourceImage)));
+		if (!avatars->FRostersModel)
+			return;
+		std::function<void(IRosterIndex *)> notify = [avatars, AHash, &notify](IRosterIndex *index) {
+			if (!avatars || !index)
+				return;
+			if (index->data(RDR_AVATAR_HASH).toString() == AHash)
+				emit avatars->rosterDataChanged(index, RDR_AVATAR_IMAGE);
+			for (int row = 0; row < index->childCount(); ++row)
+				notify(index->child(row));
+		};
+		notify(avatars->FRostersModel->rootIndex());
+	});
+	return QImage();
 }
 
 QString Avatars::getImageFormat(const QByteArray &AData) const
@@ -817,15 +846,19 @@ void Avatars::onRosterIndexToolTips(IRosterIndex *AIndex, quint32 ALabelId, QMap
 {
 	if ((ALabelId==AdvancedDelegateItem::DisplayId || ALabelId == FAvatarLabelId) && rosterDataTypes().contains(AIndex->type()))
 	{
-		QString hash = AIndex->data(RDR_AVATAR_HASH).toString();
-		if (hasAvatar(hash))
-		{
-			QString fileName = avatarFileName(hash);
-			QSize imageSize = QImageReader(fileName).size();
-			if (ALabelId!=FAvatarLabelId && (imageSize.height()>64 || imageSize.width()>64))
-				imageSize.scale(QSize(64,64), Qt::KeepAspectRatio);
-			QString avatarMask = "<img src='%1' width=%2 height=%3 />";
-			AToolTips.insert(RTTO_AVATAR_IMAGE,avatarMask.arg(fileName).arg(imageSize.width()).arg(imageSize.height()));
+		const QString hash = AIndex->data(RDR_AVATAR_HASH).toString();
+		const QSize maximumSize = ALabelId == FAvatarLabelId ? QSize(256, 256) : QSize(64, 64);
+		const QImage avatar = loadAvatarImage(hash, maximumSize, false);
+		if (!avatar.isNull()) {
+			QByteArray pngData;
+			QBuffer buffer(&pngData);
+			if (buffer.open(QIODevice::WriteOnly) && avatar.save(&buffer, "PNG")) {
+				const QString dataUrl = QStringLiteral("data:image/png;base64,%1")
+					.arg(QString::fromLatin1(pngData.toBase64()));
+				AToolTips.insert(RTTO_AVATAR_IMAGE,
+					QStringLiteral("<img src='%1' width=%2 height=%3 />")
+						.arg(dataUrl).arg(avatar.width()).arg(avatar.height()));
+			}
 		}
 	}
 }

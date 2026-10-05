@@ -187,7 +187,7 @@ bool SimpleMessageStyle::appendContent(QWidget *AWidget, const QString &AHtml, c
 	{
 		bool sameSender = isSameSender(AWidget,AOptions);
 		QString html = makeContentTemplate(AOptions,sameSender);
-		fillContentKeywords(html,AOptions,sameSender);
+		fillContentKeywords(html,AOptions,sameSender,view);
 		html.replace("%message%",prepareMessage(AHtml,AOptions));
 
 		WidgetStatus &wstatus = FWidgetStatus[AWidget];
@@ -360,7 +360,8 @@ QString SimpleMessageStyle::makeContentTemplate(const IMessageContentOptions &AO
 	return html;
 }
 
-void SimpleMessageStyle::fillContentKeywords(QString &AHtml, const IMessageContentOptions &AOptions, bool ASameSender) const
+void SimpleMessageStyle::fillContentKeywords(QString &AHtml, const IMessageContentOptions &AOptions,
+	bool ASameSender, StyleViewer *AView) const
 {
 	bool isDirectionIn = AOptions.direction == IMessageContentOptions::DirectionIn;
 
@@ -428,9 +429,11 @@ void SimpleMessageStyle::fillContentKeywords(QString &AHtml, const IMessageConte
 	AHtml.replace("%messageClasses%", messageClasses.join(" "));
 
 	AHtml.replace("%senderStatusIcon%",AOptions.senderIcon);
+	const QDateTime displayTime = ASameSender && AOptions.kind == IMessageContentOptions::KindMessage
+		? QDateTime() : AOptions.time;
 	const QString shortTimeFormat = AOptions.timeFormat.isEmpty()
 		? tr("hh:mm") : AOptions.timeFormat;
-	AHtml.replace("%shortTime%", AOptions.time.toString(shortTimeFormat).toHtmlEscaped());
+	AHtml.replace("%shortTime%", displayTime.toString(shortTimeFormat).toHtmlEscaped());
 
 	QString avatar = AOptions.senderAvatar;
 	if (!QFile::exists(avatar))
@@ -443,10 +446,10 @@ void SimpleMessageStyle::fillContentKeywords(QString &AHtml, const IMessageConte
 		if (!QFile::exists(avatar))
 			avatar = qApp->applicationDirPath()+"/"SHARED_STYLE_PATH"/buddy_icon.png";
 	}
-	AHtml.replace("%userIconPath%",avatar);
+	AHtml.replace("%userIconPath%", AView->cacheImageResource(avatar).toHtmlEscaped());
 
 	QString timeFormat = !AOptions.timeFormat.isEmpty() ? AOptions.timeFormat : tr("hh:mm:ss");
-	QString time = AOptions.time.toString(timeFormat).toHtmlEscaped();
+	QString time = displayTime.toString(timeFormat).toHtmlEscaped();
 	AHtml.replace("%time%", time);
 
 	QString sColor = !AOptions.senderColor.isEmpty() ? AOptions.senderColor : senderColor(AOptions.senderId);

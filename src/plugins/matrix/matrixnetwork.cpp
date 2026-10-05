@@ -3,6 +3,7 @@
 #include "matrixssss.h"
 #include "interfaces/iprotocolpresence.h"
 #include "interfaces/ichatstates.h"
+#include <utils/imageloadscheduler.h>
 #include <QRandomGenerator>
 #include <QNetworkReply>
 #include <QNetworkRequest>
@@ -18,6 +19,7 @@
 #include <QDateTime>
 #include <QElapsedTimer>
 #include <QEventLoop>
+#include <QPointer>
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -25,26 +27,9 @@
 #include <QFileInfo>
 #include <QSaveFile>
 #include <QStandardPaths>
-#include <QBuffer>
 #include <QImage>
-#include <QImageReader>
 #include <QUrlQuery>
 #include <algorithm>
-
-static QImage decodeMatrixImage(const QByteArray &data, const QSize &maximumSize)
-{
-	QBuffer buffer;
-	buffer.setData(data);
-	if (!buffer.open(QIODevice::ReadOnly))
-		return QImage();
-	QImageReader reader(&buffer);
-	reader.setAutoTransform(true);
-	const QSize sourceSize = reader.size();
-	if (sourceSize.isValid() && (sourceSize.width() > maximumSize.width() ||
-		sourceSize.height() > maximumSize.height()))
-		reader.setScaledSize(sourceSize.scaled(maximumSize, Qt::KeepAspectRatio));
-	return reader.read();
-}
 
 MatrixNetwork::MatrixNetwork(QObject *parent)
 	: QObject(parent), FNetworkAccessManager(nullptr), FAccesToken(), FSyncToken(), FInFlightRequest(RequestNone), FNormalizedServerUrl()
@@ -1086,79 +1071,141 @@ void MatrixNetwork::requestAvatar(const QString &key, const QString &mxcUrl)
 	const QString cachePath = cacheDirectory + QLatin1Char('/') +
 		QString::fromLatin1(QCryptographicHash::hash(mxcUrl.toUtf8(), QCryptographicHash::Sha256).toHex()) +
 		QStringLiteral(".bin");
-	QFile cachedFile(cachePath);
-	if (cachedFile.open(QIODevice::ReadOnly)) {
-		const QByteArray cachedData = cachedFile.readAll();
-		const QImage image = decodeMatrixImage(cachedData, QSize(128, 128));
-		if (!image.isNull()) {
-			emit avatarImageReceived(key, image);
-			return;
-		}
-		cachedFile.close();
-		QFile::remove(cachePath);
-	}
-	if (FAvatarUnavailable.contains(requestKey) || FAccesToken.isEmpty())
-		return;
 	FAvatarRequestsInFlight.insert(requestKey);
-	const QString mediaId = mxc.path().mid(1);
-	const bool legacyMediaApi = FAvatarLegacyFallbacks.contains(requestKey);
-	const QString mediaPrefix = legacyMediaApi
-		? QStringLiteral("/_matrix/media/v3/download/")
-		: QStringLiteral("/_matrix/client/v1/media/download/");
-	const QString path = mediaPrefix + QStringLiteral("%1/%2")
-		.arg(QString::fromUtf8(QUrl::toPercentEncoding(mxc.host())))
-		.arg(QString::fromUtf8(QUrl::toPercentEncoding(mediaId)));
-	QNetworkRequest request(QUrl(constructUrl(path)));
-	request.setAttribute(QNetworkRequest::Http2AllowedAttribute, FUseHttp2);
-	request.setRawHeader("Authorization", QByteArray("Bearer ") + FAccesToken.toUtf8());
-	QNetworkReply *reply = FNetworkAccessManager->get(request);
-	connect(reply, &QNetworkReply::finished, this, [this, reply, key, mxcUrl, requestKey, cachePath, legacyMediaApi]() {
+	QPointer<MatrixNetwork> network(this);
+	ImageLoadScheduler *scheduler = ImageLoadScheduler::instance();
+	if (!scheduler) {
 		FAvatarRequestsInFlight.remove(requestKey);
-		if (reply->error() == QNetworkReply::NoError) {
-			const QByteArray data = reply->readAll();
-			if (!data.isEmpty()) {
-				QSaveFile cacheFile(cachePath);
-				if (cacheFile.open(QIODevice::WriteOnly)) {
-					cacheFile.write(data);
-					if (!cacheFile.commit())
-						qWarning() << "Matrix avatar cache commit failed:" << cachePath;
-				}
+		return;
+	}
+	scheduler->submit(ImageLoadScheduler::fileKey(cachePath),
+		[network, key, mxcUrl, requestKey, cachePath](ImageLoadScheduler::Completion done) {
+			if (!network) {
+				done(QImage());
+				return;
 			}
+			ImageLoadScheduler *queue = ImageLoadScheduler::instance();
+			if (!queue) {
+				done(QImage());
+				return;
+			}
+			connect(network, &QObject::destroyed, queue, [done]() { done(QImage()); });
+			queue->decodeFileAsync(cachePath,
+				[network, key, mxcUrl, requestKey, cachePath, done](const QImage &cachedImage) {
+					if (!network) {
+						done(QImage());
+						return;
+					}
+					if (!cachedImage.isNull()) {
+						done(cachedImage);
+						return;
+					}
+					QFile::remove(cachePath);
+					QMetaObject::invokeMethod(network,
+						[network, key, mxcUrl, requestKey, cachePath, done]() {
+							if (!network) {
+								done(QImage());
+								return;
+							}
+							if (network->FAvatarUnavailable.contains(requestKey) ||
+								network->FAccesToken.isEmpty()) {
+								done(QImage());
+								return;
+							}
+							const QUrl mxc(mxcUrl);
+							const QString mediaId = mxc.path().mid(1);
+							const bool legacyMediaApi = network->FAvatarLegacyFallbacks.contains(requestKey);
+							const QString mediaPrefix = legacyMediaApi
+								? QStringLiteral("/_matrix/media/v3/download/")
+								: QStringLiteral("/_matrix/client/v1/media/download/");
+							const QString path = mediaPrefix + QStringLiteral("%1/%2")
+								.arg(QString::fromUtf8(QUrl::toPercentEncoding(mxc.host())))
+								.arg(QString::fromUtf8(QUrl::toPercentEncoding(mediaId)));
+							QNetworkRequest request(QUrl(network->constructUrl(path)));
+							request.setAttribute(QNetworkRequest::Http2AllowedAttribute, network->FUseHttp2);
+							request.setRawHeader("Authorization",
+								QByteArray("Bearer ") + network->FAccesToken.toUtf8());
+							QNetworkReply *reply = network->FNetworkAccessManager->get(request);
+							connect(reply, &QNetworkReply::finished, network,
+								[network, reply, key, mxcUrl, requestKey, cachePath, done]() {
+									if (!network) {
+										reply->deleteLater();
+										done(QImage());
+										return;
+									}
+									if (reply->error() == QNetworkReply::NoError) {
+										const QByteArray data = reply->readAll();
+										if (!data.isEmpty()) {
+											QSaveFile cacheFile(cachePath);
+											if (cacheFile.open(QIODevice::WriteOnly) &&
+												cacheFile.write(data) == data.size()) {
+												if (!cacheFile.commit())
+													qWarning() << "Matrix avatar cache commit failed:" << cachePath;
+											} else {
+												qWarning() << "Matrix avatar cache write failed:" << cachePath;
+											}
+											network->FAvatarRetries.remove(requestKey);
+											network->FAvatarLegacyFallbacks.remove(requestKey);
+											network->FAvatarUnavailable.remove(requestKey);
+											ImageLoadScheduler *queue = ImageLoadScheduler::instance();
+											if (queue)
+												queue->decodeDataAsync(data, done);
+											else
+												done(QImage());
+										} else {
+											done(QImage());
+										}
+									} else {
+										const int status = reply->attribute(
+											QNetworkRequest::HttpStatusCodeAttribute).toInt();
+										bool retryScheduled = false;
+										if (status >= 500 && status < 600 &&
+											!network->FAvatarLegacyFallbacks.contains(requestKey)) {
+											network->FAvatarLegacyFallbacks.insert(requestKey);
+											retryScheduled = true;
+										} else if (reply->error() == QNetworkReply::RemoteHostClosedError &&
+											!network->FAvatarRetries.contains(requestKey)) {
+											network->FAvatarRetries.insert(requestKey);
+											network->FAvatarUnavailable.remove(requestKey);
+											network->FUseHttp2 = !network->FUseHttp2;
+											retryScheduled = true;
+										}
+										if (retryScheduled) {
+											QTimer::singleShot(1000, network, [network, key, mxcUrl]() {
+												if (network)
+													network->requestAvatar(key, mxcUrl);
+											});
+										} else {
+											network->FAvatarUnavailable.insert(requestKey);
+										}
+										done(QImage());
+									}
+									reply->deleteLater();
+								});
+						}, Qt::QueuedConnection);
+				});
+		}, this,
+		[this, key, requestKey](const QImage &image) {
+			FAvatarRequestsInFlight.remove(requestKey);
+			if (image.isNull())
+				return;
 			FAvatarRetries.remove(requestKey);
 			FAvatarLegacyFallbacks.remove(requestKey);
 			FAvatarUnavailable.remove(requestKey);
-			const QImage image = decodeMatrixImage(data, QSize(128, 128));
-			if (!image.isNull())
-				emit avatarImageReceived(key, image);
-		}
-		else {
-			const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-			bool retryScheduled = false;
-			if (status >= 500 && status < 600 && !FAvatarLegacyFallbacks.contains(requestKey)) {
-				FAvatarLegacyFallbacks.insert(requestKey);
-				retryScheduled = true;
-				QTimer::singleShot(1000, this, [this, key, mxcUrl]() {
-					requestAvatar(key, mxcUrl);
-				});
-			}
-			if (!retryScheduled) {
-				FAvatarUnavailable.insert(requestKey);
-			}
-			if (reply->error() == QNetworkReply::RemoteHostClosedError && !FAvatarRetries.contains(requestKey)) {
-				FAvatarRetries.insert(requestKey);
-				FAvatarUnavailable.remove(requestKey);
-				FUseHttp2 = !FUseHttp2;
-				QTimer::singleShot(1000, this, [this, key, mxcUrl]() {
-					requestAvatar(key, mxcUrl);
-				});
-			}
-		}
-		reply->deleteLater();
-	});
+			QImage avatarImage = image;
+			if (avatarImage.width() > 128 || avatarImage.height() > 128)
+				avatarImage = avatarImage.scaled(QSize(128, 128), Qt::KeepAspectRatio,
+					Qt::SmoothTransformation);
+			emit avatarImageReceived(key, avatarImage);
+		});
 }
 
 void MatrixNetwork::requestImage(const MatrixTextEvent &event)
 {
+	if (event.messageType != QStringLiteral("m.image") &&
+		event.messageType != QStringLiteral("m.file"))
+		return;
+	const bool isImageEvent = event.messageType == QStringLiteral("m.image");
 	const QString mxcUrl = event.metadata.value(QStringLiteral("url")).toString();
 	const QUrl mxc(mxcUrl);
 	if (event.eventId.isEmpty() || mxc.scheme() != QStringLiteral("mxc") ||
@@ -1178,98 +1225,128 @@ void MatrixNetwork::requestImage(const MatrixTextEvent &event)
 	const QString requestKey = event.eventId + QChar('\n') + mxcUrl;
 	if (FImageRequestsInFlight.contains(requestKey))
 		return;
-	auto emitImage = [this, event, cachePath](const QByteArray &data) {
-		if (data.isEmpty())
-			return;
-		MatrixTextEvent imageEvent = event;
-		if (imageEvent.messageType == QStringLiteral("m.image")) {
-			QBuffer buffer;
-			buffer.setData(data);
-			buffer.open(QIODevice::ReadOnly);
-			QImageReader reader(&buffer);
-			reader.setAutoTransform(true);
-			const QSize sourceSize = reader.size();
-			if (sourceSize.isValid() && (sourceSize.width() > 1280 || sourceSize.height() > 1280))
-				reader.setScaledSize(sourceSize.scaled(QSize(1280, 1280), Qt::KeepAspectRatio));
-			const QImage decodedImage = reader.read();
-			if (!decodedImage.isNull()) {
-				imageEvent.metadata.insert(QStringLiteral("decoded_image"), decodedImage);
+	FImageRequestsInFlight.insert(requestKey);
+	QPointer<MatrixNetwork> network(this);
+	ImageLoadScheduler *scheduler = ImageLoadScheduler::instance();
+	if (!scheduler) {
+		FImageRequestsInFlight.remove(requestKey);
+		return;
+	}
+	const QString schedulerKey = (isImageEvent ? QString() : QStringLiteral("matrix-attachment:")) +
+		ImageLoadScheduler::fileKey(cachePath);
+	scheduler->submit(schedulerKey,
+		[network, event, mxcUrl, cachePath, isImageEvent](ImageLoadScheduler::Completion done) {
+			if (!network) {
+				done(QImage());
+				return;
+			}
+			ImageLoadScheduler *queue = ImageLoadScheduler::instance();
+			if (!queue) {
+				done(QImage());
+				return;
+			}
+			connect(network, &QObject::destroyed, queue, [done]() { done(QImage()); });
+			queue->decodeFileAsync(cachePath,
+				[network, event, mxcUrl, cachePath, isImageEvent, done](const QImage &cachedImage) {
+					if (!network) {
+						done(QImage());
+						return;
+					}
+					if (!cachedImage.isNull()) {
+						done(cachedImage);
+						return;
+					}
+					if (!isImageEvent && QFileInfo(cachePath).exists() && QFileInfo(cachePath).size() > 0) {
+						QImage ready(1, 1, QImage::Format_ARGB32);
+						ready.fill(Qt::transparent);
+						done(ready);
+						return;
+					}
+					if (isImageEvent)
+						QFile::remove(cachePath);
+					QMetaObject::invokeMethod(network,
+						[network, event, mxcUrl, cachePath, isImageEvent, done]() {
+							if (!network) {
+								done(QImage());
+								return;
+							}
+							if (network->FAccesToken.isEmpty()) {
+								done(QImage());
+								return;
+							}
+							const QUrl mxc(mxcUrl);
+							const QString path = QStringLiteral("/_matrix/client/v1/media/download/%1/%2")
+								.arg(QString::fromUtf8(QUrl::toPercentEncoding(mxc.host())))
+								.arg(QString::fromUtf8(QUrl::toPercentEncoding(mxc.path().mid(1))));
+							QNetworkRequest request(QUrl(network->constructUrl(path)));
+							request.setAttribute(QNetworkRequest::Http2AllowedAttribute, network->FUseHttp2);
+							request.setRawHeader("Authorization",
+								QByteArray("Bearer ") + network->FAccesToken.toUtf8());
+							QNetworkReply *reply = network->FNetworkAccessManager->get(request);
+							connect(reply, &QNetworkReply::finished, network,
+								[network, reply, event, cachePath, isImageEvent, done]() {
+									if (!network) {
+										reply->deleteLater();
+										done(QImage());
+										return;
+									}
+									if (reply->error() != QNetworkReply::NoError) {
+										qWarning() << "Matrix image download failed:" << reply->errorString()
+											<< "httpStatus:"
+											<< reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+										reply->deleteLater();
+										done(QImage());
+										return;
+									}
+									const QByteArray data = reply->readAll();
+									if (data.isEmpty()) {
+										reply->deleteLater();
+										done(QImage());
+										return;
+									}
+									QSaveFile output(cachePath);
+									if (!output.open(QIODevice::WriteOnly) ||
+										output.write(data) != data.size() || !output.commit())
+										qWarning() << "Failed to persist Matrix room image in profile cache";
+									reply->deleteLater();
+									ImageLoadScheduler *queue = ImageLoadScheduler::instance();
+									if (!queue) {
+										done(QImage());
+									} else if (isImageEvent) {
+										queue->decodeDataAsync(data, done);
+									} else {
+										queue->decodeDataAsync(data, [done](const QImage &image) {
+											if (!image.isNull()) {
+												done(image);
+												return;
+											}
+											QImage ready(1, 1, QImage::Format_ARGB32);
+											ready.fill(Qt::transparent);
+											done(ready);
+										});
+									}
+								});
+						}, Qt::QueuedConnection);
+				});
+		}, this,
+		[this, event, requestKey, cachePath](const QImage &image) {
+			FImageRequestsInFlight.remove(requestKey);
+			if (image.isNull())
+				return;
+			MatrixTextEvent imageEvent = event;
+			if (imageEvent.messageType == QStringLiteral("m.image")) {
+				imageEvent.metadata.insert(QStringLiteral("decoded_image"), image);
 				imageEvent.metadata.insert(QStringLiteral("image_resource_url"),
 					QStringLiteral("vacuum-matrix-image:/%1/%2")
 						.arg(QString::fromLatin1(QUrl::toPercentEncoding(imageEvent.roomId)),
 							QString::fromLatin1(QUrl::toPercentEncoding(imageEvent.eventId))));
 			}
 			imageEvent.metadata.insert(QStringLiteral("file_path"), cachePath);
-		} else
-			imageEvent.metadata.insert(QStringLiteral("file_path"), cachePath);
-		for (MatrixTextEvent &cached : FMessageHistory[imageEvent.roomId])
-			if (cached.eventId == imageEvent.eventId)
-				cached.metadata = imageEvent.metadata;
-		emit messageReceived(imageEvent.toBasicMessage());
-	};
-	QFile cacheFile(cachePath);
-	if (cacheFile.open(QIODevice::ReadOnly)) {
-		const QByteArray data = cacheFile.readAll();
-		if (!data.isEmpty()) {
-			emitImage(data);
-			return;
-		}
-	}
-	if (FAccesToken.isEmpty())
-		return;
-	FImageRequestsInFlight.insert(requestKey);
-	const QString path = QStringLiteral("/_matrix/client/v1/media/download/%1/%2")
-		.arg(QString::fromUtf8(QUrl::toPercentEncoding(mxc.host())))
-		.arg(QString::fromUtf8(QUrl::toPercentEncoding(mxc.path().mid(1))));
-	QNetworkRequest request(QUrl(constructUrl(path)));
-	request.setAttribute(QNetworkRequest::Http2AllowedAttribute, FUseHttp2);
-	request.setRawHeader("Authorization", QByteArray("Bearer ") + FAccesToken.toUtf8());
-	QNetworkReply *reply = FNetworkAccessManager->get(request);
-	connect(reply, &QNetworkReply::finished, this,
-		[this, reply, event, requestKey, cachePath, emitImage]() {
-			FImageRequestsInFlight.remove(requestKey);
-			if (reply->error() == QNetworkReply::NoError) {
-				const QByteArray data = reply->readAll();
-				if (!data.isEmpty()) {
-					QSaveFile output(cachePath);
-					if (!output.open(QIODevice::WriteOnly) || output.write(data) != data.size() ||
-						!output.commit())
-						qWarning() << "Failed to persist Matrix room image in profile cache";
-					emitImage(data);
-				}
-			} else {
-				qWarning() << "Matrix image download failed:" << reply->errorString()
-					<< "httpStatus:"
-					<< reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-			}
-			reply->deleteLater();
+			for (MatrixTextEvent &cached : FMessageHistory[imageEvent.roomId])
+				if (cached.eventId == imageEvent.eventId)
+					cached.metadata = imageEvent.metadata;
+			emit messageReceived(imageEvent.toBasicMessage());
 		});
-}
-
-void MatrixNetwork::requestHistoricalImages(const QList<MatrixTimelineEvent> &events)
-{
-	int requested = 0;
-	for (auto it = events.crbegin(); it != events.crend(); ++it) {
-		if (requested >= 8)
-			break;
-		if (it->messageType != QStringLiteral("m.image") &&
-			it->messageType != QStringLiteral("m.file"))
-			continue;
-		MatrixTextEvent event;
-		event.eventId = it->eventId;
-		event.roomId = it->roomId;
-		event.userId = it->sender;
-		event.content = it->content;
-		event.timestamp = QString::number(it->originTs);
-		event.eventType = it->eventType;
-		event.messageType = it->messageType;
-		event.attachments = it->attachments;
-		for (auto metadata = it->metadata.constBegin(); metadata != it->metadata.constEnd(); ++metadata)
-			event.metadata.insert(metadata.key(), metadata.value());
-		event.metadata.insert(QStringLiteral("historical"), true);
-		requestImage(event);
-		++requested;
-	}
 }
 
 void MatrixNetwork::requestRoomName(const QString &roomId)
@@ -4682,8 +4759,7 @@ void MatrixNetwork::onSyncFinished(QNetworkReply *reply)
 		emit syncReceived(events);
 
 		for (const MatrixTextEvent &event : events) {
-			if (event.messageType == QStringLiteral("m.image") ||
-				event.messageType == QStringLiteral("m.file")) {
+			if (event.messageType == QStringLiteral("m.image")) {
 				if (event.roomId == FActiveRoomId)
 					requestImage(event);
 				else

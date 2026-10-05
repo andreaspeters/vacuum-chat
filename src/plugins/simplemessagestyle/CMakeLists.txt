@@ -16,7 +16,8 @@ if (BUILD_TESTING)
 		styleviewer.h)
 	target_compile_features(simplemessagestyle_autoscroll_tests PRIVATE cxx_std_11)
 	target_compile_definitions(simplemessagestyle_autoscroll_tests PRIVATE
-		AUTOSCROLL_STYLE_PATH=\"${CMAKE_SOURCE_DIR}/resources/simplemessagestyles/plain\")
+		AUTOSCROLL_STYLE_PATH=\"${CMAKE_SOURCE_DIR}/resources/simplemessagestyles/plain\"
+		AVATAR_STYLE_PATH=\"${CMAKE_SOURCE_DIR}/resources/simplemessagestyles/chat\")
 	target_link_libraries(simplemessagestyle_autoscroll_tests PRIVATE
 		${VACUUM_UTILS_NAME}
 		Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::Xml Qt6::Sql)

@@ -1,10 +1,11 @@
 #include "unicodeavatar.h"
 
+#include <utils/imageloadscheduler.h>
+
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QImageReader>
 #include <QPainter>
 #include <QSaveFile>
 #include <QStandardPaths>
@@ -27,10 +28,29 @@ QString UnicodeAvatar::getAvatarPath(const QString &username)
     const QByteArray digest = QCryptographicHash::hash(grapheme.toUtf8(), QCryptographicHash::Sha256).toHex();
     const QString path = QDir(avatarDirectory).filePath(QString::fromLatin1(digest) + QStringLiteral(".png"));
     if (QFileInfo::exists(path)) {
-        QImageReader reader(path);
-        if (reader.canRead())
-            return path;
-        QFile::remove(path);
+        if (ImageLoadScheduler *scheduler = ImageLoadScheduler::instance()) {
+            scheduler->submit(ImageLoadScheduler::fileKey(path),
+                [scheduler, path, grapheme](ImageLoadScheduler::Completion done) {
+                    scheduler->decodeFileAsync(path, [path, grapheme, done](const QImage &cachedImage) {
+                        if (!cachedImage.isNull()) {
+                            done(cachedImage);
+                            return;
+                        }
+                        QFile::remove(path);
+                        const QImage replacement = generateAvatarImage(grapheme);
+                        if (!replacement.isNull()) {
+                            QSaveFile replacementFile(path);
+                            if (!replacementFile.open(QIODevice::WriteOnly) ||
+                                !replacement.save(&replacementFile, "PNG") || !replacementFile.commit()) {
+                                done(QImage());
+                                return;
+                            }
+                        }
+                        done(replacement);
+                    });
+                }, nullptr, ImageLoadScheduler::Completion());
+        }
+        return path;
     }
 
     const QImage image = generateAvatarImage(grapheme);
