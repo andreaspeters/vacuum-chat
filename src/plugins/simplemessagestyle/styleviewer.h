@@ -7,6 +7,8 @@
 #include <QList>
 #include <QPointer>
 #include <QSet>
+#include <QTimer>
+#include <QUrl>
 #include <QTextDocumentFragment>
 #include <QTextTable>
 #include <utils/animatedtextbrowser.h>
@@ -38,11 +40,15 @@ private:
 		QTextTable *table;
 		QPointer<QFrame> frame;
 		QPointer<QTextBrowser> content;
+		QSet<QUrl> imageResources;
 	};
 	void notifyUserScrollPositionChanged();
 	void updateMessageBubbleGeometry();
+	void updateMessageBubbleResource(const QUrl &AUrl);
+	void scheduleMessageBubbleGeometryUpdate();
 	QSet<QString> FPendingImageResources;
 	QList<BubbleOverlay> FBubbleOverlays;
+	QTimer FGeometryUpdateTimer;
 };
 
 #endif // STYLEVIEWER_H

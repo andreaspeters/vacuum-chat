@@ -42,11 +42,19 @@ StyleViewer::StyleViewer(QWidget *AParent) : AnimatedTextBrowser(AParent)
 			});
 		});
 	connect(verticalScrollBar(), &QScrollBar::valueChanged,
-		this, &StyleViewer::updateMessageBubbleGeometry);
+		this, &StyleViewer::scheduleMessageBubbleGeometryUpdate);
 	connect(horizontalScrollBar(), &QScrollBar::valueChanged,
-		this, &StyleViewer::updateMessageBubbleGeometry);
+		this, &StyleViewer::scheduleMessageBubbleGeometryUpdate);
 	connect(document()->documentLayout(), &QAbstractTextDocumentLayout::documentSizeChanged,
-		this, [this](const QSizeF &) { updateMessageBubbleGeometry(); });
+		this, [this](const QSizeF &) { scheduleMessageBubbleGeometryUpdate(); });
+	connect(this, &AnimatedTextBrowser::resourceUpdated,
+		this, &StyleViewer::updateMessageBubbleResource);
+	connect(this, &AnimatedTextBrowser::resourceLoaded,
+		this, &StyleViewer::updateMessageBubbleResource, Qt::QueuedConnection);
+	FGeometryUpdateTimer.setSingleShot(true);
+	FGeometryUpdateTimer.setInterval(0);
+	connect(&FGeometryUpdateTimer, &QTimer::timeout,
+		this, &StyleViewer::updateMessageBubbleGeometry);
 }
 
 StyleViewer::~StyleViewer()
@@ -90,6 +98,7 @@ QString StyleViewer::cacheImageResource(const QString &APath, bool ARoundCorners
 					doc->addResource(QTextDocument::ImageResource, resourceUrl, displayImage);
 					doc->markContentsDirty(0, doc->characterCount());
 					viewer->viewport()->update();
+					emit viewer->resourceUpdated(resourceUrl);
 				});
 			}
 		}
@@ -144,34 +153,25 @@ void StyleViewer::addMessageBubble(QTextTable *ATable, const QString &AHtml, con
 		QRegularExpression::CaseInsensitiveOption);
 	QRegularExpressionMatchIterator matches = imageSourceExpression.globalMatch(AHtml);
 	QTextDocument *contentDocument = content->document();
+	QSet<QUrl> bubbleImageResources;
 	while (matches.hasNext())
 	{
 		const QRegularExpressionMatch match = matches.next();
 		const QString source = match.captured(1).isEmpty() ? match.captured(2) : match.captured(1);
 		const QUrl url = QUrl::fromEncoded(source.toUtf8());
+		bubbleImageResources.insert(url);
 		const QVariant image = document()->resource(QTextDocument::ImageResource, url);
 		if (image.isValid())
 			contentDocument->addResource(QTextDocument::ImageResource, url, image);
 	}
-	connect(this, &AnimatedTextBrowser::resourceUpdated, content,
-		[this, content](const QUrl &AUrl) {
-			const QVariant image = document()->resource(QTextDocument::ImageResource, AUrl);
-			if (image.isValid())
-			{
-				QTextDocument *doc = content->document();
-				doc->addResource(QTextDocument::ImageResource, AUrl, image);
-				doc->markContentsDirty(0, doc->characterCount());
-			}
-		});
 	connect(content, &QTextBrowser::anchorClicked, this, &StyleViewer::bubbleAnchorClicked);
 
 	content->setHtml(QStringLiteral(
 		"<div class=\"xxxmessage\" style=\"background-color:transparent;\">%1</div>").arg(AHtml));
 	layout->addWidget(content);
-	FBubbleOverlays.append({ATable, frame, content});
+	FBubbleOverlays.append({ATable, frame, content, bubbleImageResources});
 	frame->show();
-	updateMessageBubbleGeometry();
-	QTimer::singleShot(0, this, &StyleViewer::updateMessageBubbleGeometry);
+	scheduleMessageBubbleGeometryUpdate();
 }
 
 void StyleViewer::clearMessageBubbles()
@@ -182,6 +182,21 @@ void StyleViewer::clearMessageBubbles()
 			delete overlay.frame.data();
 	}
 	FBubbleOverlays.clear();
+}
+
+void StyleViewer::updateMessageBubbleResource(const QUrl &AUrl)
+{
+	const QVariant image = document()->resource(QTextDocument::ImageResource, AUrl);
+	if (!image.isValid())
+		return;
+	for (const BubbleOverlay &overlay : FBubbleOverlays)
+	{
+		if (!overlay.content || !overlay.imageResources.contains(AUrl))
+			continue;
+		QTextDocument *doc = overlay.content->document();
+		doc->addResource(QTextDocument::ImageResource, AUrl, image);
+		doc->markContentsDirty(0, doc->characterCount());
+	}
 }
 
 QTextDocumentFragment StyleViewer::bubbleSelection() const
@@ -235,6 +250,12 @@ QTextDocumentFragment StyleViewer::bubbleTextUnderPosition(const QPoint &APositi
 	return QTextDocumentFragment();
 }
 
+void StyleViewer::scheduleMessageBubbleGeometryUpdate()
+{
+	if (!FGeometryUpdateTimer.isActive())
+		FGeometryUpdateTimer.start();
+}
+
 void StyleViewer::updateMessageBubbleGeometry()
 {
 	if (!document() || !document()->documentLayout())
@@ -270,7 +291,7 @@ void StyleViewer::keyPressEvent(QKeyEvent *AEvent)
 void StyleViewer::resizeEvent(QResizeEvent *AEvent)
 {
 	AnimatedTextBrowser::resizeEvent(AEvent);
-	updateMessageBubbleGeometry();
+	scheduleMessageBubbleGeometryUpdate();
 }
 
 void StyleViewer::notifyUserScrollPositionChanged()

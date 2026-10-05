@@ -7,6 +7,7 @@
 #include <QKeyEvent>
 #include <QNetworkAccessManager>
 #include <QPainter>
+#include <QRectF>
 #include <QResizeEvent>
 #include <QRegularExpression>
 #include <QScrollBar>
@@ -27,6 +28,19 @@ bool check(bool condition, const char *description)
     if (!condition)
         std::cerr << description << " failed\n";
     return condition;
+}
+
+bool imageContainsColor(const QImage &image, const QColor &color)
+{
+    for (int y = 0; y < image.height(); ++y)
+    {
+        for (int x = 0; x < image.width(); ++x)
+        {
+            if (image.pixelColor(x, y) == color)
+                return true;
+        }
+    }
+    return false;
 }
 
 void waitForTimeout(int milliseconds)
@@ -90,6 +104,7 @@ QString tallMessage(int index)
     html += QStringLiteral("</p>");
     return html;
 }
+
 }
 
 int main(int argc, char **argv)
@@ -325,16 +340,120 @@ int main(int argc, char **argv)
     avatarOptions.senderId = QStringLiteral("image-user");
     avatarOptions.senderName = QStringLiteral("Image User");
     const QString inlineImageHtml = QStringLiteral(
-        "<img src=\"%1\" width=\"24\" height=\"24\" alt=\"fixture\" />")
+        "geometry probe <img src=\"%1\" width=\"24\" height=\"24\" alt=\"fixture\" />")
         .arg(inlineImageUrl.toString(QUrl::FullyEncoded).toHtmlEscaped());
     avatarStyle.appendContent(avatarView, inlineImageHtml, avatarOptions);
-    application.processEvents();
+
+    QTextCursor geometryProbeCursor = avatarView->document()->find(QStringLiteral("geometry probe"));
+    QTextTable *geometryProbeTable = geometryProbeCursor.currentTable();
+    const QList<QFrame *> geometryProbeFrames = avatarView->findChildren<QFrame *>(
+        QStringLiteral("modernChatBubbleFrame"));
+    passed &= check(geometryProbeTable != nullptr && !geometryProbeFrames.isEmpty(),
+        "the geometry probe maps to a rendered message bubble");
+    if (geometryProbeTable && !geometryProbeFrames.isEmpty())
+    {
+        application.processEvents();
+        QFrame *geometryProbeFrame = geometryProbeFrames.constLast();
+        const QRect geometryBeforeDocumentMutation = geometryProbeFrame->geometry();
+        geometryProbeCursor.movePosition(QTextCursor::EndOfBlock);
+        geometryProbeCursor.insertText(QString(400, QLatin1Char('W')));
+
+        QRectF expectedGeometry = avatarView->document()->documentLayout()->frameBoundingRect(geometryProbeTable);
+        expectedGeometry.translate(-avatarView->horizontalScrollBar()->value(),
+            -avatarView->verticalScrollBar()->value());
+        const QRect expectedGeometryAfterMutation = expectedGeometry.toAlignedRect();
+        passed &= check(expectedGeometryAfterMutation != geometryBeforeDocumentMutation,
+            "the document mutation changes the bubble's layout bounds");
+        passed &= check(geometryProbeFrame->geometry() == geometryBeforeDocumentMutation,
+            "bubble geometry is not updated synchronously during document layout changes");
+
+        application.processEvents();
+        expectedGeometry = avatarView->document()->documentLayout()->frameBoundingRect(geometryProbeTable);
+        expectedGeometry.translate(-avatarView->horizontalScrollBar()->value(),
+            -avatarView->verticalScrollBar()->value());
+        passed &= check(geometryProbeFrame->geometry() == expectedGeometry.toAlignedRect(),
+            "deferred bubble geometry matches the completed document layout");
+    }
     const QImage renderedInlineImage = avatarView->document()->resource(
         QTextDocument::ImageResource, inlineImageUrl).value<QImage>();
     passed &= check(renderedInlineImage.pixelColor(0, 0).alpha() < 128 &&
         renderedInlineImage.pixelColor(renderedInlineImage.width() / 2,
             renderedInlineImage.height() / 2).alpha() > 240,
         "Modern Chat inline image corners are rounded without clipping the center");
+
+    const QColor delayedImageColor(20, 180, 60);
+    QImage delayedImage(24, 24, QImage::Format_ARGB32_Premultiplied);
+    delayedImage.fill(delayedImageColor);
+    const QString delayedImagePath = avatarDirectory.filePath(QStringLiteral("late-inline.png"));
+    if (!delayedImage.save(delayedImagePath))
+    {
+        std::cerr << "delayed inline image fixture could not be saved\n";
+        delete avatarView;
+        delete view;
+        return 2;
+    }
+    const QString delayedImageSource = avatarView->cacheImageResource(delayedImagePath);
+    const QUrl delayedImageUrl(delayedImageSource);
+    const QString delayedImageHtml = QStringLiteral(
+        "late image <img src=\"%1\" width=\"24\" height=\"24\" alt=\"late image\" />")
+        .arg(delayedImageSource.toHtmlEscaped());
+    avatarOptions.senderId = QStringLiteral("late-image-user");
+    avatarOptions.senderName = QStringLiteral("Late Image User");
+    avatarStyle.appendContent(avatarView, delayedImageHtml, avatarOptions);
+    application.processEvents();
+    const QList<QFrame *> delayedImageFrames = avatarView->findChildren<QFrame *>(
+        QStringLiteral("modernChatBubbleFrame"));
+    QTextBrowser *delayedImageContent = delayedImageFrames.isEmpty() ? nullptr :
+        delayedImageFrames.constLast()->findChild<QTextBrowser *>(
+            QStringLiteral("modernChatBubbleContent"));
+    waitForTimeout(1500);
+    const QImage loadedDelayedImage = avatarView->document()->resource(
+        QTextDocument::ImageResource, delayedImageUrl).value<QImage>();
+    const QImage bubbleDelayedImage = delayedImageContent ? delayedImageContent->document()->resource(
+        QTextDocument::ImageResource, delayedImageUrl).value<QImage>() : QImage();
+    passed &= check(loadedDelayedImage.size() == delayedImage.size() &&
+        loadedDelayedImage.pixelColor(12, 12) == delayedImageColor,
+        "the shared image scheduler populates a late inline-image resource");
+    passed &= check(bubbleDelayedImage.size() == delayedImage.size() &&
+        bubbleDelayedImage.pixelColor(12, 12) == delayedImageColor,
+        "late inline images are propagated into the message bubble document");
+    if (delayedImageContent)
+    {
+        QTextDocument *bubbleDocument = delayedImageContent->document();
+        const QSize documentSize = bubbleDocument->size().toSize().expandedTo(QSize(1, 1));
+        QImage renderedBubbleDocument(documentSize, QImage::Format_ARGB32_Premultiplied);
+        renderedBubbleDocument.fill(Qt::transparent);
+        QPainter painter(&renderedBubbleDocument);
+        bubbleDocument->drawContents(&painter);
+        painter.end();
+        passed &= check(imageContainsColor(renderedBubbleDocument, delayedImageColor),
+            "late inline images are actually painted by the message bubble document");
+    }
+
+    const QColor networkImageColor(180, 40, 200);
+    const QUrl networkImageUrl(QStringLiteral("vacuum-matrix-image:/loaded-after-bubble"));
+    const QString networkImageHtml = QStringLiteral(
+        "network image <img src=\"%1\" width=\"20\" height=\"20\" alt=\"network image\" />")
+        .arg(networkImageUrl.toString(QUrl::FullyEncoded).toHtmlEscaped());
+    avatarOptions.senderId = QStringLiteral("network-image-user");
+    avatarOptions.senderName = QStringLiteral("Network Image User");
+    avatarStyle.appendContent(avatarView, networkImageHtml, avatarOptions);
+    application.processEvents();
+    const QList<QFrame *> networkImageFrames = avatarView->findChildren<QFrame *>(
+        QStringLiteral("modernChatBubbleFrame"));
+    QTextBrowser *networkImageContent = networkImageFrames.isEmpty() ? nullptr :
+        networkImageFrames.constLast()->findChild<QTextBrowser *>(
+            QStringLiteral("modernChatBubbleContent"));
+    QImage networkImage(20, 20, QImage::Format_ARGB32_Premultiplied);
+    networkImage.fill(networkImageColor);
+    avatarView->document()->addResource(QTextDocument::ImageResource, networkImageUrl, networkImage);
+    avatarView->resourceLoaded(networkImageUrl);
+    application.processEvents();
+    const QImage bubbleNetworkImage = networkImageContent ? networkImageContent->document()->resource(
+        QTextDocument::ImageResource, networkImageUrl).value<QImage>() : QImage();
+    passed &= check(bubbleNetworkImage.size() == networkImage.size() &&
+        bubbleNetworkImage.pixelColor(10, 10) == networkImageColor,
+        "resourceLoaded images reach the message bubble document");
 
     const int bubbleFrameCountBefore = avatarView->findChildren<QFrame *>(
         QStringLiteral("modernChatBubbleFrame")).size();

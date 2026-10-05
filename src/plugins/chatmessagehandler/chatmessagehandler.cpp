@@ -7,6 +7,7 @@
 #include <utils/systemtimezonecache.h>
 #include <utils/matrixhtml.h>
 #include <utils/imageloadscheduler.h>
+#include <utils/animatedtextbrowser.h>
 #include <utils/roundedavatar.h>
 #include <utils/messagenotificationmute.h>
 #include <interfaces/iemoticons.h>
@@ -47,6 +48,12 @@
 #include <QThreadPool>
 #include <QRunnable>
 #include <QScrollBar>
+
+static void notifyImageResourceUpdated(QTextEdit *view, const QUrl &resourceUrl)
+{
+	if (AnimatedTextBrowser *browser = qobject_cast<AnimatedTextBrowser *>(view))
+		emit browser->resourceUpdated(resourceUrl);
+}
 
 #define HISTORY_MESSAGES          10
 #define HISTORY_TIME_DELTA        5
@@ -106,6 +113,7 @@ static QString cacheReplyAvatarResource(QTextEdit *view, const QString &path, QO
 				doc->addResource(QTextDocument::ImageResource, resourceUrl, image);
 				doc->markContentsDirty(0, doc->characterCount());
 				guardedView->viewport()->update();
+				notifyImageResourceUpdated(guardedView, resourceUrl);
 			});
 		}
 	}
@@ -914,8 +922,10 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 	else if (messageType == QStringLiteral("m.image") && !decodedImage.isNull() && !resourceUrl.isEmpty())
 	{
 		QTextEdit *view = qobject_cast<QTextEdit *>(AWindow->viewWidget()->styleWidget());
-		if (view)
+		if (view) {
 			view->document()->addResource(QTextDocument::ImageResource, QUrl(resourceUrl), decodedImage);
+			notifyImageResourceUpdated(view, QUrl(resourceUrl));
+		}
 		const QString escapedUrl = resourceUrl.toHtmlEscaped();
 		const QString escapedAlt = body.toHtmlEscaped();
 		const QString imageHtml = QStringLiteral(
