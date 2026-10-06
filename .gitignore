@@ -4,3 +4,4 @@ todos.md
 tests**
 tests/__pycache__
 *.log
+*.dll

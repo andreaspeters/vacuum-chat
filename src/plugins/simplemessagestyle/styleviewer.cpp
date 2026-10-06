@@ -120,7 +120,7 @@ void StyleViewer::addMessageBubble(QTextTable *ATable, const QString &AHtml, con
 		.arg(AFill.name(QColor::HexRgb)));
 
 	QVBoxLayout *layout = new QVBoxLayout(frame);
-	layout->setContentsMargins(6, 6, 6, 6);
+	layout->setContentsMargins(6, 3, 6, 6); // Tighter top/bottom margins so bubble height matches content
 	layout->setSpacing(0);
 
 	QTextBrowser *content = new QTextBrowser(frame);
@@ -144,6 +144,13 @@ void StyleViewer::addMessageBubble(QTextTable *ATable, const QString &AHtml, con
 	content->setPalette(palette);
 	content->document()->setDocumentMargin(0);
 	content->document()->setDefaultFont(document()->defaultFont());
+	// Ensure images rendered as inline elements have a valid font size,
+	// preventing "QFont::setPixelSize: Pixel size <= 0 (0)" warnings.
+	QFont bubbleFont = content->document()->defaultFont();
+	if (bubbleFont.pixelSize() <= 0 && bubbleFont.pointSizeF() <= 0) {
+		bubbleFont.setPointSize(10);
+	}
+	content->document()->setDefaultFont(bubbleFont);
 	content->document()->setDefaultStyleSheet(document()->defaultStyleSheet() +
 		QStringLiteral("\nbody { margin: 0; padding: 0; background: transparent; }\n") +
 		QStringLiteral(".xxxmessage { background-color: transparent; }"));

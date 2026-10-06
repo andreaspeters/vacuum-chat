@@ -22,6 +22,7 @@
 #include <iostream>
 
 #include "simplemessagestyle.h"
+#include <utils/matrixhtml.h>
 
 namespace {
 bool check(bool condition, const char *description)
@@ -563,6 +564,24 @@ int main(int argc, char **argv)
     passed &= checkLastBubbleFrame(avatarView, QColor(QStringLiteral("#e8f1ff")),
         QStringLiteral("outgoing bubble probe"),
         "outgoing consecutive-message QFrame renders rounded corners with rich text");
+
+    const QString singleLineMatrixHtml = matrixSafeHtml(
+        matrixMarkdownToSafeHtml(QStringLiteral("hallo")));
+    outgoingOptions.senderId = QStringLiteral("matrix-user");
+    outgoingOptions.time = outgoingOptions.time.addSecs(60);
+    avatarStyle.appendContent(avatarView, singleLineMatrixHtml, outgoingOptions);
+    application.processEvents();
+    const QList<QFrame *> matrixFrames = avatarView->findChildren<QFrame *>(
+        QStringLiteral("modernChatBubbleFrame"));
+    QTextBrowser *matrixContent = matrixFrames.isEmpty() ? nullptr :
+        matrixFrames.constLast()->findChild<QTextBrowser *>(
+            QStringLiteral("modernChatBubbleContent"));
+    passed &= check(matrixContent && matrixContent->toPlainText().trimmed() == QStringLiteral("hallo"),
+        "a one-line Matrix formatted body stays one line in the outgoing bubble");
+    passed &= check(matrixContent && matrixContent->document()->blockCount() == 1,
+        "a one-line Matrix formatted body does not create empty QTextDocument blocks");
+    passed &= check(matrixContent && matrixContent->document()->size().height() <= 60.0,
+        "a one-line Matrix formatted body does not create an over-height bubble");
     delete avatarView;
 
     StyleViewer lifetimeView(nullptr);

@@ -8,6 +8,7 @@
 #include <utils/matrixhtml.h>
 #include <utils/imageloadscheduler.h>
 #include <utils/animatedtextbrowser.h>
+#include <QKeyEvent>
 #include <utils/roundedavatar.h>
 #include <utils/messagenotificationmute.h>
 #include <interfaces/iemoticons.h>
@@ -137,6 +138,8 @@ ChatMessageHandler::ChatMessageHandler()
 	FRecentContacts = NULL;
 	FFileTransfer = NULL;
 	FProtocolRoster = NULL;
+	FReplyEscFilter = NULL;
+	FRoomInviteTarget.clear();
 }
 
 ChatMessageHandler::~ChatMessageHandler()
@@ -1668,6 +1671,35 @@ void ChatMessageHandler::setupRoomSidebar(IChatWindow *AWindow, IProtocolMessagi
 	connect(scroll->verticalScrollBar(), &QScrollBar::valueChanged, sidebar,
 		[requestVisibleMemberAvatars](int) { requestVisibleMemberAvatars(); });
 	QTimer::singleShot(0, sidebar, requestVisibleMemberAvatars);
+
+	// Invite people button at bottom of room sidebar
+	QPushButton *inviteButton = new QPushButton(sidebar);
+	inviteButton->setCursor(Qt::PointingHandCursor);
+	inviteButton->setFlat(true);
+	const QIcon inviteIcon = IconStorage::staticStorage(RSR_STORAGE_MENUICONS)->getIcon(MNI_MUC_INVITE);
+	if (!inviteIcon.isNull()) {
+		inviteButton->setIcon(inviteIcon);
+	} else {
+		// Fallback: use a simple "+" text as icon
+		QPixmap placeholder(16, 16);
+		placeholder.fill(Qt::transparent);
+		QPainter painter(&placeholder);
+		painter.setPen(QColor("#58a6ff"));
+		painter.setFont(QFont("Sans Serif", 12, QFont::Bold));
+		painter.drawText(placeholder.rect(), Qt::AlignCenter, "+");
+		painter.end();
+		inviteButton->setIcon(QIcon(placeholder));
+	}
+	inviteButton->setText(tr("Invite people"));
+	inviteButton->setStyleSheet(
+		QStringLiteral("QPushButton { padding: 4px 8px; border: none; background: transparent; color: #58a6ff; text-align: left; font-size: 12px; } "
+		               "QPushButton:hover { background-color: #f0f6fc; border-radius: 3px; }")
+	);
+	connect(inviteButton, &QPushButton::clicked, sidebar, [this, AMessaging, AWindow, currentRoom]() {
+		showRoomInviteDialog(AWindow->instance(), AMessaging, currentRoom);
+	});
+	layout->addWidget(inviteButton);
+
 	AWindow->setSidebarWidget(sidebar);
 }
 
@@ -1719,6 +1751,19 @@ void ChatMessageHandler::setupProtocolWindow(IChatWindow *AWindow, IProtocolMess
 	if (!avatarPath.isEmpty())
 		AWindow->infoWidget()->setField(IInfoWidget::ContactAvatar, avatarPath);
 	setupRoomSidebar(AWindow, AMessaging);
+
+	// Install ESC-to-cancel-reply filter on the edit widget for Matrix windows
+	if (AMessaging && AMessaging->protocol() == QStringLiteral("matrix")) {
+		IEditWidget *editWidget = AWindow->editWidget();
+		if (editWidget && editWidget->textEdit()) {
+			QTextEdit *editor = editWidget->textEdit();
+			if (!FReplyEscFilter) {
+				FReplyEscFilter = new QObject(editor);
+			}
+			editor->installEventFilter(FReplyEscFilter);
+			connect(FReplyEscFilter, SIGNAL(destroyed(QObject*)), SLOT(onReplyEscFilterDestroyed()));
+		}
+	}
 
 	AWindow->setTabPageNotifier(FMessageWidgets->newTabPageNotifier(AWindow));
 	connect(AWindow->instance(),SIGNAL(messageReady()),SLOT(onMessageReady()));
@@ -2272,4 +2317,87 @@ void ChatMessageHandler::onStyleOptionsChanged(const IMessageStyleOptions &AOpti
 	}
 }
 
+bool ChatMessageHandler::eventFilter(QObject *AWatched, QEvent *AEvent)
+{
+	if (AEvent->type() == QEvent::KeyPress) {
+		QKeyEvent *keyEvent = static_cast<QKeyEvent *>(AEvent);
+		if (keyEvent->key() == Qt::Key_Escape) {
+			QTextEdit *editor = qobject_cast<QTextEdit *>(AWatched);
+			if (editor) {
+				QString replyEventId = editor->property("vacuum.matrix.reply_event_id").toString();
+				if (!replyEventId.isEmpty()) {
+					// Cancel the active reply
+					editor->setProperty("vacuum.matrix.reply_event_id", QVariant());
+					QString originalPlaceholder = editor->property("vacuum.matrix.reply_original_placeholder").toString();
+					if (!originalPlaceholder.isEmpty()) {
+						editor->setPlaceholderText(originalPlaceholder);
+						editor->setProperty("vacuum.matrix.reply_original_placeholder", QVariant());
+					}
+					return true; // Consume the event so it doesn't trigger window close
+				}
+			}
+		}
+	}
+	return QObject::eventFilter(AWatched, AEvent);
+}
 
+void ChatMessageHandler::onReplyEscFilterDestroyed()
+{
+	FReplyEscFilter = NULL;
+}
+
+void ChatMessageHandler::showRoomInviteDialog(QWidget *AParent, IProtocolMessaging *AMessaging,
+	const ProtocolRoom &ARoom)
+{
+	if (!AMessaging || ARoom.id.isEmpty())
+		return;
+
+	IProtocolRoster *roster = nullptr;
+	if (FPluginManager) {
+		for (IPlugin *plugin : FPluginManager->pluginInterface("IProtocolRoster")) {
+			IProtocolRoster *candidate = qobject_cast<IProtocolRoster *>(plugin->instance());
+			if (candidate && candidate->streamId() == AMessaging->streamId()) {
+				roster = candidate;
+				break;
+			}
+		}
+	}
+
+	QDialog *dialog = new QDialog(AParent);
+	dialog->setAttribute(Qt::WA_DeleteOnClose);
+	dialog->setWindowTitle(tr("Invite People to %1").arg(ARoom.name.isEmpty() ? ARoom.id : ARoom.name));
+	QVBoxLayout *layout = new QVBoxLayout(dialog);
+	layout->setContentsMargins(12, 12, 12, 12);
+	layout->setSpacing(8);
+
+		QLabel *infoLabel = new QLabel(tr("Enter a Matrix user ID to invite (e.g. @user:server):"), dialog);
+		infoLabel->setWordWrap(true);
+		layout->addWidget(infoLabel);
+
+		QLineEdit *userIdEdit = new QLineEdit(dialog);
+	userIdEdit->setPlaceholderText(tr("@user:server"));
+	layout->addWidget(userIdEdit);
+
+		QDialogButtonBox *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, dialog);
+		connect(buttons, &QDialogButtonBox::accepted, dialog, &QDialog::accept);
+		connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
+		layout->addWidget(buttons);
+
+		connect(dialog, &QDialog::accepted, dialog, [this, AMessaging, ARoom, userIdEdit]() {
+			const QString userId = userIdEdit->text().trimmed();
+			if (!userId.isEmpty()) {
+				// Check if it's a valid Matrix ID format
+				QRegularExpression matrixIdRegex(R"(^@[\w\.\-=\/]+:[\w\.\-=\/]+$)");
+				if (matrixIdRegex.match(userId).hasMatch()) {
+					// Call Matrix-specific invite method through MatrixNetwork directly
+					MatrixNetwork *network = qobject_cast<MatrixNetwork *>(AMessaging);
+					if (network) {
+						network->changeRoomMembership(ARoom.id, "invite");
+					}
+				}
+			}
+		});
+
+	dialog->resize(360, 300);
+	dialog->exec();
+}

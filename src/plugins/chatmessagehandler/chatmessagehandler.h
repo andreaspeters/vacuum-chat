@@ -113,6 +113,8 @@ protected:
 	void setupRoomSidebar(IChatWindow *AWindow, IProtocolMessaging *AMessaging);
 	void showRoomMemberProfile(QWidget *AParent, IProtocolMessaging *AMessaging,
 		const ProtocolRoom &ARoom, const ProtocolRosterEntry &AMember);
+	void showRoomInviteDialog(QWidget *AParent, IProtocolMessaging *AMessaging,
+		const ProtocolRoom &ARoom);
 	void renderProtocolMessage(IChatWindow *AWindow, IProtocolMessaging *AMessaging, const BasicMessage &AMessage);
 	void renderProtocolHistory(IChatWindow *AWindow, IProtocolMessaging *AMessaging);
 	void rebuildProtocolConversation(IChatWindow *AWindow, IProtocolMessaging *AMessaging,
@@ -134,7 +136,11 @@ protected:
 	void showStyledStatus(IChatWindow *AWindow, const QString &AMessage, bool ADontSave=false, const QDateTime &ATime=QDateTime::currentDateTime());
 	void showStyledMessage(IChatWindow *AWindow, const Message &AMessage);
 	bool isSelectionAccepted(const QList<IRosterIndex *> &ASelected) const;
+protected:
+	virtual bool eventFilter(QObject *AWatched, QEvent *AEvent) override;
 protected slots:
+	void onCancelReplyOnEsc();
+	void onReplyEscFilterDestroyed();
 	void onProtocolMessageReceived(const BasicMessage &AMessage);
 	void onProtocolHistoryLoaded(const QString &ARoomId);
 	void onProtocolViewContextMenu(const QPoint &APosition,
@@ -195,6 +201,8 @@ private:
 private:
 	QMap<QString, IChatWindow *> FHistoryRequests;
 	QMap<IChatWindow *, QList<Message> > FPendingMessages;
+	QObject *FReplyEscFilter;
+	QString FRoomInviteTarget;
 };
 
 #endif // CHATMESSAGEHANDLER_H
