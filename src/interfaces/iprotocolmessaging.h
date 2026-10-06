@@ -43,6 +43,9 @@ public:
     { (void)conversationId; (void)eventId; (void)key; return false; }
     virtual bool supportsTyping(const ConversationId &conversationId) const
     { (void)conversationId; return false; }
+    virtual bool supportsRoomInvites() const { return false; }
+    virtual bool inviteUserToRoom(const ConversationId &roomId, const UserId &userId)
+    { (void)roomId; (void)userId; return false; }
     virtual void setTyping(const ConversationId &conversationId, ProtocolTypingStatus status)
     { (void)conversationId; (void)status; }
     virtual QList<BasicMessage> conversationHistory(const ConversationId &conversationId) const

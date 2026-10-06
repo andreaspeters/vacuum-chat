@@ -139,6 +139,7 @@ public:
 	Q_INVOKABLE void searchPublicRooms(const QString &directoryServer, const QString &searchTerm,
 		int limit = 25, const QString &since = QString());
 	Q_INVOKABLE void startDirectChat(const QString &userId);
+	Q_INVOKABLE void inviteUserToRoom(const QString &roomId, const QString &userId);
 	Q_INVOKABLE void leaveRoom(const QString &roomId);
 	Q_INVOKABLE void uploadFileAndSend(const QString &roomId, const QString &filePath, const QString &mimeType,
 		const QString &messageType, const QString &body, const QString &txnId);

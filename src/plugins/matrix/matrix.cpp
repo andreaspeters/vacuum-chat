@@ -1,5 +1,6 @@
 #include "matrix.h"
 #include "matrixnetwork.h"
+#include "matrixroominvite.h"
 #include "matrixdatabase.h"
 #include "matrixverificationdialog.h"
 #include "matrixjoinroomchatdialog.h"
@@ -23,7 +24,7 @@
 #include <QInputDialog>
 #include <QMessageBox>
 #include <QTimer>
-
+#include <QPointer>
 
 #include <QCryptographicHash>
 #include <QStandardPaths>
@@ -1047,6 +1048,25 @@ bool Matrix::sendMessage(const BasicMessage &message)
 			}, Qt::QueuedConnection);
 	}
 	return true;
+}
+
+bool Matrix::supportsRoomInvites() const
+{
+	return FMatrixNetwork && FNetworkLoggedIn;
+}
+
+bool Matrix::inviteUserToRoom(const ConversationId &roomId, const UserId &userId)
+{
+	MatrixRoomInvite::Request inviteRequest;
+	if (!supportsRoomInvites() || !MatrixRoomInvite::buildRequest(roomId, userId, inviteRequest))
+		return false;
+
+	QPointer<MatrixNetwork> network = FMatrixNetwork;
+	return QMetaObject::invokeMethod(FMatrixNetwork,
+		[network, roomId, userId]() {
+			if (network)
+				network->inviteUserToRoom(roomId, userId);
+		}, Qt::QueuedConnection);
 }
 
 bool Matrix::supportsTyping(const ConversationId &conversationId) const

@@ -55,6 +55,8 @@ public:
 	virtual void appendNotification(const ProtocolNotification &notification) override;
 	virtual void removeNotification(const QString &id) override;
 	virtual bool sendMessage(const BasicMessage &message);
+	virtual bool supportsRoomInvites() const override;
+	virtual bool inviteUserToRoom(const ConversationId &roomId, const UserId &userId) override;
 	virtual bool supportsReactions(const ConversationId &conversationId) const;
 	virtual bool sendReaction(const ConversationId &conversationId, const MessageId &eventId,
 		const QString &key);

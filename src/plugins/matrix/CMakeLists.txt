@@ -55,6 +55,9 @@ if (BUILD_TESTING)
 	add_executable(matrix_direct_room_tests EXCLUDE_FROM_ALL
 		matrixdirectroom_test.cpp matrixdirectroom.cpp)
 	target_link_libraries(matrix_direct_room_tests PRIVATE Qt6::Core Qt6::Network)
+	add_executable(matrix_room_invite_tests EXCLUDE_FROM_ALL
+		matrixroominvite_test.cpp matrixroominvite.cpp matrixdirectroom.cpp)
+	target_link_libraries(matrix_room_invite_tests PRIVATE Qt6::Core Qt6::Network)
 	add_executable(matrix_join_dialog_tests EXCLUDE_FROM_ALL
 		matrixjoinroomchatdialog_test.cpp matrixjoinroomchatdialog.cpp matrixdirectroom.cpp
 		matrixpublicrooms.cpp)

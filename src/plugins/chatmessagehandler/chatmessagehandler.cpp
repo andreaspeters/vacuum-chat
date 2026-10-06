@@ -35,7 +35,7 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QPushButton>
-#include <QRegularExpression>
+#include <QMessageBox>
 #include <QTextEdit>
 #include <QTextDocument>
 #include <QTextBoundaryFinder>
@@ -1672,33 +1672,32 @@ void ChatMessageHandler::setupRoomSidebar(IChatWindow *AWindow, IProtocolMessagi
 		[requestVisibleMemberAvatars](int) { requestVisibleMemberAvatars(); });
 	QTimer::singleShot(0, sidebar, requestVisibleMemberAvatars);
 
-	// Invite people button at bottom of room sidebar
-	QPushButton *inviteButton = new QPushButton(sidebar);
-	inviteButton->setCursor(Qt::PointingHandCursor);
-	inviteButton->setFlat(true);
-	const QIcon inviteIcon = IconStorage::staticStorage(RSR_STORAGE_MENUICONS)->getIcon(MNI_MUC_INVITE);
-	if (!inviteIcon.isNull()) {
-		inviteButton->setIcon(inviteIcon);
-	} else {
-		// Fallback: use a simple "+" text as icon
-		QPixmap placeholder(16, 16);
-		placeholder.fill(Qt::transparent);
-		QPainter painter(&placeholder);
-		painter.setPen(QColor("#58a6ff"));
-		painter.setFont(QFont("Sans Serif", 12, QFont::Bold));
-		painter.drawText(placeholder.rect(), Qt::AlignCenter, "+");
-		painter.end();
-		inviteButton->setIcon(QIcon(placeholder));
+	// Show the invite action only for protocols that support room invitations.
+	if (AMessaging->supportsRoomInvites()) {
+		QPushButton *inviteButton = new QPushButton(sidebar);
+		inviteButton->setCursor(Qt::PointingHandCursor);
+		inviteButton->setFlat(true);
+		const QIcon inviteIcon = IconStorage::staticStorage(RSR_STORAGE_MENUICONS)->getIcon(MNI_MUC_INVITE);
+		if (!inviteIcon.isNull()) {
+			inviteButton->setIcon(inviteIcon);
+		} else {
+			QPixmap placeholder(16, 16);
+			placeholder.fill(Qt::transparent);
+			QPainter painter(&placeholder);
+			painter.setPen(QColor("#58a6ff"));
+			painter.setFont(QFont("Sans Serif", 12, QFont::Bold));
+			painter.drawText(placeholder.rect(), Qt::AlignCenter, "+");
+			inviteButton->setIcon(QIcon(placeholder));
+		}
+		inviteButton->setStyleSheet(
+			QStringLiteral("QPushButton { padding: 4px 8px; border: none; background: transparent; color: #58a6ff; text-align: left; font-size: 12px; } "
+			               "QPushButton:hover { background-color: #f0f6fc; border-radius: 3px; }")
+		);
+		connect(inviteButton, &QPushButton::clicked, sidebar, [this, AMessaging, AWindow, currentRoom]() {
+			showRoomInviteDialog(AWindow->instance(), AMessaging, currentRoom);
+		});
+		layout->addWidget(inviteButton);
 	}
-	inviteButton->setText(tr("Invite people"));
-	inviteButton->setStyleSheet(
-		QStringLiteral("QPushButton { padding: 4px 8px; border: none; background: transparent; color: #58a6ff; text-align: left; font-size: 12px; } "
-		               "QPushButton:hover { background-color: #f0f6fc; border-radius: 3px; }")
-	);
-	connect(inviteButton, &QPushButton::clicked, sidebar, [this, AMessaging, AWindow, currentRoom]() {
-		showRoomInviteDialog(AWindow->instance(), AMessaging, currentRoom);
-	});
-	layout->addWidget(inviteButton);
 
 	AWindow->setSidebarWidget(sidebar);
 }
@@ -2349,19 +2348,8 @@ void ChatMessageHandler::onReplyEscFilterDestroyed()
 void ChatMessageHandler::showRoomInviteDialog(QWidget *AParent, IProtocolMessaging *AMessaging,
 	const ProtocolRoom &ARoom)
 {
-	if (!AMessaging || ARoom.id.isEmpty())
+	if (!AMessaging || !AMessaging->supportsRoomInvites() || ARoom.id.isEmpty())
 		return;
-
-	IProtocolRoster *roster = nullptr;
-	if (FPluginManager) {
-		for (IPlugin *plugin : FPluginManager->pluginInterface("IProtocolRoster")) {
-			IProtocolRoster *candidate = qobject_cast<IProtocolRoster *>(plugin->instance());
-			if (candidate && candidate->streamId() == AMessaging->streamId()) {
-				roster = candidate;
-				break;
-			}
-		}
-	}
 
 	QDialog *dialog = new QDialog(AParent);
 	dialog->setAttribute(Qt::WA_DeleteOnClose);
@@ -2379,24 +2367,18 @@ void ChatMessageHandler::showRoomInviteDialog(QWidget *AParent, IProtocolMessagi
 	layout->addWidget(userIdEdit);
 
 	QDialogButtonBox *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, dialog);
-	connect(buttons, &QDialogButtonBox::accepted, dialog, &QDialog::accept);
+	connect(buttons, &QDialogButtonBox::accepted, dialog,
+		[this, AMessaging, ARoom, userIdEdit, dialog]() {
+			const QString userId = userIdEdit->text().trimmed();
+			if (!AMessaging->inviteUserToRoom(ARoom.id, userId)) {
+				QMessageBox::warning(dialog, tr("Invite failed"),
+					tr("The Matrix invitation could not be queued. Check the user ID and connection."));
+				return;
+			}
+			dialog->accept();
+		});
 	connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
 	layout->addWidget(buttons);
-
-	connect(dialog, &QDialog::accepted, dialog, [this, AMessaging, ARoom, userIdEdit]() {
-		const QString userId = userIdEdit->text().trimmed();
-		if (!userId.isEmpty()) {
-			// Check if it's a valid Matrix ID format
-			QRegularExpression matrixIdRegex(R"(^@[\w\.\-=\/]+:[\w\.\-=\/]+$)");
-			if (matrixIdRegex.match(userId).hasMatch()) {
-				// Call Matrix-specific invite method through MatrixNetwork directly
-				MatrixNetwork *network = qobject_cast<MatrixNetwork *>(AMessaging);
-				if (network) {
-					network->changeRoomMembership(ARoom.id, "invite", userId);
-				}
-			}
-		}
-	});
 
 	dialog->resize(360, 300);
 	dialog->exec();
