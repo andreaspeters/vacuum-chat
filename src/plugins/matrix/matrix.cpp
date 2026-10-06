@@ -4,7 +4,7 @@
 #include "matrixverificationdialog.h"
 #include "matrixjoinroomchatdialog.h"
 #include "matrixcontext.h"
-#include <utils/matrixhtml.h>
+#include "matrixtextmessage.h"
 #include <interfaces/matrixreply.h>
 #include <utils/action.h>
 #include <utils/menu.h>
@@ -989,19 +989,18 @@ bool Matrix::sendMessage(const BasicMessage &message)
 	const QString messageType = metadata.value(QStringLiteral("msgtype"),
 		QStringLiteral("m.text")).toString();
 	QString body = message.body();
+	MatrixTextMessagePayload textPayload;
+	if (messageType == QStringLiteral("m.text")) {
+		textPayload = createMatrixTextMessagePayload(body, metadata);
+		metadata = textPayload.localEchoMetadata;
+	}
 	BasicMessage localEcho(transactionId, message.conversationId(),
 		FNetworkUserId, QString(), body, QDateTime::currentDateTimeUtc(),
 		QStringLiteral("matrix"), BasicMessage::Outgoing);
 	localEcho.setMetadata(metadata);
 	emit protocolMessageReceived(localEcho);
 	if (messageType == QStringLiteral("m.text")) {
-		const QString formattedBody = metadata.value(QStringLiteral("formatted_body")).toString();
-		QJsonObject content;
-		content.insert(QStringLiteral("msgtype"), QStringLiteral("m.text"));
-		content.insert(QStringLiteral("body"), body);
-		content.insert(QStringLiteral("format"), QStringLiteral("org.matrix.custom.html"));
-		content.insert(QStringLiteral("formatted_body"),
-			matrixSafeHtml(formattedBody.isEmpty() ? matrixMarkdownToSafeHtml(body) : formattedBody));
+		QJsonObject content = textPayload.content;
 		content = MatrixReply::applyRelation(content,
 			metadata.value(QStringLiteral("reply_to_event_id")).toString());
 		const QString roomId = message.conversationId();

@@ -96,6 +96,29 @@ QString safeMarkdownFragment(const QString &markdown)
 	return sanitize(QTextDocumentFragment(cursor).toHtml());
 }
 
+QString normalizeCodeBlocks(QString html)
+{
+	const QRegularExpression preBlock(QStringLiteral("<pre>(.*?)</pre>"),
+		QRegularExpression::DotMatchesEverythingOption);
+	const QRegularExpression codeElement(QStringLiteral("^<code>(.*)</code>$"),
+		QRegularExpression::DotMatchesEverythingOption);
+	QRegularExpressionMatch match = preBlock.match(html);
+	while (match.hasMatch()) {
+		QString code = match.captured(1);
+		const QRegularExpressionMatch codeMatch = codeElement.match(code);
+		if (codeMatch.hasMatch())
+			code = codeMatch.captured(1);
+		if (!code.endsWith(QLatin1Char('\n')))
+			code.append(QLatin1Char('\n'));
+		const QString replacement = QStringLiteral("<pre><code>") + code +
+			QStringLiteral("</code></pre>");
+		const int start = match.capturedStart();
+		html.replace(start, match.capturedLength(), replacement);
+		match = preBlock.match(html, start + replacement.size());
+	}
+	return html.trimmed() + (html.trimmed().isEmpty() ? QString() : QStringLiteral("\n"));
+}
+
 }
 
 QString matrixMarkdownToSafeHtml(const QString &markdown)
@@ -129,6 +152,7 @@ QString matrixMarkdownToSafeHtml(const QString &markdown)
 		fragment.replace(QStringLiteral("<p>") + it.key() + QStringLiteral("</p>"), it.value());
 		fragment.replace(it.key(), it.value());
 	}
+	fragment = normalizeCodeBlocks(fragment);
 	fragment.replace(QStringLiteral("<table>"),
 		QStringLiteral("<table style=\"border-collapse:collapse; margin:6px 0;\">"));
 	fragment.replace(QStringLiteral("<th>"),

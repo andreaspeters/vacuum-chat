@@ -70,5 +70,12 @@ int main(int argc, char **argv)
         highlightedShortMention.contains(shortMention + QStringLiteral("</span>")),
         "short user-id mention tokens are highlighted");
 
+    const QString codeMarkdown = QStringLiteral("```\ntest\n```");
+    const QString expectedCodeHtml = QStringLiteral("<pre><code>test\n</code></pre>\n");
+    const QString actualCodeHtml = matrixSafeHtml(matrixMarkdownToSafeHtml(codeMarkdown));
+
+    passed &= check(actualCodeHtml == expectedCodeHtml,
+        "fenced Markdown becomes the expected Matrix formatted_body");
+
     return passed ? 0 : 1;
 }
