@@ -35,4 +35,15 @@ if (BUILD_TESTING)
 	target_include_directories(chatmessagehandler_rounded_avatar_tests PRIVATE "${CMAKE_SOURCE_DIR}/src")
 	target_compile_features(chatmessagehandler_rounded_avatar_tests PRIVATE cxx_std_11)
 	target_link_libraries(chatmessagehandler_rounded_avatar_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets)
+
+	add_executable(chatmessagehandler_protocol_capabilities_tests EXCLUDE_FROM_ALL
+		protocolmessaging_capabilities_test.cpp)
+	target_include_directories(chatmessagehandler_protocol_capabilities_tests PRIVATE "${CMAKE_SOURCE_DIR}/src")
+	target_compile_features(chatmessagehandler_protocol_capabilities_tests PRIVATE cxx_std_11)
+	target_link_libraries(chatmessagehandler_protocol_capabilities_tests PRIVATE Qt6::Core)
+	add_executable(chatmessagehandler_plugin_load_tests EXCLUDE_FROM_ALL
+		chatmessagehandler_plugin_load_test.cpp)
+	target_link_libraries(chatmessagehandler_plugin_load_tests PRIVATE Qt6::Core Qt6::Widgets)
+	target_compile_features(chatmessagehandler_plugin_load_tests PRIVATE cxx_std_11)
+	add_dependencies(chatmessagehandler_plugin_load_tests chatmessagehandler)
 endif()

@@ -159,9 +159,7 @@ IXmppStream *Account::xmppStream() const
 
 IProtocolAccount::ProtocolKind Account::protocolKind() const
 {
-	return FOptionsNode.value("type").toString().compare("matrix", Qt::CaseInsensitive) == 0
-			? ProtocolMatrix : (FOptionsNode.value("type").toString().compare("meshcore", Qt::CaseInsensitive) == 0 
-			? ProtocolMeshCore : ProtocolXmpp);
+	return protocolKindForType(FOptionsNode.value("type").toString());
 }
 
 IProtocolAccount::Capabilities Account::capabilities() const

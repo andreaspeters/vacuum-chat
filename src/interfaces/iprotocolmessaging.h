@@ -38,6 +38,22 @@ public:
     virtual bool sendMessage(const BasicMessage &message) = 0;
     virtual bool supportsReactions(const ConversationId &conversationId) const
     { (void)conversationId; return false; }
+    virtual bool supportsReplies(const ConversationId &conversationId) const
+    { (void)conversationId; return false; }
+    virtual bool providesAvatarUpdateSignals() const { return false; }
+    virtual bool providesHistoryLoadedSignals() const { return false; }
+    virtual bool supportsConversationMedia() const { return false; }
+    virtual bool supportsFileTransfer() const { return false; }
+    virtual bool isEventIdLike(const QString &eventId) const
+    { (void)eventId; return false; }
+    virtual QString replyPreviewHtml(const QString &senderName, const QString &excerpt, const QString &avatarResourceUrl) const
+    { (void)senderName; (void)excerpt; (void)avatarResourceUrl; return QString(); }
+    virtual QString stripReplyFallback(const QString &body, const QString &formatType) const
+    { (void)body; (void)formatType; return body; }
+    virtual QString sanitizeHtml(const QString &html) const
+    { return html; }
+    virtual QString highlightMentions(const QString &text) const
+    { return text; }
     virtual bool sendReaction(const ConversationId &conversationId, const MessageId &eventId,
         const QString &key)
     { (void)conversationId; (void)eventId; (void)key; return false; }

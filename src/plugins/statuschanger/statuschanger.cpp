@@ -1,4 +1,5 @@
 #include "statuschanger.h"
+#include "protocolpresencerouting.h"
 #include <QRandomGenerator>
 
 #include <QTimer>
@@ -22,7 +23,6 @@ StatusChanger::StatusChanger()
 	FOptionsManager = NULL;
 	FAccountManager = NULL;
 	FNotifications = NULL;
-	FProtocolPresence = NULL;
 
 	FMainMenu = NULL;
 	FModifyStatus = NULL;
@@ -53,38 +53,25 @@ void StatusChanger::pluginInfo(IPluginInfo *APluginInfo)
 
 bool StatusChanger::initConnections(IPluginManager *APluginManager, int &AInitOrder)
 {
-	Q_UNUSED(AInitOrder);
-	FPluginManager = APluginManager;
+    Q_UNUSED(AInitOrder);
+    FPluginManager = APluginManager;
 
-	IPlugin *plugin = APluginManager->pluginInterface("IPresencePlugin").value(0,NULL);
-	if (plugin)
-	{
-		FPresencePlugin = qobject_cast<IPresencePlugin *>(plugin->instance());
-		if (FPresencePlugin)
-		{
-			connect(FPresencePlugin->instance(),SIGNAL(presenceAdded(IPresence *)),
-				SLOT(onPresenceAdded(IPresence *)));
-			connect(FPresencePlugin->instance(),SIGNAL(presenceChanged(IPresence *, int, const QString &, int)),
-				SLOT(onPresenceChanged(IPresence *, int, const QString &, int)));
-			connect(FPresencePlugin->instance(),SIGNAL(presenceRemoved(IPresence *)),
-				SLOT(onPresenceRemoved(IPresence *)));
-		}
-	}
+    IPlugin *plugin = APluginManager->pluginInterface("IPresencePlugin").value(0,NULL);
+    if (plugin)
+    {
+        FPresencePlugin = qobject_cast<IPresencePlugin *>(plugin->instance());
+        if (FPresencePlugin)
+        {
+            connect(FPresencePlugin->instance(),SIGNAL(presenceAdded(IPresence *)),
+                SLOT(onPresenceAdded(IPresence *)));
+            connect(FPresencePlugin->instance(),SIGNAL(presenceChanged(IPresence *, int, const QString &, int)),
+                SLOT(onPresenceChanged(IPresence *, int, const QString &, int)));
+            connect(FPresencePlugin->instance(),SIGNAL(presenceRemoved(IPresence *)),
+                SLOT(onPresenceRemoved(IPresence *)));
+        }
+    }
 
-	plugin = APluginManager->pluginInterface("IProtocolPresence").value(0,NULL);
-	if (plugin)
-	{
-		FProtocolPresence = qobject_cast<IProtocolPresence *>(plugin->instance());
-		if (FProtocolPresence)
-		{
-			connect(FProtocolPresence->instance(),SIGNAL(protocolPresenceChanged(QString,int,QString)),
-				SLOT(onProtocolPresenceChanged(QString,int,QString)));
-			connect(FProtocolPresence->instance(),SIGNAL(protocolPresenceClosed(QString)),
-				SLOT(onProtocolPresenceClosed(QString)));
-			if (!FProtocolPresence->streamId().isEmpty())
-				FProtocolStatuses.insert(FProtocolPresence->streamId(), FProtocolPresence->show());
-		}
-	}
+    bindProtocolPresenceProviders();
 
 	plugin = APluginManager->pluginInterface("IRosterPlugin").value(0,NULL);
 	if (plugin)
@@ -175,6 +162,27 @@ bool StatusChanger::initConnections(IPluginManager *APluginManager, int &AInitOr
 	connect(APluginManager->instance(),SIGNAL(shutdownStarted()),SLOT(onShutdownStarted()));
 
 	return FPresencePlugin!=NULL;
+}
+
+void StatusChanger::bindProtocolPresenceProviders()
+{
+	if (!FPluginManager)
+		return;
+
+	for (IPlugin *plugin : FPluginManager->pluginInterface("IProtocolPresence")) {
+		IProtocolPresence *provider = plugin
+			? qobject_cast<IProtocolPresence *>(plugin->instance()) : nullptr;
+		if (!provider || FProtocolPresences.contains(provider))
+			continue;
+
+		FProtocolPresences.append(provider);
+		connect(provider->instance(), SIGNAL(protocolPresenceChanged(QString,int,QString)),
+			this, SLOT(onProtocolPresenceChanged(QString,int,QString)), Qt::UniqueConnection);
+		connect(provider->instance(), SIGNAL(protocolPresenceClosed(QString)),
+			this, SLOT(onProtocolPresenceClosed(QString)), Qt::UniqueConnection);
+		if (!provider->streamId().isEmpty())
+			FProtocolStatuses.insert(provider->streamId(), provider->show());
+	}
 }
 
 bool StatusChanger::initObjects()
@@ -269,23 +277,7 @@ bool StatusChanger::initSettings()
 
 bool StatusChanger::startPlugin()
 {
-	if (!FProtocolPresence && FPluginManager)
-	{
-		IPlugin *plugin = FPluginManager->pluginInterface("IProtocolPresence").value(0,NULL);
-		if (plugin)
-		{
-			FProtocolPresence = qobject_cast<IProtocolPresence *>(plugin->instance());
-			if (FProtocolPresence)
-			{
-				connect(FProtocolPresence->instance(),SIGNAL(protocolPresenceChanged(QString,int,QString)),
-					SLOT(onProtocolPresenceChanged(QString,int,QString)),Qt::UniqueConnection);
-				connect(FProtocolPresence->instance(),SIGNAL(protocolPresenceClosed(QString)),
-					SLOT(onProtocolPresenceClosed(QString)),Qt::UniqueConnection);
-			}
-		}
-	}
-	if (FProtocolPresence && !FProtocolPresence->streamId().isEmpty())
-		FProtocolStatuses.insert(FProtocolPresence->streamId(), FProtocolPresence->show());
+	bindProtocolPresenceProviders();
 	updateMainMenu();
 	return true;
 }
@@ -383,48 +375,41 @@ int StatusChanger::streamStatus(const Jid &AStreamJid) const
 QList<AccountId> StatusChanger::statusAccounts(int AStatusId) const
 {
 	QList<AccountId> accounts;
-	if (FProtocolPresence && accountStatus(FProtocolPresence->streamId()) == AStatusId)
-		accounts.append(FProtocolPresence->streamId());
+	for (IProtocolPresence *presence : FProtocolPresences) {
+		if (!presence || presence->streamId().isEmpty())
+			continue;
+		const QList<int> statuses = statusByShow(presence->show());
+		if (!statuses.isEmpty() && statuses.first() == AStatusId)
+			accounts.append(presence->streamId());
+	}
 	return accounts;
 }
 
 int StatusChanger::accountStatus(const AccountId &AAccountId) const
 {
-	if (FProtocolPresence && FProtocolPresence->streamId() == AAccountId)
-	{
-		QList<int> statuses = statusByShow(FProtocolPresence->show());
-		return statuses.isEmpty() ? STATUS_NULL_ID : statuses.first();
-	}
-	return STATUS_NULL_ID;
+	IProtocolPresence *presence = ProtocolPresenceRouting::providerForAccountId(
+		FProtocolPresences, AAccountId);
+	if (!presence)
+		return STATUS_NULL_ID;
+	const QList<int> statuses = statusByShow(presence->show());
+	return statuses.isEmpty() ? STATUS_NULL_ID : statuses.first();
 }
 
 void StatusChanger::setAccountStatus(const AccountId &AAccountId, int AStatusId)
 {
-	if (FProtocolPresence && FProtocolPresence->streamId() == AAccountId && FStatusItems.contains(AStatusId))
-	{
-		const StatusItem status = FStatusItems.value(AStatusId);
-		FProtocolPresence->setPresence(status.show, status.text);
+	if (!FStatusItems.contains(AStatusId))
+		return;
+	const StatusItem status = FStatusItems.value(AStatusId);
+	if (ProtocolPresenceRouting::setPresenceForAccountId(FProtocolPresences,
+		AAccountId, status.show, status.text)) {
+		FProtocolStatuses.insert(AAccountId, status.show);
 		updateMainMenu();
 	}
 }
 
 void StatusChanger::setStreamStatus(const Jid &AStreamJid, int AStatusId)
 {
-	if (!FProtocolPresence && FPluginManager)
-	{
-		IPlugin *plugin = FPluginManager->pluginInterface("IProtocolPresence").value(0,NULL);
-		if (plugin)
-		{
-			FProtocolPresence = qobject_cast<IProtocolPresence *>(plugin->instance());
-			if (FProtocolPresence)
-			{
-				connect(FProtocolPresence->instance(),SIGNAL(protocolPresenceChanged(QString,int,QString)),
-					SLOT(onProtocolPresenceChanged(QString,int,QString)),Qt::UniqueConnection);
-				connect(FProtocolPresence->instance(),SIGNAL(protocolPresenceClosed(QString)),
-					SLOT(onProtocolPresenceClosed(QString)),Qt::UniqueConnection);
-			}
-		}
-	}
+	bindProtocolPresenceProviders();
 	if (FStatusItems.contains(AStatusId))
 	{
 		bool isSwitchOffline = false;
@@ -432,13 +417,13 @@ void StatusChanger::setStreamStatus(const Jid &AStreamJid, int AStatusId)
 		bool isChangeMainStatus = !AStreamJid.isValid() && AStatusId!=STATUS_MAIN_ID;
 
 		StatusItem newStatus = FStatusItems.value(AStatusId);
-		if (FProtocolPresence && (!AStreamJid.isValid() ||
-			AStreamJid.bare() == FProtocolPresence->streamId()))
-		{
-			FProtocolPresence->setPresence(newStatus.show, newStatus.text);
-			FProtocolStatuses.insert(FProtocolPresence->streamId(), newStatus.show);
-			updateMainMenu();
-		}
+		// The legacy stream-specific path below is XMPP-only. A protocol-wide
+		// main status applies once to every provider which exposes this capability.
+		if (!AStreamJid.isValid())
+			for (IProtocolPresence *presence : FProtocolPresences)
+				if (presence && !presence->streamId().isEmpty() &&
+					presence->setPresence(newStatus.show, newStatus.text))
+					FProtocolStatuses.insert(presence->streamId(), presence->show());
 		IPresence *mainPresence = visibleMainStatusPresence();
 		StatusItem oldMainStatus = FStatusItems.value(FCurrentStatus.value(mainPresence,STATUS_OFFLINE));
 
@@ -907,11 +892,6 @@ void StatusChanger::updateMainMenu()
 	int statusId = FCurrentStatus.value(visibleMainStatusPresence(),STATUS_OFFLINE);
 	bool protocolOnline = false;
 	int protocolShow = IPresence::Offline;
-	if (FProtocolPresence && !FProtocolPresence->streamId().isEmpty())
-	{
-		protocolShow = FProtocolPresence->show();
-		protocolOnline = protocolShow != IPresence::Offline && protocolShow != IPresence::Error;
-	}
 	for (QMap<QString, int>::const_iterator it = FProtocolStatuses.constBegin();
 		it != FProtocolStatuses.constEnd(); ++it) {
 		if (!protocolOnline && it.value() != IPresence::Offline && it.value() != IPresence::Error) {

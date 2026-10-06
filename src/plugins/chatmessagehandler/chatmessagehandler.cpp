@@ -3,9 +3,8 @@
 #include "protocolmessagerouting.h"
 #include "protocolmessagehistory.h"
 #include "roomsidebarstate.h"
-#include <interfaces/matrixreply.h>
+#include <interfaces/iemoticons.h>
 #include <utils/systemtimezonecache.h>
-#include <utils/matrixhtml.h>
 #include <utils/imageloadscheduler.h>
 #include <utils/animatedtextbrowser.h>
 #include <QKeyEvent>
@@ -80,9 +79,9 @@ static void loadImagePixmapAsync(QLabel *label, const QString &path, const QSize
 			return;
 		const QImage image = RoundedAvatar::roundImageScaled(sourceImage, targetSize);
 		guardedLabel->setPixmap(QPixmap::fromImage(image));
-		if (guardedLabel->property("matrixAvatarKey").isValid()) {
-			guardedLabel->setProperty("matrixAvatarHasLoaded", true);
-			guardedLabel->setProperty("matrixAvatarIsPlaceholder", false);
+		if (guardedLabel->property("avatarKey").isValid()) {
+			guardedLabel->setProperty("avatarHasLoaded", true);
+			guardedLabel->setProperty("avatarIsPlaceholder", false);
 		}
 	});
 }
@@ -413,10 +412,10 @@ bool ChatMessageHandler::startPlugin()
 			{
 				FProtocolMessaging.append(messaging);
 				connect(plugin->instance(), SIGNAL(protocolMessageReceived(BasicMessage)), this, SLOT(onProtocolMessageReceived(BasicMessage)), Qt::UniqueConnection);
-				if (messaging->protocol() == QStringLiteral("matrix"))
+				if (messaging->providesAvatarUpdateSignals())
 					connect(plugin->instance(), SIGNAL(protocolAvatarUpdated(QString)),
 						this, SLOT(onProtocolAvatarUpdated(QString)), Qt::UniqueConnection);
-				if (messaging->protocol() == QStringLiteral("matrix"))
+				if (messaging->providesHistoryLoadedSignals())
 					connect(plugin->instance(), SIGNAL(protocolHistoryLoaded(QString)),
 						this, SLOT(onProtocolHistoryLoaded(QString)), Qt::UniqueConnection);
 			}
@@ -447,9 +446,7 @@ void ChatMessageHandler::onProtocolViewContextMenu(const QPoint &APosition,
 		return;
 	IProtocolMessaging *messaging = nullptr;
 	for (IProtocolMessaging *candidate : std::as_const(FProtocolMessaging))
-		if (candidate && candidate->streamId() == window->accountId() &&
-			candidate->protocol() == QStringLiteral("matrix") &&
-			candidate->supportsReactions(window->conversationId())) {
+		if (candidate && candidate->streamId() == window->accountId()) {
 			messaging = candidate;
 			break;
 		}
@@ -459,14 +456,15 @@ void ChatMessageHandler::onProtocolViewContextMenu(const QPoint &APosition,
 	const QString eventPrefix = messaging->streamId() + QChar('\n') +
 		window->conversationId() + QChar('\n');
 	QString eventId;
-	for (auto it = FProtocolEventMessageIds.constBegin(); it != FProtocolEventMessageIds.constEnd(); ++it)
+	for (auto it = FProtocolEventMessageIds.constBegin(); it != FProtocolEventMessageIds.constEnd(); ++it) {
 		if (it.key().startsWith(eventPrefix) && it.value() == displayedMessageId) {
 			const QString candidateId = it.key().mid(eventPrefix.size());
-			if (MatrixReply::isEventId(candidateId)) {
+			if (messaging->isEventIdLike(candidateId)) {
 				eventId = candidateId;
 				break;
 			}
 		}
+	}
 	const QString targetKey = eventPrefix + eventId;
 	const QString targetRelationType = FProtocolMessageRelationTypes.value(targetKey);
 	if (eventId.isEmpty() || FProtocolRedactedMessages.contains(targetKey) ||
@@ -485,27 +483,32 @@ void ChatMessageHandler::onProtocolViewContextMenu(const QPoint &APosition,
 			break;
 		}
 
-	// Add Reply action above React.
-	Action *replyAction = new Action(AMenu);
-	replyAction->setText(tr("Reply"));
-	connect(replyAction, &QAction::triggered, this,
-		[this, window, eventId, targetSenderName]() {
-			if (!window || !window->editWidget())
-				return;
-			window->showTabPage();
-			QTextEdit *editor = window->editWidget()->textEdit();
-			if (!editor)
-				return;
-			if (editor->property("vacuum.matrix.reply_event_id").toString().isEmpty())
-				editor->setProperty("vacuum.matrix.reply_original_placeholder", editor->placeholderText());
-			editor->setProperty("vacuum.matrix.reply_event_id", eventId);
-			editor->setPlaceholderText(tr("Replying to %1").arg(targetSenderName));
-			editor->setFocus(Qt::OtherFocusReason);
-		});
-	AMenu->addAction(replyAction, AG_DEFAULT, true);
+	const QString conversationId = window->conversationId();
+	if (messaging->supportsReplies(conversationId)) {
+		Action *replyAction = new Action(AMenu);
+		replyAction->setText(tr("Reply"));
+		connect(replyAction, &QAction::triggered, this,
+			[this, window, eventId, targetSenderName]() {
+				if (!window || !window->editWidget())
+					return;
+				window->showTabPage();
+				QTextEdit *editor = window->editWidget()->textEdit();
+				if (!editor)
+					return;
+				if (editor->property("reply_event_id").toString().isEmpty())
+					editor->setProperty("reply_original_placeholder", editor->placeholderText());
+				editor->setProperty("reply_event_id", eventId);
+				editor->setPlaceholderText(tr("Replying to %1").arg(targetSenderName));
+				editor->setFocus(Qt::OtherFocusReason);
+			});
+		AMenu->addAction(replyAction, AG_DEFAULT, true);
+	}
 
-	AMenu->addSeparator(); // Add separator between Reply and React
+	if (!messaging->supportsReactions(conversationId))
+		return;
 
+	if (messaging->supportsReplies(conversationId))
+		AMenu->addSeparator();
 	QMenu *reactionMenu = AMenu->addMenu(tr("React"));
 	const QStringList quickReactions = {
 		QStringLiteral("👍"), QStringLiteral("👎"), QStringLiteral("😀"),
@@ -514,15 +517,17 @@ void ChatMessageHandler::onProtocolViewContextMenu(const QPoint &APosition,
 	for (const QString &key : quickReactions) {
 		QAction *action = reactionMenu->addAction(key);
 		connect(action, &QAction::triggered, this,
-			[messaging, conversationId = window->conversationId(), eventId, key]() {
-				messaging->sendReaction(conversationId, eventId, key);
+			[messaging, conversationId, eventId, key]() {
+				if (messaging->supportsReactions(conversationId))
+					messaging->sendReaction(conversationId, eventId, key);
 			});
 	}
 	reactionMenu->addSeparator();
 	QAction *moreAction = reactionMenu->addAction(tr("More…"));
 	connect(moreAction, &QAction::triggered, this,
-		[this, messaging, parent = window->instance(),
-		 conversationId = window->conversationId(), eventId]() {
+		[this, messaging, parent = window->instance(), conversationId, eventId]() {
+			if (!messaging->supportsReactions(conversationId))
+				return;
 			bool accepted = false;
 			const QString key = QInputDialog::getText(parent, tr("Add a reaction"),
 				tr("Emoji or reaction text:"), QLineEdit::Normal, QString(), &accepted).trimmed();
@@ -548,11 +553,11 @@ void ChatMessageHandler::onProtocolAvatarUpdated(const QString &key)
 {
 	for (QWidget *widget : QApplication::allWidgets()) {
 		QLabel *avatar = qobject_cast<QLabel *>(widget);
-		if (!avatar || avatar->property("matrixAvatarKey").toString() != key)
+		if (!avatar || avatar->property("avatarKey").toString() != key)
 			continue;
-		const QString accountId = avatar->property("matrixAccountId").toString();
-		const QString roomId = avatar->property("matrixRoomId").toString();
-		const QString userId = avatar->property("matrixUserId").toString();
+		const QString accountId = avatar->property("accountId").toString();
+		const QString roomId = avatar->property("roomId").toString();
+		const QString userId = avatar->property("userId").toString();
 		for (IProtocolMessaging *messaging : FProtocolMessaging)
 			if (messaging && messaging->streamId() == accountId) {
 				loadImagePixmapAsync(avatar, messaging->userAvatarPath(roomId, userId), avatar->size());
@@ -906,17 +911,17 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 	const QString replyEventId = AMessage.metadata().value(
 		QStringLiteral("reply_to_event_id")).toString();
 	const QString historyKey = AMessaging->streamId() + QChar('\n') + AMessage.conversationId();
-	const QString replyHtml = MatrixReply::isEventId(replyEventId)
+	const QString replyHtml = AMessaging->isEventIdLike(replyEventId)
 		? buildProtocolReplyPreviewHtml(FProtocolConversationMessages.value(historyKey),
 			AWindow, AMessaging, replyEventId, this) : QString();
 	const QString bodyForDisplay = !replyHtml.isEmpty()
-		? MatrixReply::stripFallbackText(body) : body;
+		? AMessaging->stripReplyFallback(body, QStringLiteral("text/plain")) : body;
 	const QString formattedBodyForDisplay = !replyHtml.isEmpty()
-		? MatrixReply::stripFallbackHtml(formattedBody) : formattedBody;
+		? AMessaging->stripReplyFallback(formattedBody, QStringLiteral("text/html")) : formattedBody;
 
 	if (messageType == QStringLiteral("m.text") &&
 		messageFormat == QStringLiteral("org.matrix.custom.html") && !formattedBodyForDisplay.isEmpty())
-		AWindow->viewWidget()->appendHtml(replyHtml + matrixHighlightMentions(matrixSafeHtml(
+		AWindow->viewWidget()->appendHtml(replyHtml + AMessaging->highlightMentions(AMessaging->sanitizeHtml(
 			AMessaging->formatEmoticonsForDisplay(formattedBodyForDisplay))), options);
 	else if (messageType == QStringLiteral("m.image") && !decodedImage.isNull() && !resourceUrl.isEmpty())
 	{
@@ -962,14 +967,12 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 	}
 	else
 	{
-	// Matrix messages are protocol-neutral BasicMessages.  appendText() wraps
-	// the text in the legacy Message type and sends it through the XMPP
-	// MessageProcessor, which can discard the body because no legacy message
-	// type is set.  Render the already selected plain text directly instead.
-	const QString displayBody = AMessaging->formatEmoticonsForDisplay(bodyForDisplay);
-	const QString escapedBody = displayBody.toHtmlEscaped().replace(QStringLiteral("\n"),
-		QStringLiteral("<br/>"));
-	AWindow->viewWidget()->appendHtml(replyHtml + matrixHighlightMentions(escapedBody), options);
+		// Keep protocol messages in this renderer instead of routing them through
+		// the legacy MessageProcessor, which requires a legacy message type.
+		const QString displayBody = AMessaging->formatEmoticonsForDisplay(bodyForDisplay);
+		const QString escapedBody = displayBody.toHtmlEscaped().replace(QStringLiteral("\n"),
+			QStringLiteral("<br/>"));
+		AWindow->viewWidget()->appendHtml(replyHtml + AMessaging->highlightMentions(escapedBody), options);
 	}
 	if (!AMessage.messageId().isEmpty())
 		FProtocolRenderedMessages.insert(prefix + AMessage.messageId());
@@ -1033,7 +1036,7 @@ static QString buildProtocolReplyPreviewHtml(const QList<BasicMessage> &history,
 		avatarPath = AMessaging->userAvatarPath(AWindow->conversationId(), target.sender());
 	QTextEdit *view = qobject_cast<QTextEdit *>(AWindow->viewWidget()->styleWidget());
 	const QString avatarResource = cacheReplyAvatarResource(view, avatarPath, receiver);
-	return MatrixReply::previewHtml(senderName, excerpt, avatarResource);
+	return AMessaging->replyPreviewHtml(senderName, excerpt, avatarResource);
 }
 
 void ChatMessageHandler::renderProtocolHistory(IChatWindow *AWindow, IProtocolMessaging *AMessaging)
@@ -1459,7 +1462,8 @@ void ChatMessageHandler::updateWindow(IChatWindow *AWindow)
 
 void ChatMessageHandler::setupFileTransferAction(IChatWindow *AWindow, IProtocolMessaging *AMessaging)
 {
-	if (!AWindow || !AWindow->toolBarWidget())
+	if (!AWindow || !AWindow->toolBarWidget() ||
+		(AMessaging && !AMessaging->supportsFileTransfer()))
 		return;
 	Action *fileAction = new Action(AWindow->instance());
 	fileAction->setText(QString());
@@ -1477,7 +1481,7 @@ void ChatMessageHandler::setupFileTransferAction(IChatWindow *AWindow, IProtocol
 		}
 		const QString mimeType = QMimeDatabase().mimeTypeForFile(info).name();
 		BasicMessage message(QString(), AWindow->conversationId(), QString(), QString(),
-			info.fileName(), QDateTime::currentDateTimeUtc(), QStringLiteral("matrix"), BasicMessage::Outgoing);
+			info.fileName(), QDateTime::currentDateTimeUtc(), AMessaging->protocol(), BasicMessage::Outgoing);
 		QVariantMap metadata;
 		metadata.insert(QStringLiteral("file_path"), filePath);
 		metadata.insert(QStringLiteral("mimetype"), mimeType);
@@ -1504,8 +1508,8 @@ void ChatMessageHandler::setupRoomSidebar(IChatWindow *AWindow, IProtocolMessagi
 	if (!AWindow || !AMessaging || !roster) {
 		if (AWindow) {
 			if (QObject *windowObject = AWindow->instance())
-				for (QWidget *sidebar : windowObject->findChildren<QWidget *>(QStringLiteral("matrixRoomSidebar")))
-					sidebar->setProperty("matrixSidebarCurrent", false);
+				for (QWidget *sidebar : windowObject->findChildren<QWidget *>(QStringLiteral("protocolRoomSidebar")))
+					sidebar->setProperty("sidebarCurrent", false);
 			AWindow->setSidebarWidget(nullptr);
 		}
 		return;
@@ -1518,41 +1522,41 @@ void ChatMessageHandler::setupRoomSidebar(IChatWindow *AWindow, IProtocolMessagi
 	const QByteArray memberSnapshot = RoomSidebarState::snapshot(currentRoom, accountId);
 	QWidget *existingSidebar = nullptr;
 	if (QObject *windowObject = AWindow->instance())
-		for (QWidget *sidebar : windowObject->findChildren<QWidget *>(QStringLiteral("matrixRoomSidebar")))
-			if (sidebar->property("matrixSidebarCurrent").toBool()) {
+		for (QWidget *sidebar : windowObject->findChildren<QWidget *>(QStringLiteral("protocolRoomSidebar")))
+			if (sidebar->property("sidebarCurrent").toBool()) {
 				existingSidebar = sidebar;
 				break;
 			}
 	const bool sameSidebarIdentity = existingSidebar &&
-		existingSidebar->property("matrixRoomId").toString() == currentRoom.id &&
-		existingSidebar->property("matrixAccountId").toString() == accountId;
+		existingSidebar->property("roomId").toString() == currentRoom.id &&
+		existingSidebar->property("accountId").toString() == accountId;
 	if (RoomSidebarState::canReuseSidebar(
-		existingSidebar ? existingSidebar->property("matrixAccountId").toString() : QString(),
-		existingSidebar ? existingSidebar->property("matrixRoomId").toString() : QString(),
-		existingSidebar ? existingSidebar->property("matrixMemberSnapshot").toByteArray() : QByteArray(),
+		existingSidebar ? existingSidebar->property("accountId").toString() : QString(),
+		existingSidebar ? existingSidebar->property("roomId").toString() : QString(),
+		existingSidebar ? existingSidebar->property("memberSnapshot").toByteArray() : QByteArray(),
 		accountId, currentRoom.id, memberSnapshot))
 		return;
 	QHash<QString, QPixmap> loadedMemberAvatars;
 	if (sameSidebarIdentity)
-		for (QLabel *avatar : existingSidebar->findChildren<QLabel *>(QStringLiteral("matrixMemberAvatar"))) {
-			if (!avatar->property("matrixAvatarHasLoaded").toBool())
+		for (QLabel *avatar : existingSidebar->findChildren<QLabel *>(QStringLiteral("protocolMemberAvatar"))) {
+			if (!avatar->property("avatarHasLoaded").toBool())
 				continue;
 			const QPixmap pixmap = avatar->pixmap();
-			const QString userId = avatar->property("matrixUserId").toString();
+			const QString userId = avatar->property("userId").toString();
 			if (!userId.isEmpty() && !pixmap.isNull())
 				loadedMemberAvatars.insert(userId, pixmap);
 		}
 	if (existingSidebar)
-		existingSidebar->setProperty("matrixSidebarCurrent", false);
+		existingSidebar->setProperty("sidebarCurrent", false);
 	QWidget *sidebar = new QWidget;
 	QVBoxLayout *layout = new QVBoxLayout(sidebar);
 	layout->setContentsMargins(12, 12, 12, 12);
 	layout->setSpacing(8);
-	sidebar->setObjectName(QStringLiteral("matrixRoomSidebar"));
-	sidebar->setProperty("matrixRoomId", currentRoom.id);
-	sidebar->setProperty("matrixAccountId", accountId);
-	sidebar->setProperty("matrixMemberSnapshot", memberSnapshot);
-	sidebar->setProperty("matrixSidebarCurrent", true);
+	sidebar->setObjectName(QStringLiteral("protocolRoomSidebar"));
+	sidebar->setProperty("roomId", currentRoom.id);
+	sidebar->setProperty("accountId", accountId);
+	sidebar->setProperty("memberSnapshot", memberSnapshot);
+	sidebar->setProperty("sidebarCurrent", true);
 	QLabel *title = new QLabel(currentRoom.name.isEmpty() ? currentRoom.id : currentRoom.name, sidebar);
 	title->setWordWrap(true);
 	title->setStyleSheet(QStringLiteral("font-size:16px; font-weight:600;"));
@@ -1597,11 +1601,11 @@ void ChatMessageHandler::setupRoomSidebar(IChatWindow *AWindow, IProtocolMessagi
 		QLabel *avatar = new QLabel(row);
 		RoomSidebarState::configureMemberAvatarLabel(avatar);
 		avatar->setAlignment(Qt::AlignCenter);
-		avatar->setObjectName(QStringLiteral("matrixMemberAvatar"));
-		avatar->setProperty("matrixAvatarKey", AMessaging->userAvatarKey(currentRoom.id, member.id));
-		avatar->setProperty("matrixAccountId", AMessaging->streamId());
-		avatar->setProperty("matrixRoomId", currentRoom.id);
-		avatar->setProperty("matrixUserId", member.id);
+		avatar->setObjectName(QStringLiteral("protocolMemberAvatar"));
+		avatar->setProperty("avatarKey", AMessaging->userAvatarKey(currentRoom.id, member.id));
+		avatar->setProperty("accountId", AMessaging->streamId());
+		avatar->setProperty("roomId", currentRoom.id);
+		avatar->setProperty("userId", member.id);
 		const QString cachedPath = AMessaging->userAvatarPath(currentRoom.id, member.id);
 		if (!cachedPath.isEmpty())
 			loadImagePixmapAsync(avatar, cachedPath, avatar->size());
@@ -1611,23 +1615,23 @@ void ChatMessageHandler::setupRoomSidebar(IChatWindow *AWindow, IProtocolMessagi
 		case RoomSidebarState::AvatarAction::ReuseLoaded:
 			avatar->setPixmap(RoomSidebarState::avatarPixmapForDisplay(
 				loadedAvatar.value(), avatar->size()));
-			avatar->setProperty("matrixAvatarHasLoaded", true);
-			avatar->setProperty("matrixAvatarIsPlaceholder", false);
+			avatar->setProperty("avatarHasLoaded", true);
+			avatar->setProperty("avatarIsPlaceholder", false);
 			break;
 		case RoomSidebarState::AvatarAction::LoadCached:
-			avatar->setProperty("matrixAvatarHasLoaded", false);
-			avatar->setProperty("matrixAvatarIsPlaceholder", false);
+			avatar->setProperty("avatarHasLoaded", false);
+			avatar->setProperty("avatarIsPlaceholder", false);
 			break;
 		case RoomSidebarState::AvatarAction::Placeholder:
 			QImage placeholder(21, 21, QImage::Format_ARGB32_Premultiplied);
 			placeholder.fill(QColor(QStringLiteral("#c8d0d9")));
 			avatar->setPixmap(QPixmap::fromImage(
 				RoundedAvatar::roundImageScaled(placeholder, avatar->size())));
-			avatar->setProperty("matrixAvatarHasLoaded", false);
-			avatar->setProperty("matrixAvatarIsPlaceholder", true);
+			avatar->setProperty("avatarHasLoaded", false);
+			avatar->setProperty("avatarIsPlaceholder", true);
 			break;
 		}
-		row->setProperty("matrixUserId", member.id);
+		row->setProperty("userId", member.id);
 		rowLayout->addWidget(avatar);
 		QString verificationLabel;
 		if (member.hasVerificationState) {
@@ -1662,10 +1666,10 @@ void ChatMessageHandler::setupRoomSidebar(IChatWindow *AWindow, IProtocolMessagi
 			const int rowTop = row->y();
 			const int rowBottom = rowTop + row->height();
 			if (rowBottom < visibleTop || rowTop > visibleBottom ||
-				row->property("matrixAvatarRequested").toBool())
+				row->property("avatarRequested").toBool())
 				continue;
-			row->setProperty("matrixAvatarRequested", true);
-			AMessaging->loadUserAvatar(roomId, row->property("matrixUserId").toString());
+			row->setProperty("avatarRequested", true);
+			AMessaging->loadUserAvatar(roomId, row->property("userId").toString());
 		}
 	};
 	connect(scroll->verticalScrollBar(), &QScrollBar::valueChanged, sidebar,
@@ -1717,11 +1721,11 @@ void ChatMessageHandler::showRoomMemberProfile(QWidget *AParent, IProtocolMessag
 	if (!avatarPath.isEmpty()) {
 		QLabel *avatar = new QLabel(dialog);
 		avatar->setFixedSize(96, 96);
-		avatar->setObjectName(QStringLiteral("matrixMemberProfileAvatar"));
-		avatar->setProperty("matrixAvatarKey", AMessaging->userAvatarKey(ARoom.id, AMember.id));
-		avatar->setProperty("matrixAccountId", AMessaging->streamId());
-		avatar->setProperty("matrixRoomId", ARoom.id);
-		avatar->setProperty("matrixUserId", AMember.id);
+		avatar->setObjectName(QStringLiteral("protocolMemberProfileAvatar"));
+		avatar->setProperty("avatarKey", AMessaging->userAvatarKey(ARoom.id, AMember.id));
+		avatar->setProperty("accountId", AMessaging->streamId());
+		avatar->setProperty("roomId", ARoom.id);
+		avatar->setProperty("userId", AMember.id);
 		loadImagePixmapAsync(avatar, avatarPath, QSize(96, 96));
 		avatar->setAlignment(Qt::AlignCenter);
 		layout->addWidget(avatar);
@@ -1751,14 +1755,13 @@ void ChatMessageHandler::setupProtocolWindow(IChatWindow *AWindow, IProtocolMess
 		AWindow->infoWidget()->setField(IInfoWidget::ContactAvatar, avatarPath);
 	setupRoomSidebar(AWindow, AMessaging);
 
-	// Install ESC-to-cancel-reply filter on the edit widget for Matrix windows
-	if (AMessaging && AMessaging->protocol() == QStringLiteral("matrix")) {
+	// Install ESC-to-cancel-reply filter only when this conversation supports replies.
+	if (AMessaging && AMessaging->supportsReplies(AWindow->conversationId())) {
 		IEditWidget *editWidget = AWindow->editWidget();
 		if (editWidget && editWidget->textEdit()) {
 			QTextEdit *editor = editWidget->textEdit();
-			if (!FReplyEscFilter) {
+			if (!FReplyEscFilter)
 				FReplyEscFilter = new QObject(editor);
-			}
 			editor->installEventFilter(FReplyEscFilter);
 			connect(FReplyEscFilter, SIGNAL(destroyed(QObject*)), SLOT(onReplyEscFilterDestroyed()));
 		}
@@ -1954,7 +1957,7 @@ void ChatMessageHandler::onProtocolUrlClicked(const QUrl &AUrl)
 		IProtocolMessaging *messaging = nullptr;
 		for (IProtocolMessaging *candidate : FProtocolMessaging)
 			if (candidate && candidate->streamId() == window->accountId() &&
-				candidate->protocol() == QStringLiteral("matrix")) {
+				candidate->supportsConversationMedia()) {
 				messaging = candidate;
 				break;
 			}
@@ -1962,7 +1965,7 @@ void ChatMessageHandler::onProtocolUrlClicked(const QUrl &AUrl)
 			return;
 		BasicMessage message(eventId, roomId, QString(), QString(),
 			query.queryItemValue(QStringLiteral("body")), QDateTime::currentDateTimeUtc(),
-			QStringLiteral("matrix"), BasicMessage::Incoming);
+			messaging->protocol(), BasicMessage::Incoming);
 		QVariantMap metadata;
 		metadata.insert(QStringLiteral("url"), query.queryItemValue(QStringLiteral("url")));
 		metadata.insert(QStringLiteral("msgtype"), query.queryItemValue(QStringLiteral("msgtype")));
@@ -2006,23 +2009,20 @@ void ChatMessageHandler::onMessageReady()
 				formattedBody, QDateTime::currentDateTimeUtc(),
 				selectedMessaging->protocol(), BasicMessage::Outgoing);
 			QTextEdit *editor = window->editWidget()->textEdit();
-			const bool isMatrix = selectedMessaging->protocol() == QStringLiteral("matrix");
-			const QString replyTargetId = isMatrix && editor
-				? editor->property("vacuum.matrix.reply_event_id").toString() : QString();
-			if (isMatrix) {
+			const bool supportsReplies = selectedMessaging->supportsReplies(window->conversationId());
+			const QString replyTargetId = supportsReplies && editor
+				? editor->property("reply_event_id").toString() : QString();
+			if (!replyTargetId.isEmpty() && selectedMessaging->isEventIdLike(replyTargetId)) {
 				QVariantMap metadata;
-				metadata.insert(QStringLiteral("msgtype"), QStringLiteral("m.text"));
-				metadata.insert(QStringLiteral("body"), body);
-				if (MatrixReply::isEventId(replyTargetId))
-					metadata.insert(QStringLiteral("reply_to_event_id"), replyTargetId);
+				metadata.insert(QStringLiteral("reply_to_event_id"), replyTargetId);
 				message.setMetadata(metadata);
 			}
 			if (selectedMessaging->sendMessage(message)) {
 				if (!replyTargetId.isEmpty() && editor) {
-					editor->setProperty("vacuum.matrix.reply_event_id", QVariant());
+					editor->setProperty("reply_event_id", QVariant());
 					editor->setPlaceholderText(
-						editor->property("vacuum.matrix.reply_original_placeholder").toString());
-					editor->setProperty("vacuum.matrix.reply_original_placeholder", QVariant());
+						editor->property("reply_original_placeholder").toString());
+					editor->setProperty("reply_original_placeholder", QVariant());
 				}
 				window->editWidget()->clearEditor();
 				return;
@@ -2323,14 +2323,14 @@ bool ChatMessageHandler::eventFilter(QObject *AWatched, QEvent *AEvent)
 		if (keyEvent->key() == Qt::Key_Escape) {
 			QTextEdit *editor = qobject_cast<QTextEdit *>(AWatched);
 			if (editor) {
-				QString replyEventId = editor->property("vacuum.matrix.reply_event_id").toString();
+				QString replyEventId = editor->property("reply_event_id").toString();
 				if (!replyEventId.isEmpty()) {
-					// Cancel the active reply
-					editor->setProperty("vacuum.matrix.reply_event_id", QVariant());
-					QString originalPlaceholder = editor->property("vacuum.matrix.reply_original_placeholder").toString();
+					// Cancel the active reply.
+					editor->setProperty("reply_event_id", QVariant());
+					QString originalPlaceholder = editor->property("reply_original_placeholder").toString();
 					if (!originalPlaceholder.isEmpty()) {
 						editor->setPlaceholderText(originalPlaceholder);
-						editor->setProperty("vacuum.matrix.reply_original_placeholder", QVariant());
+						editor->setProperty("reply_original_placeholder", QVariant());
 					}
 					return true; // Consume the event so it doesn't trigger window close
 				}

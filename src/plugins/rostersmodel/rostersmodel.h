@@ -100,6 +100,8 @@ protected slots:
 	void onProtocolPresenceChanged(const QString &AStreamId, int AShow, const QString &AStatus);
 	void onProtocolPresenceClosed(const QString &AStreamId);
 	void onProtocolRosterChanged();
+	void bindProtocolPresenceProviders();
+	void bindProtocolRosterProviders();
 	void onIndexDataChanged(IRosterIndex *AIndex, int ARole);
 	void onIndexChildAboutToBeInserted(IRosterIndex *AIndex);
 	void onIndexChildInserted(IRosterIndex *AIndex);
@@ -111,8 +113,7 @@ private:
 	IRosterPlugin *FRosterPlugin;
 	IPresencePlugin *FPresencePlugin;
 	IAccountManager *FAccountManager;
-	IProtocolPresence *FProtocolPresence;
-	IProtocolRoster *FProtocolRoster;
+	QList<IProtocolPresence *> FProtocolPresences;
 	QList<IProtocolRoster *> FProtocolRosters;
 	QHash<IProtocolRoster *, QString> FProtocolRosterStreamIds;
 	IPluginManager *FPluginManager;

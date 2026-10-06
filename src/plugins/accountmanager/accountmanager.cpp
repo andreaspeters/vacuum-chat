@@ -99,7 +99,7 @@ QMultiMap<int, IOptionsWidget *> AccountManager::optionsWidgets(const QString &A
 				this, &AccountManager::onMatrixRoomKeyImportRequested, Qt::UniqueConnection);
 			widgets.insertMulti(OWO_ACCOUNT_OPTIONS, accountOptions);
 			QString accountType = aoptions.value("type").toString();
-			if (accountType.compare(QStringLiteral("matrix"), Qt::CaseInsensitive) != 0)
+			if (IProtocolAccount::protocolKindForType(accountType) == IProtocolAccount::ProtocolXmpp)
 			{
 				widgets.insertMulti(OWO_ACCOUNT_REQUIRE_ENCRYPTION,FOptionsManager->optionsNodeWidget(aoptions.node("require-encryption"),tr("Require a secure connection"),AParent));
 			}

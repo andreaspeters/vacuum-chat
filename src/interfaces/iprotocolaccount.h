@@ -18,6 +18,18 @@ public:
 		ProtocolMeshCore
 	};
 
+	static ProtocolKind protocolKindForType(const QString &type)
+	{
+		if (type.isEmpty() || type.compare(QStringLiteral("jabber"), Qt::CaseInsensitive) == 0 ||
+			type.compare(QStringLiteral("xmpp"), Qt::CaseInsensitive) == 0)
+			return ProtocolXmpp;
+		if (type.compare(QStringLiteral("matrix"), Qt::CaseInsensitive) == 0)
+			return ProtocolMatrix;
+		if (type.compare(QStringLiteral("meshcore"), Qt::CaseInsensitive) == 0)
+			return ProtocolMeshCore;
+		return ProtocolUnknown;
+	}
+
 	enum Capability
 	{
 		CapabilityNone = 0x0,

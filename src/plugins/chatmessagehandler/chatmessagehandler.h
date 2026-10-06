@@ -139,7 +139,6 @@ protected:
 protected:
 	virtual bool eventFilter(QObject *AWatched, QEvent *AEvent) override;
 protected slots:
-	void onCancelReplyOnEsc();
 	void onReplyEscFilterDestroyed();
 	void onProtocolMessageReceived(const BasicMessage &AMessage);
 	void onProtocolHistoryLoaded(const QString &ARoomId);

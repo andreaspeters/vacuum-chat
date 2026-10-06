@@ -1,2 +1,2 @@
 set(SOURCES rosterindex.cpp rostersmodel.cpp )
-set(HEADERS rosterindex.h rostersmodel.h )
+set(HEADERS rosterindex.h rostersmodel.h protocolrosterlifecycle.h )

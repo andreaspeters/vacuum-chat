@@ -2,6 +2,7 @@
 #define STATUSCHANGER_H
 
 #include <QSet>
+#include <QList>
 #include <QPair>
 #include <QPointer>
 #include <QDateTime>
@@ -128,6 +129,7 @@ protected:
 	void removeTempStatus(IPresence *APresence);
 	void resendUpdatedStatus(int AStatusId);
 	void removeAllCustomStatuses();
+	void bindProtocolPresenceProviders();
 	void insertStatusNotification(IPresence *APresence);
 	void removeStatusNotification(IPresence *APresence);
 protected slots:
@@ -165,7 +167,7 @@ private:
 	IAccountManager *FAccountManager;
 	IStatusIcons *FStatusIcons;
 	INotifications *FNotifications;
-	IProtocolPresence *FProtocolPresence;
+	QList<IProtocolPresence *> FProtocolPresences;
 private:
 	Menu *FMainMenu;
 	Action *FModifyStatus;

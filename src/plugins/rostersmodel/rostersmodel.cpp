@@ -1,4 +1,5 @@
 #include "rostersmodel.h"
+#include "protocolrosterlifecycle.h"
 
 #include <QTimer>
 
@@ -9,8 +10,7 @@ RostersModel::RostersModel()
 	FRosterPlugin = NULL;
 	FPresencePlugin = NULL;
 	FAccountManager = NULL;
-	FProtocolPresence = NULL;
-	FProtocolRoster = NULL;
+
 	FPluginManager = NULL;
 	FProtocolRosterRetryCount = 0;
 
@@ -79,68 +79,53 @@ bool RostersModel::initConnections(IPluginManager *APluginManager, int &AInitOrd
 		}
 	}
 
-	plugin = APluginManager->pluginInterface("IProtocolPresence").value(0,NULL);
-	if (plugin)
-	{
-		FProtocolPresence = qobject_cast<IProtocolPresence *>(plugin->instance());
-		if (FProtocolPresence)
-		{
-			connect(FProtocolPresence->instance(),SIGNAL(protocolPresenceChanged(QString, int, QString)),
-				SLOT(onProtocolPresenceChanged(QString, int, QString)));
-			connect(FProtocolPresence->instance(),SIGNAL(protocolPresenceClosed(QString)),
-				SLOT(onProtocolPresenceClosed(QString)));
-		}
-	}
+	bindProtocolPresenceProviders();
 
-	for (IPlugin *rosterPlugin : APluginManager->pluginInterface("IProtocolRoster"))
-	{
-		IProtocolRoster *roster = qobject_cast<IProtocolRoster *>(rosterPlugin->instance());
-		if (roster && !FProtocolRosters.contains(roster)) {
-			FProtocolRosters.append(roster);
-			if (!FProtocolRoster)
-				FProtocolRoster = roster;
-			connect(rosterPlugin->instance(),SIGNAL(protocolRosterChanged()),
-				SLOT(onProtocolRosterChanged()),Qt::UniqueConnection);
-		}
-	}
+	bindProtocolRosterProviders();
 
 	return true;
 }
 
 bool RostersModel::startPlugin()
 {
-	if (!FProtocolPresence && FPluginManager)
-	{
-		IPlugin *plugin = FPluginManager->pluginInterface("IProtocolPresence").value(0,NULL);
-		if (plugin)
-		{
-			FProtocolPresence = qobject_cast<IProtocolPresence *>(plugin->instance());
-			if (FProtocolPresence)
-			{
-				connect(FProtocolPresence->instance(),SIGNAL(protocolPresenceChanged(QString, int, QString)),
-					SLOT(onProtocolPresenceChanged(QString, int, QString)),Qt::UniqueConnection);
-				connect(FProtocolPresence->instance(),SIGNAL(protocolPresenceClosed(QString)),
-					SLOT(onProtocolPresenceClosed(QString)),Qt::UniqueConnection);
-			}
-		}
-	}
-	if (FPluginManager)
-	{
-		for (IPlugin *rosterPlugin : FPluginManager->pluginInterface("IProtocolRoster")) {
-			IProtocolRoster *roster = qobject_cast<IProtocolRoster *>(rosterPlugin->instance());
-			if (!roster || FProtocolRosters.contains(roster))
-				continue;
-			FProtocolRosters.append(roster);
-			if (!FProtocolRoster)
-				FProtocolRoster = roster;
-			connect(rosterPlugin->instance(), SIGNAL(protocolRosterChanged()),
-				this, SLOT(onProtocolRosterChanged()), Qt::UniqueConnection);
-		}
-	}
+	bindProtocolPresenceProviders();
+	bindProtocolRosterProviders();
 	for (IProtocolRoster *roster : FProtocolRosters)
 		rebuildProtocolRoster(roster);
 	QTimer::singleShot(0,this,SLOT(onProtocolRosterChanged()));
 	return true;
+}
+
+void RostersModel::bindProtocolPresenceProviders()
+{
+	if (!FPluginManager)
+		return;
+	for (IPlugin *plugin : FPluginManager->pluginInterface("IProtocolPresence")) {
+		IProtocolPresence *presence = plugin
+			? qobject_cast<IProtocolPresence *>(plugin->instance()) : nullptr;
+		if (!presence || FProtocolPresences.contains(presence))
+			continue;
+		FProtocolPresences.append(presence);
+		connect(presence->instance(), SIGNAL(protocolPresenceChanged(QString,int,QString)),
+			this, SLOT(onProtocolPresenceChanged(QString,int,QString)), Qt::UniqueConnection);
+		connect(presence->instance(), SIGNAL(protocolPresenceClosed(QString)),
+			this, SLOT(onProtocolPresenceClosed(QString)), Qt::UniqueConnection);
+	}
+}
+
+void RostersModel::bindProtocolRosterProviders()
+{
+	if (!FPluginManager)
+		return;
+	for (IPlugin *plugin : FPluginManager->pluginInterface("IProtocolRoster")) {
+		IProtocolRoster *roster = plugin
+			? qobject_cast<IProtocolRoster *>(plugin->instance()) : nullptr;
+		if (!roster || FProtocolRosters.contains(roster))
+			continue;
+		FProtocolRosters.append(roster);
+		connect(plugin->instance(), SIGNAL(protocolRosterChanged()),
+			this, SLOT(onProtocolRosterChanged()), Qt::UniqueConnection);
+	}
 }
 
 bool RostersModel::initObjects()
@@ -241,17 +226,29 @@ IRosterIndex *RostersModel::protocolStreamRoot(const QString &AAccountId) const
 IRosterIndex *RostersModel::addStream(const Jid &AStreamJid)
 {
 	const QString protocolStreamId = AStreamJid.bare();
-	if (FProtocolRoster && FProtocolRoster->streamId() == protocolStreamId)
-		return addProtocolStream(protocolStreamId);
-	if (FProtocolPresence && FProtocolPresence->streamId() == protocolStreamId)
-		return addProtocolStream(protocolStreamId);
+	for (IProtocolRoster *roster : FProtocolRosters)
+		if (roster && roster->streamId() == protocolStreamId)
+			return addProtocolStream(protocolStreamId);
+	for (IProtocolPresence *presence : FProtocolPresences)
+		if (presence && presence->streamId() == protocolStreamId)
+			return addProtocolStream(protocolStreamId);
 	IRosterIndex *streamIndex = FStreamsRoot.value(AStreamJid);
 	if (streamIndex == NULL)
 	{
 		IRoster *roster = FRosterPlugin!=NULL ? FRosterPlugin->findRoster(AStreamJid) : NULL;
 		IPresence *presence = FPresencePlugin!=NULL ? FPresencePlugin->findPresence(AStreamJid) : NULL;
-		bool protocolPresence = FProtocolPresence!=NULL && FProtocolPresence->streamId()==AStreamJid.bare();
-		bool protocolRoster = FProtocolRoster!=NULL && FProtocolRoster->streamId()==AStreamJid.bare();
+		IProtocolPresence *protocolPresence = nullptr;
+		for (IProtocolPresence *candidate : FProtocolPresences)
+			if (candidate && candidate->streamId() == AStreamJid.bare()) {
+				protocolPresence = candidate;
+				break;
+			}
+		bool protocolRoster = false;
+		for (IProtocolRoster *candidate : FProtocolRosters)
+			if (candidate && candidate->streamId() == AStreamJid.bare()) {
+				protocolRoster = true;
+				break;
+			}
 		IAccount *account = FAccountManager!=NULL ? FAccountManager->accountByStream(AStreamJid) : NULL;
 
 		if (roster || presence || protocolPresence || protocolRoster)
@@ -270,8 +267,8 @@ IRosterIndex *RostersModel::addStream(const Jid &AStreamJid)
 			}
 			if (protocolPresence)
 			{
-				streamIndex->setData(RDR_SHOW, FProtocolPresence->show());
-				streamIndex->setData(RDR_STATUS, FProtocolPresence->status());
+				streamIndex->setData(RDR_SHOW, protocolPresence->show());
+				streamIndex->setData(RDR_STATUS, protocolPresence->status());
 			}
 			if (account)
 			{
@@ -644,16 +641,8 @@ void RostersModel::onProtocolPresenceClosed(const QString &AStreamId)
 
 void RostersModel::onProtocolRosterChanged()
 {
-	if (FPluginManager) {
-		for (IPlugin *rosterPlugin : FPluginManager->pluginInterface("IProtocolRoster")) {
-			IProtocolRoster *roster = qobject_cast<IProtocolRoster *>(rosterPlugin->instance());
-			if (roster && !FProtocolRosters.contains(roster)) {
-				FProtocolRosters.append(roster);
-				connect(rosterPlugin->instance(), SIGNAL(protocolRosterChanged()),
-					this, SLOT(onProtocolRosterChanged()), Qt::UniqueConnection);
-			}
-		}
-	}
+	bindProtocolPresenceProviders();
+	bindProtocolRosterProviders();
 	IProtocolRoster *senderRoster = qobject_cast<IProtocolRoster *>(sender());
 	if (senderRoster) {
 		rebuildProtocolRoster(senderRoster);
@@ -684,15 +673,15 @@ void RostersModel::rebuildProtocolRoster(IProtocolRoster *roster)
 
 	const QString streamId = roster->streamId();
 	const QString previousStreamId = FProtocolRosterStreamIds.value(roster);
-	if (streamId.isEmpty())
+	const ProtocolRosterLifecycle::StreamTransition transition =
+		ProtocolRosterLifecycle::transition(previousStreamId, streamId);
+	if (!transition.streamIdToClose.isEmpty())
+		onProtocolPresenceClosed(transition.streamIdToClose);
+	if (!transition.shouldBuildStream)
 	{
 		FProtocolRosterStreamIds.remove(roster);
-		if (!previousStreamId.isEmpty())
-			onProtocolPresenceClosed(previousStreamId);
 		return;
 	}
-	if (!previousStreamId.isEmpty() && previousStreamId != streamId)
-		onProtocolPresenceClosed(previousStreamId);
 	FProtocolRosterStreamIds.insert(roster, streamId);
 
 	IRosterIndex *streamIndex = addProtocolStream(streamId);

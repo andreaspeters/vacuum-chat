@@ -1753,10 +1753,13 @@ def test_encrypted_matrix_formatted_body_contract():
     root = Path(__file__).resolve().parents[1]
     network = (root / "src/plugins/matrix/matrixnetwork.cpp").read_text()
     renderer = (root / "src/plugins/chatmessagehandler/chatmessagehandler.cpp").read_text()
+    adapter = (root / "src/plugins/matrix/matrix.cpp").read_text()
     assert 'const QJsonObject messageContent = wasEncrypted ? decryptedContent : eventContent;' in network
     assert 'for (const QString &formattedField : {QStringLiteral("format"), QStringLiteral("formatted_body")})' in network
     assert 'messageContent.value(formattedField).toVariant()' in network
-    assert 'matrixSafeHtml(' in renderer and 'AMessaging->formatEmoticonsForDisplay(formattedBodyForDisplay)' in renderer
+    assert 'AMessaging->sanitizeHtml(' in renderer and 'AMessaging->formatEmoticonsForDisplay(formattedBodyForDisplay)' in renderer
+    assert 'QString Matrix::sanitizeHtml(const QString &html) const' in adapter
+    assert 'return ::matrixSafeHtml(html);' in adapter
     print("  ✓ decrypted Matrix formatted_body reaches the sanitized HTML renderer")
 
 def run_smoke_test():

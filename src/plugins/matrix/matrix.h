@@ -58,8 +58,20 @@ public:
 	virtual bool supportsRoomInvites() const override;
 	virtual bool inviteUserToRoom(const ConversationId &roomId, const UserId &userId) override;
 	virtual bool supportsReactions(const ConversationId &conversationId) const;
+	virtual bool supportsReplies(const ConversationId &conversationId) const override
+	{ return supportsReactions(conversationId); }
+	virtual bool providesAvatarUpdateSignals() const override { return true; }
+	virtual bool providesHistoryLoadedSignals() const override { return true; }
+	virtual bool supportsConversationMedia() const override { return true; }
+	virtual bool supportsFileTransfer() const override { return true; }
 	virtual bool sendReaction(const ConversationId &conversationId, const MessageId &eventId,
 		const QString &key);
+	virtual bool isEventIdLike(const QString &eventId) const override;
+	virtual QString replyPreviewHtml(const QString &senderName, const QString &excerpt,
+		const QString &avatarResourceUrl) const override;
+	virtual QString stripReplyFallback(const QString &body, const QString &formatType) const override;
+	virtual QString sanitizeHtml(const QString &html) const override;
+	virtual QString highlightMentions(const QString &text) const override;
 	virtual bool supportsTyping(const ConversationId &conversationId) const;
 	virtual void setTyping(const ConversationId &conversationId, ProtocolTypingStatus status);
 	virtual QList<BasicMessage> conversationHistory(const QString &conversationId) const;

@@ -7,6 +7,7 @@
 #include "matrixcontext.h"
 #include "matrixtextmessage.h"
 #include <interfaces/matrixreply.h>
+#include <utils/matrixhtml.h>
 #include <utils/action.h>
 #include <utils/menu.h>
 #include <interfaces/ipresence.h>
@@ -751,15 +752,19 @@ void Matrix::onAccountHidden(IAccount *AAccount)
 	{
 		if (!FStreamId.isEmpty())
 			emit protocolPresenceClosed(FStreamId);
+		FStreamId.clear();
 		FShow = 0;
 		FStatus.clear();
 		FNetworkLoggedIn = false;
 		FNetworkUserId.clear();
+		FProtocolRooms.clear();
+		FProtocolEntries.clear();
 		QMetaObject::invokeMethod(FMatrixNetwork, "logout", Qt::QueuedConnection);
 		if (FInitialSyncWindow)
 			FInitialSyncWindow->close();
 		if (FMatrixAccount == AAccount)
 			FMatrixAccount = nullptr;
+		emit protocolRosterChanged();
 	}
 }
 
@@ -1099,6 +1104,34 @@ bool Matrix::sendReaction(const ConversationId &conversationId, const MessageId 
 			network->sendRoomEvent(conversationId, QStringLiteral("m.reaction"),
 				content, transactionId);
 		}, Qt::QueuedConnection);
+}
+
+bool Matrix::isEventIdLike(const QString &eventId) const
+{
+	return MatrixReply::isEventId(eventId);
+}
+
+QString Matrix::replyPreviewHtml(const QString &senderName, const QString &excerpt,
+	const QString &avatarResourceUrl) const
+{
+	return MatrixReply::previewHtml(senderName, excerpt, avatarResourceUrl);
+}
+
+QString Matrix::stripReplyFallback(const QString &body, const QString &formatType) const
+{
+	if (formatType == QStringLiteral("text/html"))
+		return MatrixReply::stripFallbackHtml(body);
+	return MatrixReply::stripFallbackText(body);
+}
+
+QString Matrix::sanitizeHtml(const QString &html) const
+{
+	return ::matrixSafeHtml(html);
+}
+
+QString Matrix::highlightMentions(const QString &text) const
+{
+	return ::matrixHighlightMentions(text);
 }
 
 void Matrix::setTyping(const ConversationId &conversationId, ProtocolTypingStatus status)
