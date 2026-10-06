@@ -5,3 +5,6 @@ tests**
 tests/__pycache__
 *.log
 *.dll
+*.o
+*.obj
+*.a

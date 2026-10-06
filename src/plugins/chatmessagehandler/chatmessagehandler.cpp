@@ -2370,33 +2370,33 @@ void ChatMessageHandler::showRoomInviteDialog(QWidget *AParent, IProtocolMessagi
 	layout->setContentsMargins(12, 12, 12, 12);
 	layout->setSpacing(8);
 
-		QLabel *infoLabel = new QLabel(tr("Enter a Matrix user ID to invite (e.g. @user:server):"), dialog);
-		infoLabel->setWordWrap(true);
-		layout->addWidget(infoLabel);
+	QLabel *infoLabel = new QLabel(tr("Enter a Matrix user ID to invite (e.g. @user:server):"), dialog);
+	infoLabel->setWordWrap(true);
+	layout->addWidget(infoLabel);
 
-		QLineEdit *userIdEdit = new QLineEdit(dialog);
+	QLineEdit *userIdEdit = new QLineEdit(dialog);
 	userIdEdit->setPlaceholderText(tr("@user:server"));
 	layout->addWidget(userIdEdit);
 
-		QDialogButtonBox *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, dialog);
-		connect(buttons, &QDialogButtonBox::accepted, dialog, &QDialog::accept);
-		connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
-		layout->addWidget(buttons);
+	QDialogButtonBox *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, dialog);
+	connect(buttons, &QDialogButtonBox::accepted, dialog, &QDialog::accept);
+	connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
+	layout->addWidget(buttons);
 
-		connect(dialog, &QDialog::accepted, dialog, [this, AMessaging, ARoom, userIdEdit]() {
-			const QString userId = userIdEdit->text().trimmed();
-			if (!userId.isEmpty()) {
-				// Check if it's a valid Matrix ID format
-				QRegularExpression matrixIdRegex(R"(^@[\w\.\-=\/]+:[\w\.\-=\/]+$)");
-				if (matrixIdRegex.match(userId).hasMatch()) {
-					// Call Matrix-specific invite method through MatrixNetwork directly
-					MatrixNetwork *network = qobject_cast<MatrixNetwork *>(AMessaging);
-					if (network) {
-						network->changeRoomMembership(ARoom.id, "invite");
-					}
+	connect(dialog, &QDialog::accepted, dialog, [this, AMessaging, ARoom, userIdEdit]() {
+		const QString userId = userIdEdit->text().trimmed();
+		if (!userId.isEmpty()) {
+			// Check if it's a valid Matrix ID format
+			QRegularExpression matrixIdRegex(R"(^@[\w\.\-=\/]+:[\w\.\-=\/]+$)");
+			if (matrixIdRegex.match(userId).hasMatch()) {
+				// Call Matrix-specific invite method through MatrixNetwork directly
+				MatrixNetwork *network = qobject_cast<MatrixNetwork *>(AMessaging);
+				if (network) {
+					network->changeRoomMembership(ARoom.id, "invite", userId);
 				}
 			}
-		});
+		}
+	});
 
 	dialog->resize(360, 300);
 	dialog->exec();
