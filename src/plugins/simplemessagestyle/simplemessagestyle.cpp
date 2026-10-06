@@ -540,8 +540,7 @@ void SimpleMessageStyle::fillContentKeywords(QString &AHtml, const IMessageConte
 		if (!isAvatarExistsCached(avatar))
 			avatar = qApp->applicationDirPath()+"/"SHARED_STYLE_PATH"/buddy_icon.png";
 	}
-	AHtml.replace("%userIconPath%", AView->cacheImageResource(avatar,
-		isModernChatStyle(FStylePath)).toHtmlEscaped());
+	AHtml.replace("%userIconPath%", AView->cacheImageResource(avatar, true).toHtmlEscaped());
 
 	QString timeFormat = !AOptions.timeFormat.isEmpty() ? AOptions.timeFormat : tr("hh:mm:ss");
 	QString time = displayTime.toString(timeFormat).toHtmlEscaped();

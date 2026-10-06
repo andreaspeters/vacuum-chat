@@ -2,10 +2,13 @@
 #define ROOMSIDEBARSTATE_H
 
 #include <interfaces/iprotocolroster.h>
+#include <utils/roundedavatar.h>
 
 #include <QByteArray>
 #include <QDataStream>
 #include <QIODevice>
+#include <QLabel>
+#include <QPixmap>
 #include <algorithm>
 
 namespace RoomSidebarState {
@@ -46,6 +49,20 @@ inline AvatarAction avatarAction(bool AHasLoadedAvatar, bool AHasCachedPath)
 	if (AHasLoadedAvatar)
 		return AvatarAction::ReuseLoaded;
 	return AHasCachedPath ? AvatarAction::LoadCached : AvatarAction::Placeholder;
+}
+
+inline QPixmap avatarPixmapForDisplay(const QPixmap &source, const QSize &targetSize)
+{
+	if (source.isNull() || !targetSize.isValid())
+		return source;
+	return QPixmap::fromImage(RoundedAvatar::roundImageScaled(source.toImage(), targetSize));
+}
+
+inline void configureMemberAvatarLabel(QLabel *label)
+{
+	if (!label)
+		return;
+	label->setFixedSize(31, 31);
 }
 
 } // namespace RoomSidebarState

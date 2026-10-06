@@ -336,6 +336,8 @@ int main(int argc, char **argv)
             QTextDocument::ImageResource, avatarResourceUrl).value<QImage>();
         passed &= check(loadedAvatar.cacheKey() == reusedAvatar.cacheKey(),
             "repeated messages reuse the same decoded avatar image object");
+        passed &= check(loadedAvatar.size() == QSize(32, 32),
+            "Modern Chat sender avatar resource is exactly 32x32");
         passed &= check(loadedAvatar.pixelColor(0, 0).alpha() < 64 &&
             loadedAvatar.pixelColor(loadedAvatar.width() / 2, loadedAvatar.height() / 2).alpha() > 240,
             "Modern Chat avatar corners are rounded without clipping the center");

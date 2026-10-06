@@ -198,6 +198,7 @@ void InfoWidget::setFieldVisible(IInfoWidget::InfoField AField, bool AVisible)
 
 void InfoWidget::initialize()
 {
+	ui.lblAvatar->setFixedSize(61, 61);
 	IPlugin *plugin = FMessageWidgets->pluginManager()->pluginInterface("IAccountManager").value(0,NULL);
 	if (plugin)
 	{
@@ -355,10 +356,7 @@ void InfoWidget::updateFieldLabel(IInfoWidget::InfoField AField)
 						infoWidget->ui.lblAvatar->property("vacuum.imageLoad.path").toString() != fileName ||
 						sourceImage.isNull())
 						return;
-					QImage image = sourceImage;
-					if (image.width() > 64 || image.height() > 64)
-						image = image.scaled(QSize(64, 64), Qt::KeepAspectRatio, Qt::SmoothTransformation);
-					image = RoundedAvatar::roundImage(image, 0.18);
+					const QImage image = RoundedAvatar::roundImageScaled(sourceImage, QSize(61, 61));
 					infoWidget->ui.lblAvatar->setPixmap(QPixmap::fromImage(image));
 				});
 			}

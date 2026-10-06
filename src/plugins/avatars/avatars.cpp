@@ -317,8 +317,6 @@ QVariant Avatars::rosterData(const IRosterIndex *AIndex, int ARole) const
 		bool gray = FShowGrayAvatars && (AIndex->data(RDR_SHOW).toInt()==IPresence::Offline || AIndex->data(RDR_SHOW).toInt()==IPresence::Error);
 		QImage avatar = FCustomImagesByKey.value(avatarKey);
 		if (!avatar.isNull()) {
-			if (FAvatarSize.isValid() && (avatar.width() > FAvatarSize.width() || avatar.height() > FAvatarSize.height()))
-				avatar = avatar.scaled(FAvatarSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
 			if (gray)
 				avatar = ImageManager::opacitized(ImageManager::grayscaled(avatar));
 		} else {
@@ -339,7 +337,7 @@ QVariant Avatars::rosterData(const IRosterIndex *AIndex, int ARole) const
 		if (avatar.isNull() && FShowEmptyAvatars)
 			avatar = gray ? FGrayEmptyAvatar : FEmptyAvatar;
 		if (!avatar.isNull())
-			avatar = RoundedAvatar::roundImage(avatar, 0.18);
+			avatar = RoundedAvatar::roundImageScaled(avatar, FAvatarSize);
 		return avatar;
 	}
 	else if (ARole == RDR_AVATAR_HASH)

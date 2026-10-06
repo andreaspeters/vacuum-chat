@@ -1,5 +1,4 @@
 #include "styleviewer.h"
-#include "roundedimage.h"
 
 #include <QAbstractSlider>
 #include <QAbstractTextDocumentLayout>
@@ -23,6 +22,7 @@
 #include <QVBoxLayout>
 #include <QWheelEvent>
 #include <utils/imageloadscheduler.h>
+#include <utils/roundedavatar.h>
 
 StyleViewer::StyleViewer(QWidget *AParent) : AnimatedTextBrowser(AParent)
 {
@@ -93,7 +93,7 @@ QString StyleViewer::cacheImageResource(const QString &APath, bool ARoundCorners
 						return;
 					QTextDocument *doc = viewer->document();
 					const QImage displayImage = ARoundCorners
-						? RoundedImage::withRoundedCorners(image, 0.16, QColor(QStringLiteral("#e1e5ea")))
+						? RoundedAvatar::roundImageScaled(image, QSize(32, 32))
 						: image;
 					doc->addResource(QTextDocument::ImageResource, resourceUrl, displayImage);
 					doc->markContentsDirty(0, doc->characterCount());

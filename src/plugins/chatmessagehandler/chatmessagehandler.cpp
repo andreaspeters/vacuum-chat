@@ -77,11 +77,7 @@ static void loadImagePixmapAsync(QLabel *label, const QString &path, const QSize
 		if (!guardedLabel || guardedLabel->property("vacuum.imageLoad.identity").toString() != identity ||
 			sourceImage.isNull())
 			return;
-		QImage image = sourceImage;
-		if (targetSize.isValid() &&
-			(image.width() > targetSize.width() || image.height() > targetSize.height()))
-			image = image.scaled(targetSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-		image = RoundedAvatar::roundImage(image, 0.18);
+		const QImage image = RoundedAvatar::roundImageScaled(sourceImage, targetSize);
 		guardedLabel->setPixmap(QPixmap::fromImage(image));
 		if (guardedLabel->property("matrixAvatarKey").isValid()) {
 			guardedLabel->setProperty("matrixAvatarHasLoaded", true);
@@ -1596,7 +1592,7 @@ void ChatMessageHandler::setupRoomSidebar(IChatWindow *AWindow, IProtocolMessagi
 		rowLayout->setContentsMargins(8, 4, 8, 4);
 		rowLayout->setSpacing(8);
 		QLabel *avatar = new QLabel(row);
-		avatar->setFixedSize(32, 32);
+		RoomSidebarState::configureMemberAvatarLabel(avatar);
 		avatar->setAlignment(Qt::AlignCenter);
 		avatar->setObjectName(QStringLiteral("matrixMemberAvatar"));
 		avatar->setProperty("matrixAvatarKey", AMessaging->userAvatarKey(currentRoom.id, member.id));
@@ -1610,7 +1606,8 @@ void ChatMessageHandler::setupRoomSidebar(IChatWindow *AWindow, IProtocolMessagi
 		switch (RoomSidebarState::avatarAction(loadedAvatar != loadedMemberAvatars.cend(),
 			!cachedPath.isEmpty())) {
 		case RoomSidebarState::AvatarAction::ReuseLoaded:
-			avatar->setPixmap(loadedAvatar.value());
+			avatar->setPixmap(RoomSidebarState::avatarPixmapForDisplay(
+				loadedAvatar.value(), avatar->size()));
 			avatar->setProperty("matrixAvatarHasLoaded", true);
 			avatar->setProperty("matrixAvatarIsPlaceholder", false);
 			break;
@@ -1619,9 +1616,10 @@ void ChatMessageHandler::setupRoomSidebar(IChatWindow *AWindow, IProtocolMessagi
 			avatar->setProperty("matrixAvatarIsPlaceholder", false);
 			break;
 		case RoomSidebarState::AvatarAction::Placeholder:
-			QImage placeholder(32, 32, QImage::Format_ARGB32_Premultiplied);
+			QImage placeholder(21, 21, QImage::Format_ARGB32_Premultiplied);
 			placeholder.fill(QColor(QStringLiteral("#c8d0d9")));
-			avatar->setPixmap(QPixmap::fromImage(RoundedAvatar::roundImage(placeholder, 0.18)));
+			avatar->setPixmap(QPixmap::fromImage(
+				RoundedAvatar::roundImageScaled(placeholder, avatar->size())));
 			avatar->setProperty("matrixAvatarHasLoaded", false);
 			avatar->setProperty("matrixAvatarIsPlaceholder", true);
 			break;
