@@ -326,7 +326,7 @@ void PrivacyLists::stanzaRequestResult(const Jid &AStreamJid, const Stanza &ASta
 		}
 		FRemoveRequests.remove(AStanza.id());
 	}
-	FStreamRequests[AStreamJid].removeAt(FStreamRequests[AStreamJid].indexOf(AStanza.id()));
+	FStreamRequests[AStreamJid].removeOne(AStanza.id());
 
 	if (AStanza.type() == "result")
 		emit requestCompleted(AStanza.id());
@@ -808,6 +808,7 @@ QString PrivacyLists::loadPrivacyLists(const Jid &AStreamJid)
 		load.addElement("query",NS_JABBER_PRIVACY);
 		if (FStanzaProcessor->sendStanzaRequest(this,AStreamJid,load,PRIVACY_TIMEOUT))
 		{
+			FStreamRequests[AStreamJid].prepend(load.id());
 			FLoadRequests.insert(load.id(),QString());
 			return load.id();
 		}

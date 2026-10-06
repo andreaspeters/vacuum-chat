@@ -145,7 +145,7 @@ add_subdirectory(src)
 
 add_custom_target(check
 	COMMAND "${VACUUM_PYTHON_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/matrix_protocol_smoke.py"
-	COMMAND "${VACUUM_GIT_EXECUTABLE}" diff --check
+	COMMAND "${VACUUM_GIT_EXECUTABLE}" -c core.whitespace=cr-at-eol diff --check
 	WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
 	COMMENT "Running source and smoke checks"
 	VERBATIM)
