@@ -37,7 +37,7 @@ protected:
 	void resizeEvent(QResizeEvent *AEvent) override;
 private:
 	struct BubbleOverlay {
-		QTextTable *table;
+		QPointer<QTextTable> table;
 		QPointer<QFrame> frame;
 		QPointer<QTextBrowser> content;
 		QSet<QUrl> imageResources;

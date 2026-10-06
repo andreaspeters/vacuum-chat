@@ -1284,48 +1284,94 @@ void MatrixNetwork::requestImage(const MatrixTextEvent &event)
 							request.setRawHeader("Authorization",
 								QByteArray("Bearer ") + network->FAccesToken.toUtf8());
 							QNetworkReply *reply = network->FNetworkAccessManager->get(request);
+							const auto finishMediaReply = [network, cachePath, isImageEvent, done](QNetworkReply *mediaReply) {
+								if (!network) {
+									mediaReply->deleteLater();
+									done(QImage());
+									return;
+								}
+								if (mediaReply->error() != QNetworkReply::NoError) {
+									qWarning() << "Matrix image download failed:" << mediaReply->errorString()
+										<< "httpStatus:"
+										<< mediaReply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+									mediaReply->deleteLater();
+									done(QImage());
+									return;
+								}
+								const QByteArray data = mediaReply->readAll();
+								if (data.isEmpty()) {
+									mediaReply->deleteLater();
+									done(QImage());
+									return;
+								}
+								QSaveFile output(cachePath);
+								if (!output.open(QIODevice::WriteOnly) ||
+									output.write(data) != data.size() || !output.commit())
+									qWarning() << "Failed to persist Matrix room image in profile cache";
+								mediaReply->deleteLater();
+								ImageLoadScheduler *queue = ImageLoadScheduler::instance();
+								if (!queue) {
+									done(QImage());
+								} else if (isImageEvent) {
+									queue->decodeDataAsync(data, done);
+								} else {
+									queue->decodeDataAsync(data, [done](const QImage &image) {
+										if (!image.isNull()) {
+											done(image);
+										return;
+										}
+										QImage ready(1, 1, QImage::Format_ARGB32);
+										ready.fill(Qt::transparent);
+										done(ready);
+									});
+								}
+							};
+							const auto requestLegacyMedia = [network, mxcUrl, finishMediaReply, done]() {
+								if (!network) {
+									done(QImage());
+									return;
+								}
+								const QUrl legacyMxc(mxcUrl);
+								const QString legacyPath = QStringLiteral("/_matrix/media/v3/download/%1/%2")
+									.arg(QString::fromUtf8(QUrl::toPercentEncoding(legacyMxc.host())))
+									.arg(QString::fromUtf8(QUrl::toPercentEncoding(legacyMxc.path().mid(1))));
+								QNetworkRequest legacyRequest(QUrl(network->constructUrl(legacyPath)));
+								legacyRequest.setAttribute(QNetworkRequest::Http2AllowedAttribute, network->FUseHttp2);
+								QNetworkReply *legacyReply = network->FNetworkAccessManager->get(legacyRequest);
+								connect(legacyReply, &QNetworkReply::finished, network,
+									[network, legacyReply, finishMediaReply, done]() {
+										if (!network) {
+										legacyReply->deleteLater();
+										done(QImage());
+										return;
+										}
+										finishMediaReply(legacyReply);
+									});
+							};
 							connect(reply, &QNetworkReply::finished, network,
-								[network, reply, event, cachePath, isImageEvent, done]() {
+								[network, reply, requestLegacyMedia, finishMediaReply, done]() {
 									if (!network) {
 										reply->deleteLater();
 										done(QImage());
 										return;
 									}
 									if (reply->error() != QNetworkReply::NoError) {
-										qWarning() << "Matrix image download failed:" << reply->errorString()
-											<< "httpStatus:"
-											<< reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-										reply->deleteLater();
-										done(QImage());
-										return;
+										const int statusCode = reply->attribute(
+											QNetworkRequest::HttpStatusCodeAttribute).toInt();
+										QJsonParseError parseError;
+										const QJsonDocument errorDocument = QJsonDocument::fromJson(
+											reply->readAll(), &parseError);
+										const QString errorCode = errorDocument.object()
+											.value(QStringLiteral("errcode")).toString();
+										if (statusCode == 404 &&
+											(errorCode == QStringLiteral("M_UNRECOGNIZED") ||
+											 errorCode == QStringLiteral("M_NOT_FOUND"))) {
+											reply->deleteLater();
+											requestLegacyMedia();
+											return;
+										}
 									}
-									const QByteArray data = reply->readAll();
-									if (data.isEmpty()) {
-										reply->deleteLater();
-										done(QImage());
-										return;
-									}
-									QSaveFile output(cachePath);
-									if (!output.open(QIODevice::WriteOnly) ||
-										output.write(data) != data.size() || !output.commit())
-										qWarning() << "Failed to persist Matrix room image in profile cache";
-									reply->deleteLater();
-									ImageLoadScheduler *queue = ImageLoadScheduler::instance();
-									if (!queue) {
-										done(QImage());
-									} else if (isImageEvent) {
-										queue->decodeDataAsync(data, done);
-									} else {
-										queue->decodeDataAsync(data, [done](const QImage &image) {
-											if (!image.isNull()) {
-												done(image);
-												return;
-											}
-											QImage ready(1, 1, QImage::Format_ARGB32);
-											ready.fill(Qt::transparent);
-											done(ready);
-										});
-									}
+									finishMediaReply(reply);
 								});
 						}, Qt::QueuedConnection);
 				});

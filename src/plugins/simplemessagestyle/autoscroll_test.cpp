@@ -7,6 +7,7 @@
 #include <QKeyEvent>
 #include <QNetworkAccessManager>
 #include <QPainter>
+#include <QPointer>
 #include <QRectF>
 #include <QResizeEvent>
 #include <QRegularExpression>
@@ -462,6 +463,65 @@ int main(int argc, char **argv)
         bubbleNetworkImage.pixelColor(10, 10) == networkImageColor,
         "resourceLoaded images reach the message bubble document");
 
+    IMessageContentOptions mediaHydrationOptions = avatarOptions;
+    mediaHydrationOptions.messageId = QStringLiteral("$media-hydration-test");
+    mediaHydrationOptions.senderId = QStringLiteral("matrix-media-sender");
+    mediaHydrationOptions.senderName = QStringLiteral("Matrix Media Sender");
+    const QString placeholderHtml = QStringLiteral(
+        "<a href=\"vacuum-media://load?room=test&amp;event=%24media-hydration-test\">Load image</a>");
+    avatarStyle.appendContent(avatarView, placeholderHtml, mediaHydrationOptions);
+    application.processEvents();
+    const QList<QFrame *> placeholderFrames = avatarView->findChildren<QFrame *>(
+        QStringLiteral("modernChatBubbleFrame"));
+    QTextBrowser *placeholderContent = placeholderFrames.isEmpty() ? nullptr :
+        placeholderFrames.constLast()->findChild<QTextBrowser *>(
+            QStringLiteral("modernChatBubbleContent"));
+    passed &= check(placeholderContent && placeholderContent->toPlainText().contains(
+        QStringLiteral("Load image")),
+        "Matrix image placeholder is present before history hydration");
+
+    avatarStyle.changeOptions(avatarView, avatarStyleOptions, true);
+    application.processEvents();
+    passed &= check(avatarView->findChildren<QFrame *>(QStringLiteral("modernChatBubbleFrame")).isEmpty(),
+        "history rebuild clears the rendered Matrix image placeholder");
+
+    const QColor hydratedImageColor(40, 70, 220);
+    const QUrl hydratedImageUrl(QStringLiteral("vacuum-matrix-image:/hydrated-event"));
+    QImage hydratedImage(20, 20, QImage::Format_ARGB32_Premultiplied);
+    hydratedImage.fill(hydratedImageColor);
+    avatarView->document()->addResource(QTextDocument::ImageResource, hydratedImageUrl, hydratedImage);
+    avatarView->resourceUpdated(hydratedImageUrl);
+    const QString hydratedImageHtml = QStringLiteral(
+        "<img src=\"%1\" width=\"20\" height=\"20\" alt=\"hydrated photo\" />")
+        .arg(hydratedImageUrl.toString(QUrl::FullyEncoded).toHtmlEscaped());
+    avatarStyle.appendContent(avatarView, hydratedImageHtml, mediaHydrationOptions);
+    application.processEvents();
+    const QList<QFrame *> hydratedImageFrames = avatarView->findChildren<QFrame *>(
+        QStringLiteral("modernChatBubbleFrame"));
+    QTextBrowser *hydratedImageContent = hydratedImageFrames.isEmpty() ? nullptr :
+        hydratedImageFrames.constLast()->findChild<QTextBrowser *>(
+            QStringLiteral("modernChatBubbleContent"));
+    const QImage bubbleHydratedImage = hydratedImageContent ?
+        hydratedImageContent->document()->resource(QTextDocument::ImageResource,
+            hydratedImageUrl).value<QImage>() : QImage();
+    passed &= check(hydratedImageFrames.size() == 1 && hydratedImageContent &&
+        !hydratedImageContent->toPlainText().contains(QStringLiteral("Load image")) &&
+        bubbleHydratedImage.size() == hydratedImage.size() &&
+        bubbleHydratedImage.pixelColor(10, 10) == hydratedImageColor,
+        "hydrated Matrix image replaces the placeholder in the rebuilt message bubble");
+    if (hydratedImageContent)
+    {
+        QTextDocument *bubbleDocument = hydratedImageContent->document();
+        const QSize documentSize = bubbleDocument->size().toSize().expandedTo(QSize(1, 1));
+        QImage renderedBubbleDocument(documentSize, QImage::Format_ARGB32_Premultiplied);
+        renderedBubbleDocument.fill(Qt::transparent);
+        QPainter painter(&renderedBubbleDocument);
+        bubbleDocument->drawContents(&painter);
+        painter.end();
+        passed &= check(imageContainsColor(renderedBubbleDocument, hydratedImageColor),
+            "hydrated Matrix image is actually painted by the rebuilt bubble document");
+    }
+
     const int bubbleFrameCountBefore = avatarView->findChildren<QFrame *>(
         QStringLiteral("modernChatBubbleFrame")).size();
     avatarStyle.appendContent(avatarView, QStringLiteral("bubble edge probe"), avatarOptions);
@@ -502,6 +562,23 @@ int main(int argc, char **argv)
         QStringLiteral("outgoing bubble probe"),
         "outgoing consecutive-message QFrame renders rounded corners with rich text");
     delete avatarView;
+
+    StyleViewer lifetimeView(nullptr);
+    lifetimeView.resize(320, 200);
+    lifetimeView.show();
+    QTextCursor lifetimeCursor(lifetimeView.document());
+    QTextTable *lifetimeTable = lifetimeCursor.insertTable(1, 1);
+    lifetimeTable->cellAt(0, 0).firstCursorPosition().insertText(QStringLiteral("lifetime probe"));
+    lifetimeView.addMessageBubble(lifetimeTable, QStringLiteral("lifetime probe"), Qt::lightGray);
+    application.processEvents();
+    QPointer<QTextTable> deletedTableGuard(lifetimeTable);
+    lifetimeView.document()->setHtml(QStringLiteral("<p>replacement document</p>"));
+    lifetimeView.resize(321, 201);
+    application.processEvents();
+    passed &= check(deletedTableGuard.isNull(),
+        "replacing the document destroys its previous message table");
+    passed &= check(lifetimeView.findChildren<QFrame *>(QStringLiteral("modernChatBubbleFrame")).isEmpty(),
+        "geometry updates discard bubbles whose document table was deleted");
 
     delete view;
     return passed ? 0 : 1;

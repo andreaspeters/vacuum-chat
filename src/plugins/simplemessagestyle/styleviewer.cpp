@@ -260,14 +260,22 @@ void StyleViewer::updateMessageBubbleGeometry()
 {
 	if (!document() || !document()->documentLayout())
 		return;
-	for (const BubbleOverlay &overlay : FBubbleOverlays)
+	for (int i = 0; i < FBubbleOverlays.size(); )
 	{
+		BubbleOverlay &overlay = FBubbleOverlays[i];
 		if (!overlay.table || !overlay.frame)
+		{
+			QPointer<QFrame> frame = overlay.frame;
+			FBubbleOverlays.removeAt(i);
+			if (frame)
+				delete frame.data();
 			continue;
-		QRectF rect = document()->documentLayout()->frameBoundingRect(overlay.table);
+		}
+		QRectF rect = document()->documentLayout()->frameBoundingRect(overlay.table.data());
 		rect.translate(-horizontalScrollBar()->value(), -verticalScrollBar()->value());
 		overlay.frame->setGeometry(rect.toAlignedRect());
 		overlay.frame->raise();
+		++i;
 	}
 }
 
