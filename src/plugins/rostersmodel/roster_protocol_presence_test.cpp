@@ -6,20 +6,14 @@
 class RostersModelPresenceTestAccess
 {
 public:
-    static void addPresenceProvider(RostersModel &model, IProtocolPresence *presence)
+    static void bindPresenceProvider(RostersModel &model, IProtocolPresence *presence)
     {
-        model.FProtocolPresences.append(presence);
+        model.bindProtocolPresenceProvider(presence);
     }
 
     static void rebuild(RostersModel &model, IProtocolRoster *roster)
     {
         model.rebuildProtocolRoster(roster);
-    }
-
-    static void presenceChanged(RostersModel &model, const QString &streamId,
-        int show, const QString &status)
-    {
-        model.onProtocolPresenceChanged(streamId, show, status);
     }
 };
 
@@ -27,6 +21,8 @@ namespace
 {
 class FakePresence final : public QObject, public IProtocolPresence
 {
+    Q_OBJECT
+    Q_INTERFACES(IProtocolPresence)
 public:
     QString id = QStringLiteral("@user:example.org");
     int currentShow = IPresence::Offline;
@@ -43,6 +39,17 @@ public:
         currentStatus = statusValue;
         return true;
     }
+
+    void publishPresence(int showValue, const QString &statusValue)
+    {
+        currentShow = showValue;
+        currentStatus = statusValue;
+        emit protocolPresenceChanged(id, showValue, statusValue);
+    }
+
+signals:
+    void protocolPresenceChanged(const QString &streamId, int show, const QString &status);
+    void protocolPresenceClosed(const QString &streamId);
 };
 
 class FakeRoster final : public IProtocolRoster
@@ -78,7 +85,7 @@ int main(int argc, char **argv)
     RostersModel model;
     FakePresence presence;
     FakeRoster roster;
-    RostersModelPresenceTestAccess::addPresenceProvider(model, &presence);
+    RostersModelPresenceTestAccess::bindPresenceProvider(model, &presence);
     RostersModelPresenceTestAccess::rebuild(model, &roster);
 
     IRosterIndex *root = model.protocolStreamRoot(roster.streamId());
@@ -95,19 +102,13 @@ int main(int argc, char **argv)
     passed &= check(room->data(RDR_SHOW).toInt() == IPresence::Offline,
         "rebuilt protocol room row reflects the provider's offline state");
 
-    presence.currentShow = IPresence::Online;
-    presence.currentStatus = QStringLiteral("Online");
-    RostersModelPresenceTestAccess::presenceChanged(model, roster.streamId(),
-        IPresence::Online, QStringLiteral("Online"));
+    presence.publishPresence(IPresence::Online, QStringLiteral("Online"));
     passed &= check(root->data(RDR_SHOW).toInt() == IPresence::Online,
         "online provider state updates the account lamp role");
     passed &= check(room->data(RDR_SHOW).toInt() == IPresence::Online,
         "online provider state updates existing room rows");
 
-    presence.currentShow = IPresence::Offline;
-    presence.currentStatus = QStringLiteral("Offline");
-    RostersModelPresenceTestAccess::presenceChanged(model, roster.streamId(),
-        IPresence::Offline, QStringLiteral("Offline"));
+    presence.publishPresence(IPresence::Offline, QStringLiteral("Offline"));
     passed &= check(root->data(RDR_SHOW).toInt() == IPresence::Offline,
         "offline provider state updates the account lamp role");
     passed &= check(room->data(RDR_SHOW).toInt() == IPresence::Offline,
@@ -115,3 +116,5 @@ int main(int argc, char **argv)
 
     return passed ? 0 : 1;
 }
+
+#include "roster_protocol_presence_test.moc"

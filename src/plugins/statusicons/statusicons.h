@@ -22,7 +22,6 @@
 #include <interfaces/imultiuserchat.h>
 #include <interfaces/ioptionsmanager.h>
 #include <utils/options.h>
-#include "iconsoptionswidget.h"
 
 class StatusIcons :
 			public QObject,

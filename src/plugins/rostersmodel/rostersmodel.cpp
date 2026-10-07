@@ -130,14 +130,19 @@ void RostersModel::bindProtocolPresenceProviders()
 	for (IPlugin *plugin : FPluginManager->pluginInterface("IProtocolPresence")) {
 		IProtocolPresence *presence = plugin
 			? qobject_cast<IProtocolPresence *>(plugin->instance()) : nullptr;
-		if (!presence || FProtocolPresences.contains(presence))
-			continue;
-		FProtocolPresences.append(presence);
-		connect(presence->instance(), SIGNAL(protocolPresenceChanged(QString,int,QString)),
-			this, SLOT(onProtocolPresenceChanged(QString,int,QString)), Qt::UniqueConnection);
-		connect(presence->instance(), SIGNAL(protocolPresenceClosed(QString)),
-			this, SLOT(onProtocolPresenceClosed(QString)), Qt::UniqueConnection);
+		bindProtocolPresenceProvider(presence);
 	}
+}
+
+void RostersModel::bindProtocolPresenceProvider(IProtocolPresence *presence)
+{
+	if (!presence || FProtocolPresences.contains(presence))
+		return;
+	FProtocolPresences.append(presence);
+	connect(presence->instance(), SIGNAL(protocolPresenceChanged(QString,int,QString)),
+		this, SLOT(onProtocolPresenceChanged(QString,int,QString)), Qt::UniqueConnection);
+	connect(presence->instance(), SIGNAL(protocolPresenceClosed(QString)),
+		this, SLOT(onProtocolPresenceClosed(QString)), Qt::UniqueConnection);
 }
 
 void RostersModel::bindProtocolRosterProviders()

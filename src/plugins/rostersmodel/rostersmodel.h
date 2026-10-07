@@ -111,6 +111,7 @@ protected slots:
 	void onIndexDestroyed(IRosterIndex *AIndex);
 	void onDelayedDataChanged();
 private:
+	void bindProtocolPresenceProvider(IProtocolPresence *presence);
 	IRosterPlugin *FRosterPlugin;
 	IPresencePlugin *FPresencePlugin;
 	IAccountManager *FAccountManager;

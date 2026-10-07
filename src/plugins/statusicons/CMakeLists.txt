@@ -13,3 +13,17 @@ if (IS_ENABLED)
 		COMPONENT ${PLUGIN_NAME}
 		PATTERN ".svn" EXCLUDE)
 endif (IS_ENABLED)
+
+if (BUILD_TESTING)
+	add_executable(statusicons_roster_presence_tests EXCLUDE_FROM_ALL
+		roster_presence_icons_test.cpp
+		${CMAKE_SOURCE_DIR}/src/plugins/rostersmodel/rosterindex.cpp
+		${CMAKE_SOURCE_DIR}/src/plugins/rostersmodel/rosterindex.h)
+	target_include_directories(statusicons_roster_presence_tests PRIVATE
+		"${CMAKE_SOURCE_DIR}/src"
+		"${CMAKE_SOURCE_DIR}/src/plugins/rostersmodel"
+		"${CMAKE_CURRENT_SOURCE_DIR}")
+	target_compile_features(statusicons_roster_presence_tests PRIVATE cxx_std_11)
+	target_link_libraries(statusicons_roster_presence_tests PRIVATE
+		statusicons Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Xml)
+endif (BUILD_TESTING)

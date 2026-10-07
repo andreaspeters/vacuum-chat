@@ -1,4 +1,5 @@
 #include "statusicons.h"
+#include "iconsoptionswidget.h"
 
 #include <QPainter>
 #include <QTimer>
@@ -214,10 +215,15 @@ QVariant StatusIcons::rosterData(const IRosterIndex *AIndex, int ARole) const
 	if (ARole == Qt::DecorationRole)
 	{
 		QIcon icon;
-		if (!AIndex->data(RDR_ACCOUNT_ID).toString().isEmpty() && !AIndex->data(RDR_CONVERSATION_ID).toString().isEmpty())
-			icon = iconByIdentity(AIndex->data(RDR_ACCOUNT_ID).toString(), AIndex->data(RDR_CONVERSATION_ID).toString());
+		const QString accountId = AIndex->data(RDR_ACCOUNT_ID).toString();
+		const QString conversationId = AIndex->data(RDR_CONVERSATION_ID).toString();
+		const QVariant show = AIndex->data(RDR_SHOW);
+		if (!accountId.isEmpty() && show.isValid())
+			icon = iconByStatus(show.toInt(), SUBSCRIPTION_BOTH, false);
+		else if (!accountId.isEmpty() && !conversationId.isEmpty())
+			icon = iconByIdentity(accountId, conversationId);
 		else
-			icon = iconByJid(AIndex->data(RDR_STREAM_JID).toString(),AIndex->data(RDR_FULL_JID).toString());
+			icon = iconByJid(AIndex->data(RDR_STREAM_JID).toString(), AIndex->data(RDR_FULL_JID).toString());
 		return rosterTargetMuted(AIndex) ? mutedStatusIcon(icon) : icon;
 	}
 	return QVariant();
