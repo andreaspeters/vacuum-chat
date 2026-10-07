@@ -71,6 +71,9 @@ public slots:
     void loadHistory(const QString &profileDirectory, const QString &serverUrl,
                      const QString &userId, const QString &roomId);
     void checkCompleteCrossSigningKeys(const QString &userId);
+    void loadHistoryPage(const QString &profileDirectory, const QString &serverUrl,
+                         const QString &userId, const QString &roomId, int limit,
+                         qint64 beforeOriginTs = 0, const QString &beforeEventId = QString());
 
 signals:
     void roomsLoaded(const QList<MatrixCachedRoom> &rooms);
@@ -78,6 +81,7 @@ signals:
     void historyLoaded(const QString &roomId, const QList<MatrixTimelineEvent> &events);
     void historyLoadFailed(const QString &roomId, const QString &error);
     void completeCrossSigningKeysChecked(const QString &userId, bool complete);
+    void historyPageLoaded(const QString &roomId, const MatrixHistoryPageResult &result);
 
 private:
     MatrixDatabase FDatabase;

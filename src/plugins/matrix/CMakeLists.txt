@@ -122,6 +122,13 @@ if (BUILD_TESTING)
 	target_compile_features(matrix_presence_status_send_tests PRIVATE cxx_std_17)
 	target_link_libraries(matrix_presence_status_send_tests PRIVATE
 		matrix ${VACUUM_UTILS_NAME} Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::Xml Qt6::Sql ${ADD_LIBS})
+
+	add_executable(matrix_history_pagination_tests EXCLUDE_FROM_ALL
+		matrixhistorypagination_test.cpp matrixdatabase.cpp matrixdatabaseworker.cpp
+	)
+	target_include_directories(matrix_history_pagination_tests PRIVATE "${CMAKE_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}")
+	target_compile_features(matrix_history_pagination_tests PRIVATE cxx_std_11)
+	target_link_libraries(matrix_history_pagination_tests PRIVATE Qt6::Core Qt6::Sql)
 endif()
 
 if(TARGET matrix)

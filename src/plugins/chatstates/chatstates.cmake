@@ -1,2 +1,2 @@
 set(SOURCES chatstates.cpp statewidget.cpp )
-set(HEADERS chatstates.h statewidget.h )
+set(HEADERS chatstates.h statewidget.h protocolchatstaterouting.h )

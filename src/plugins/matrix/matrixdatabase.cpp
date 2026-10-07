@@ -965,6 +965,74 @@ QList<MatrixTimelineEvent> MatrixDatabase::getEvents(const QString &roomId, int 
     return events;
 }
 
+MatrixHistoryPageResult MatrixDatabase::loadHistoryPage(const QString &roomId, int limit,
+                                                        qint64 beforeOriginTs,
+                                                        const QString &beforeEventId) const
+{
+    MatrixHistoryPageResult result;
+    if (!FisOpen || !FDatabase.isOpen() || roomId.isEmpty() || limit <= 0 ||
+        beforeOriginTs < 0 ||
+        (beforeOriginTs == 0 && !beforeEventId.isEmpty()) ||
+        (beforeOriginTs > 0 && beforeEventId.isEmpty()))
+        return result;
+
+    // History requests are deliberately bounded to the UI's 30-message page size.
+    const int pageLimit = qMin(limit, 30);
+    const bool hasCursor = beforeOriginTs > 0;
+    QString sql = QStringLiteral(
+        "SELECT room_id, event_id, event_type, sender, origin_ts, message_type, content, metadata "
+        "FROM timeline_events WHERE room_id = :room_id ");
+    if (hasCursor)
+        sql += QStringLiteral("AND (origin_ts < :before_ts OR "
+                              "(origin_ts = :before_ts AND event_id < :before_event_id)) ");
+    sql += QStringLiteral("ORDER BY origin_ts DESC, event_id DESC LIMIT :limit");
+
+    QSqlQuery query(FDatabase);
+    query.prepare(sql);
+    query.bindValue(QStringLiteral(":room_id"), roomId);
+    if (hasCursor) {
+        query.bindValue(QStringLiteral(":before_ts"), beforeOriginTs);
+        query.bindValue(QStringLiteral(":before_event_id"), beforeEventId);
+    }
+    query.bindValue(QStringLiteral(":limit"), pageLimit + 1);
+    if (!query.exec())
+        return result;
+
+    result.success = true;
+    int loaded = 0;
+    while (query.next()) {
+        if (loaded == pageLimit) {
+            result.hasMore = true;
+            break;
+        }
+
+        const QSqlRecord record = query.record();
+        MatrixTimelineEvent event;
+        event.roomId = record.value(QStringLiteral("room_id")).toString();
+        event.eventId = record.value(QStringLiteral("event_id")).toString();
+        event.eventType = record.value(QStringLiteral("event_type")).toString();
+        event.sender = record.value(QStringLiteral("sender")).toString();
+        event.originTs = record.value(QStringLiteral("origin_ts")).toLongLong();
+        event.messageType = record.value(QStringLiteral("message_type")).toString();
+        event.content = record.value(QStringLiteral("content")).toString();
+
+        const QByteArray metadataJson = record.value(QStringLiteral("metadata")).toByteArray();
+        if (!metadataJson.isEmpty()) {
+            const QJsonDocument document = QJsonDocument::fromJson(metadataJson);
+            if (document.isObject()) {
+                const QJsonObject metadata = document.object();
+                for (auto it = metadata.begin(); it != metadata.end(); ++it)
+                    event.metadata.insert(it.key(), it.value().toVariant());
+            }
+        }
+
+        // Rows are queried newest-first; prepend to return a chronological page.
+        result.events.prepend(event);
+        ++loaded;
+    }
+    return result;
+}
+
 QStringList MatrixDatabase::roomIds() const
 {
    QStringList result;

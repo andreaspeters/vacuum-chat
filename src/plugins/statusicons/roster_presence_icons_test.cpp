@@ -74,6 +74,9 @@ int main(int argc, char **argv)
     passed &= check(statusIcons.source == StatusIconSource &&
         statusIcons.selectedShow == IPresence::Offline,
         "protocol account root selects the dedicated Offline status icon");
+    passed &= check(statusIcons.iconKeyByStatus(IPresence::Offline,
+        SUBSCRIPTION_BOTH, false) == STI_OFFLINE,
+        "Offline presence resolves to the existing Offline icon variant");
 
     RosterIndex protocolContact(RIT_CONTACT);
     protocolContact.setData(RDR_ACCOUNT_ID, QStringLiteral("account-uuid-a"));

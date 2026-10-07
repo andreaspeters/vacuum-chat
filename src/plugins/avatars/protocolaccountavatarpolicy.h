@@ -37,6 +37,13 @@ inline bool canOffer(const IProtocolCapabilities *capabilities,
         capabilities->hasCapabilities(accountId,
             IProtocolCapabilities::CapabilitySetAccountAvatar);
 }
+
+inline bool dispatchSetAvatar(IProtocolAccountAvatarActions *actions,
+    const AccountId &accountId, const QByteArray &imageData)
+{
+    return actions && !accountId.isEmpty() &&
+        actions->setAccountAvatar(accountId, imageData);
+}
 }
 
 #endif // PROTOCOLACCOUNTAVATARPOLICY_H

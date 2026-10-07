@@ -39,12 +39,14 @@ struct ChatParams
 		selfState = IChatStates::StateUnknown;
 		notifyId = 0;
 		selfLastActive = 0;
+		selfLastSent = 0;
 		canSendStates = false;
 	}
 	int userState;
 	int selfState;
 	int notifyId;
 	uint selfLastActive;
+	uint selfLastSent;
 	bool canSendStates;
 };
 
@@ -102,6 +104,7 @@ protected:
 	void setSupported(const Jid &AStreamJid, const Jid &AContactJid, bool ASupported);
 	void setUserState(const Jid &AStreamJid, const Jid &AContactJid, int AState);
 	void setProtocolUserState(const QString &accountId, const QString &conversationId, int state);
+	void setProtocolSelfState(const QString &accountId, const QString &conversationId, int state, bool ASend = true);
 	void notifyProtocolUserState(const QString &accountId, const QString &conversationId, int state);
 	void removeProtocolUserNotification(const QString &accountId, const QString &conversationId);
 	void setSelfState(const Jid &AStreamJid, const Jid &AContactJid, int AState, bool ASend = true);
@@ -143,6 +146,7 @@ private:
 	QMap<Jid, int> FPermitStatus;
 	QMap<Jid, QList<Jid> > FNotSupported;
 	QMap<Jid, QMap<Jid, ChatParams> > FChatParams;
+	QMap<QString, QMap<QString, ChatParams> > FProtocolChatParams;
 	QMap<QString, QMap<QString, int> > FProtocolUserStates;
 	QMap<QString, QMap<QString, int> > FProtocolNotifyIds;
 	QMap<Jid, QMap<Jid, QString> > FStanzaSessions;

@@ -59,13 +59,21 @@ struct MatrixTimelineCursor {
     QList<MatrixTimelineEvent> events;     // Loaded timeline events
     bool hasMore;                          // True if more events exist
     QString nextToken;                     // Sync token for continuation
-    
+
     MatrixTimelineCursor() : syncToken(0), prevBatchTs(0), hasMore(false) {}
     bool isValid() const { return !events.isEmpty() || hasMore; }
 };
 
+// History page result for keyset pagination
+struct MatrixHistoryPageResult {
+    QList<MatrixTimelineEvent> events;
+    bool hasMore = false;
+    bool success = false;
+};
+
 Q_DECLARE_METATYPE(MatrixTimelineEvent)
 Q_DECLARE_METATYPE(QList<MatrixTimelineEvent>)
+Q_DECLARE_METATYPE(MatrixHistoryPageResult)
 
 // Database singleton for Matrix account-per-room timeline persistence
 class MatrixDatabase
@@ -87,6 +95,9 @@ public:
 
     // Timeline queries
     MatrixTimelineCursor loadTimeline(const QString &roomId, qint64 afterTs, int limit = 100);
+    MatrixHistoryPageResult loadHistoryPage(const QString &roomId, int limit,
+                                            qint64 beforeOriginTs = 0,
+                                            const QString &beforeEventId = QString()) const;
     bool saveTimeline(const QString &roomId, const QList<MatrixTimelineEvent> &events);
     bool appendTimelineEvents(const QString &roomId, const QList<MatrixTimelineEvent> &events);
     bool persistSyncBatch(const QList<MatrixTimelineEvent> &events, const QString &nextBatch);

@@ -1,5 +1,6 @@
 #include "avatars.h"
 #include "protocolaccountavatarpolicy.h"
+#include "avatarvisualpolicy.h"
 #include <interfaces/iprotocolroster.h>
 #include <interfaces/protocolprofileactionpolicy.h>
 #include <utils/imageloadscheduler.h>
@@ -326,11 +327,11 @@ QVariant Avatars::rosterData(const IRosterIndex *AIndex, int ARole) const
 	const QString avatarKey = AIndex->data(RDR_AVATAR_KEY).toString();
 	if (ARole == RDR_AVATAR_IMAGE)
 	{
-		bool gray = FShowGrayAvatars && (AIndex->data(RDR_SHOW).toInt()==IPresence::Offline || AIndex->data(RDR_SHOW).toInt()==IPresence::Error);
+		const int show = AIndex->data(RDR_SHOW).toInt();
+		const bool gray = AvatarVisualPolicy::shouldGray(show, FShowGrayAvatars);
 		QImage avatar = FCustomImagesByKey.value(avatarKey);
 		if (!avatar.isNull()) {
-			if (gray)
-				avatar = ImageManager::opacitized(ImageManager::grayscaled(avatar));
+			avatar = AvatarVisualPolicy::forPresence(avatar, show, FShowGrayAvatars);
 		} else {
 			avatar = loadAvatarImage(avatarKey.isEmpty() ? avatarHash(AIndex->data(RDR_FULL_JID).toString()) : avatarHashByKey(avatarKey), FAvatarSize, gray);
 		}
@@ -568,7 +569,7 @@ QImage Avatars::loadAvatarImage(const QString &AHash, const QSize &AMaxSize, boo
 		}
 		avatars->FAvatarImages[AHash].insert(QSize(), sourceImage);
 		avatars->FGrayAvatarImages[AHash].insert(QSize(),
-			ImageManager::opacitized(ImageManager::grayscaled(sourceImage)));
+			AvatarVisualPolicy::grayImage(sourceImage));
 		if (!avatars->FRostersModel)
 			return;
 		std::function<void(IRosterIndex *)> notify = [avatars, AHash, &notify](IRosterIndex *index) {
@@ -1016,8 +1017,8 @@ void Avatars::onSetAvatarByAction(bool)
 			const QStringList accountIds = action->data(ADR_ACCOUNT_ID).toStringList();
 			if (!accountIds.isEmpty()) {
 				foreach (const AccountId &accountId, accountIds) {
-					if (IProtocolAccountAvatarActions *actions = accountAvatarActions(accountId))
-						actions->setAccountAvatar(accountId, data);
+					ProtocolAccountAvatarPolicy::dispatchSetAvatar(
+						accountAvatarActions(accountId), accountId, data);
 				}
 			} else if (!action->data(ADR_CONTACT_JID).isNull())
 			{
@@ -1036,8 +1037,8 @@ void Avatars::onClearAvatarByAction(bool)
 		const QStringList accountIds = action->data(ADR_ACCOUNT_ID).toStringList();
 		if (!accountIds.isEmpty()) {
 			foreach (const AccountId &accountId, accountIds) {
-				if (IProtocolAccountAvatarActions *actions = accountAvatarActions(accountId))
-					actions->setAccountAvatar(accountId, QByteArray());
+				ProtocolAccountAvatarPolicy::dispatchSetAvatar(
+					accountAvatarActions(accountId), accountId, QByteArray());
 			}
 		} else if (!action->data(ADR_CONTACT_JID).isNull())
 		{
@@ -1073,7 +1074,7 @@ void Avatars::onProfileActionByAction(bool)
 void Avatars::onIconStorageChanged()
 {
 	FEmptyAvatar = QImage(IconStorage::staticStorage(RSR_STORAGE_MENUICONS)->fileFullName(MNI_AVATAR_EMPTY)).scaled(FAvatarSize,Qt::KeepAspectRatio,Qt::FastTransformation);
-	FGrayEmptyAvatar = ImageManager::opacitized(ImageManager::grayscaled(FEmptyAvatar));
+	FGrayEmptyAvatar = AvatarVisualPolicy::grayImage(FEmptyAvatar);
 }
 
 void Avatars::onOptionsOpened()

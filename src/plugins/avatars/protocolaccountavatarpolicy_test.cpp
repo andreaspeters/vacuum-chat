@@ -23,7 +23,17 @@ private:
 class AvatarActionProvider : public IProtocolAccountAvatarActions
 {
 public:
-    bool setAccountAvatar(const AccountId &, const QByteArray &) override { return true; }
+    AccountId receivedAccount;
+    QByteArray receivedData;
+    int calls = 0;
+
+    bool setAccountAvatar(const AccountId &accountId, const QByteArray &imageData) override
+    {
+        ++calls;
+        receivedAccount = accountId;
+        receivedData = imageData;
+        return true;
+    }
 };
 
 static bool check(bool condition, const char *message)
@@ -54,6 +64,22 @@ int main()
     success &= check(!ProtocolAccountAvatarPolicy::canOffer(
         &unsupported, &actions, persistentAccountId),
         "default unsupported provider must remain hidden");
+
+    AvatarActionProvider dispatchProvider;
+    const QByteArray avatarData("synthetic-image-data");
+    success &= check(ProtocolAccountAvatarPolicy::dispatchSetAvatar(
+        &dispatchProvider, persistentAccountId, avatarData),
+        "avatar dispatch should invoke the matching adapter action");
+    success &= check(dispatchProvider.calls == 1 &&
+        dispatchProvider.receivedAccount == persistentAccountId &&
+        dispatchProvider.receivedData == avatarData,
+        "avatar dispatch must preserve the account ID and image bytes");
+    success &= check(!ProtocolAccountAvatarPolicy::dispatchSetAvatar(
+        nullptr, persistentAccountId, avatarData) && dispatchProvider.calls == 1,
+        "missing adapter action must not dispatch");
+    success &= check(!ProtocolAccountAvatarPolicy::dispatchSetAvatar(
+        &dispatchProvider, AccountId(), avatarData) && dispatchProvider.calls == 1,
+        "empty account ID must not dispatch");
 
     QList<ProtocolAccountAvatarPolicy::ProviderIdentity> providerIdentities;
     providerIdentities.append({protocolStreamId, persistentAccountId});

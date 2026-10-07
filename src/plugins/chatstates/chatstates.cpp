@@ -1,4 +1,5 @@
 #include "chatstates.h"
+#include "protocolchatstaterouting.h"
 
 #include <QSet>
 #include <QDateTime>
@@ -19,6 +20,17 @@
 #define PAUSED_TIMEOUT            30
 #define INACTIVE_TIMEOUT          2*60
 #define GONE_TIMEOUT              10*60
+
+namespace {
+ProtocolTypingStatus protocolTypingStatusForChatState(int state)
+{
+	if (state == IChatStates::StateComposing)
+		return TypingStatusComposing;
+	if (state == IChatStates::StatePaused)
+		return TypingStatusPaused;
+	return TypingStatusNotTyping;
+}
+}
 
 ChatStates::ChatStates()
 {
@@ -576,6 +588,25 @@ void ChatStates::setProtocolUserState(const QString &accountId, const QString &c
 	}
 }
 
+void ChatStates::setProtocolSelfState(const QString &accountId, const QString &conversationId, int state, bool ASend)
+{
+	if (accountId.isEmpty() || conversationId.isEmpty())
+		return;
+	ChatParams &params = FProtocolChatParams[accountId][conversationId];
+	const uint now = QDateTime::currentDateTime().toSecsSinceEpoch();
+	const ProtocolTypingStatus oldStatus = protocolTypingStatusForChatState(params.selfState);
+	const ProtocolTypingStatus newStatus = protocolTypingStatusForChatState(state);
+	const bool refreshTyping = state == IChatStates::StateComposing &&
+		(params.selfLastSent == 0 || now >= params.selfLastSent + PAUSED_TIMEOUT / 2);
+	params.selfLastActive = now;
+	params.selfState = state;
+	if (ASend && (oldStatus != newStatus || refreshTyping))
+	{
+		ProtocolChatStateRouting::sendTyping(FProtocolMessaging, accountId, conversationId, newStatus);
+		params.selfLastSent = now;
+	}
+}
+
 void ChatStates::notifyProtocolUserState(const QString &accountId, const QString &conversationId, int state)
 {
 	if (accountId.isEmpty() || conversationId.isEmpty())
@@ -773,7 +804,10 @@ void ChatStates::onChatWindowCreated(IChatWindow *AWindow)
 			}
 		}
 	}
-	FChatParams[AWindow->streamJid()][AWindow->contactJid()];
+	if (!AWindow->accountId().isEmpty() && !AWindow->conversationId().isEmpty())
+		FProtocolChatParams[AWindow->accountId()][AWindow->conversationId()];
+	else
+		FChatParams[AWindow->streamJid()][AWindow->contactJid()];
 	StateWidget *widget = new StateWidget(this,AWindow,AWindow->toolBarWidget()->toolBarChanger()->toolBar());
 	AWindow->toolBarWidget()->toolBarChanger()->insertWidget(widget,TBG_MWTBW_CHATSTATES);
 	widget->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
@@ -804,6 +838,15 @@ void ChatStates::onChatWindowActivated()
 	IChatWindow *window = qobject_cast<IChatWindow *>(sender());
 	if (window)
 	{
+		if (!window->accountId().isEmpty() && !window->conversationId().isEmpty())
+		{
+			const int state = FProtocolChatParams.value(window->accountId())
+				.value(window->conversationId()).selfState;
+			if (state == IChatStates::StateUnknown || state == IChatStates::StateInactive ||
+				state == IChatStates::StateGone)
+				setProtocolSelfState(window->accountId(), window->conversationId(), IChatStates::StateActive);
+			return;
+		}
 		int state = selfChatState(window->streamJid(),window->contactJid());
 		if (state==IChatStates::StateUnknown || state==IChatStates::StateInactive || state==IChatStates::StateGone)
 			setSelfState(window->streamJid(),window->contactJid(),IChatStates::StateActive);
@@ -816,6 +859,12 @@ void ChatStates::onChatWindowTextChanged()
 	IChatWindow *window = FChatByEditor.value(editor,NULL);
 	if (editor && window)
 	{
+		if (!window->accountId().isEmpty() && !window->conversationId().isEmpty())
+		{
+			setProtocolSelfState(window->accountId(), window->conversationId(),
+				editor->document()->isEmpty() ? IChatStates::StateActive : IChatStates::StateComposing);
+			return;
+		}
 		if (!editor->document()->isEmpty())
 			setSelfState(window->streamJid(),window->contactJid(),IChatStates::StateComposing);
 		else
@@ -829,6 +878,11 @@ void ChatStates::onChatWindowClosed()
 	if (window)
 	{
 		removeProtocolUserNotification(window->accountId(), window->conversationId());
+		if (!window->accountId().isEmpty() && !window->conversationId().isEmpty())
+		{
+			setProtocolSelfState(window->accountId(), window->conversationId(), IChatStates::StateInactive);
+			return;
+		}
 		int state = selfChatState(window->streamJid(),window->contactJid());
 		if (state != IChatStates::StateGone)
 			setSelfState(window->streamJid(),window->contactJid(),IChatStates::StateInactive);
@@ -838,7 +892,18 @@ void ChatStates::onChatWindowClosed()
 void ChatStates::onChatWindowDestroyed(IChatWindow *AWindow)
 {
 	removeProtocolUserNotification(AWindow->accountId(), AWindow->conversationId());
-	setSelfState(AWindow->streamJid(),AWindow->contactJid(),IChatStates::StateGone);
+	if (!AWindow->accountId().isEmpty() && !AWindow->conversationId().isEmpty())
+	{
+		setProtocolSelfState(AWindow->accountId(), AWindow->conversationId(), IChatStates::StateGone);
+		if (FProtocolChatParams.contains(AWindow->accountId()))
+		{
+			FProtocolChatParams[AWindow->accountId()].remove(AWindow->conversationId());
+			if (FProtocolChatParams[AWindow->accountId()].isEmpty())
+				FProtocolChatParams.remove(AWindow->accountId());
+		}
+	}
+	else
+		setSelfState(AWindow->streamJid(),AWindow->contactJid(),IChatStates::StateGone);
 	FChatByEditor.remove(AWindow->editWidget()->textEdit());
 }
 
@@ -847,6 +912,28 @@ void ChatStates::onUpdateSelfStates()
 	QList<IChatWindow *> windows = FMessageWidgets!=NULL ? FMessageWidgets->chatWindows() : QList<IChatWindow *>();
 	foreach (IChatWindow *window, windows)
 	{
+		if (!window->accountId().isEmpty() && !window->conversationId().isEmpty())
+		{
+			if (!FProtocolChatParams.contains(window->accountId()) ||
+				!FProtocolChatParams[window->accountId()].contains(window->conversationId()))
+				continue;
+			ChatParams &params = FProtocolChatParams[window->accountId()][window->conversationId()];
+			const uint now = QDateTime::currentDateTime().toSecsSinceEpoch();
+			const uint timePassed = now - params.selfLastActive;
+			if (params.selfState == IChatStates::StateActive && window->isActiveTabPage())
+				setProtocolSelfState(window->accountId(), window->conversationId(), IChatStates::StateActive);
+			else if (params.selfState == IChatStates::StateComposing && timePassed > PAUSED_TIMEOUT)
+				setProtocolSelfState(window->accountId(), window->conversationId(), IChatStates::StatePaused);
+			else if (params.selfState == IChatStates::StateComposing &&
+				now >= params.selfLastSent + PAUSED_TIMEOUT / 2)
+				setProtocolSelfState(window->accountId(), window->conversationId(), IChatStates::StateComposing);
+			else if ((params.selfState == IChatStates::StateActive || params.selfState == IChatStates::StatePaused) &&
+				timePassed > INACTIVE_TIMEOUT)
+				setProtocolSelfState(window->accountId(), window->conversationId(), IChatStates::StateInactive);
+			else if (params.selfState == IChatStates::StateInactive && timePassed > GONE_TIMEOUT)
+				setProtocolSelfState(window->accountId(), window->conversationId(), IChatStates::StateGone);
+			continue;
+		}
 		if (FChatParams.value(window->streamJid()).contains(window->contactJid()))
 		{
 			ChatParams &params = FChatParams[window->streamJid()][window->contactJid()];

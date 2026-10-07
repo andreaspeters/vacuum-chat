@@ -183,3 +183,20 @@ void MatrixDatabaseWorker::loadHistory(const QString &profileDirectory,
     }
     emit historyLoaded(roomId, FDatabase.getEvents(roomId));
 }
+
+void MatrixDatabaseWorker::loadHistoryPage(const QString &profileDirectory,
+                                           const QString &serverUrl,
+                                           const QString &userId,
+                                           const QString &roomId, int limit,
+                                           qint64 beforeOriginTs,
+                                           const QString &beforeEventId)
+{
+    FDatabase.setProfileDirectory(profileDirectory);
+    if (!FDatabase.openForAccount(serverUrl, userId)) {
+        emit historyPageLoaded(roomId, MatrixHistoryPageResult());
+        return;
+    }
+
+    emit historyPageLoaded(roomId, FDatabase.loadHistoryPage(
+        roomId, limit, beforeOriginTs, beforeEventId));
+}
