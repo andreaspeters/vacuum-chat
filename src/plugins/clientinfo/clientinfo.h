@@ -56,6 +56,8 @@ struct TimeItem {
 	int zone;
 };
 
+class IAccountManager;
+
 class ClientInfo :
 			public QObject,
 			public IPlugin,
@@ -132,6 +134,7 @@ protected slots:
 	void onOptionsChanged(const OptionsNode &ANode);
 private:
 	IPluginManager *FPluginManager;
+	IAccountManager *FAccountManager;
 	IRosterPlugin *FRosterPlugin;
 	IPresencePlugin *FPresencePlugin;
 	IStanzaProcessor *FStanzaProcessor;

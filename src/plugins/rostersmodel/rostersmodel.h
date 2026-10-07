@@ -23,6 +23,7 @@ class RostersModel :
 	Q_OBJECT;
 	Q_PLUGIN_METADATA(IID "org.vacuum-im.rostersmodel")
 	Q_INTERFACES(IPlugin IRostersModel);
+friend class RostersModelPresenceTestAccess;
 public:
 	RostersModel();
 	~RostersModel();

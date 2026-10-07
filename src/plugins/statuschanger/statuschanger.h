@@ -134,6 +134,7 @@ protected:
 	void removeStatusNotification(IPresence *APresence);
 protected slots:
 	void onSetStatusByAction(bool);
+	void onSetProtocolStatusByAction(bool);
 	void onPresenceAdded(IPresence *APresence);
 	void onPresenceChanged(IPresence *APresence, int AShow, const QString &AStatus, int APriority);
 	void onPresenceRemoved(IPresence *APresence);

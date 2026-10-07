@@ -117,6 +117,7 @@ MeshCoreProtocol::~MeshCoreProtocol() { disconnect(); }
 
 bool MeshCoreProtocol::initialize(const QString &configPath)
 {
+    currentPublicKeyHex.clear();
     // configPath is the transport endpoint: a serial device path for USB, or
     // the MAC/address for BLE. Default backend is USB until a backend is chosen.
     backend = "usb";
@@ -128,6 +129,7 @@ bool MeshCoreProtocol::connectToDevice()
 {
     if (protocolState == Connecting || protocolState == Connected)
         return true;
+    currentPublicKeyHex.clear();
 
     const bool allowedBackend = backend == "usb" || backend == "ble";
     if (!allowedBackend) {
@@ -202,7 +204,7 @@ bool MeshCoreProtocol::disconnect()
     abortChannelSync();
     abortMessageSync();
     messagesWaiting = true;
-    
+    currentPublicKeyHex.clear();
     if (wasActive) {
         emit disconnected();
     }
@@ -620,6 +622,8 @@ void MeshCoreProtocol::handlePacket(const QByteArray &payload)
 
         awaitingSelfInfo = false;
         awaitingContactListStart = true;
+        // Store the public key from SELF_INFO packet
+        currentPublicKeyHex = QString::fromStdString(selfInfo.publicKeyHex);
         if (!transport->sendPayload(QByteArray(1, static_cast<char>(0x04)))) {
             abortContactSync();
             onTransportError(QStringLiteral("Failed to request Companion contacts"));
@@ -846,6 +850,7 @@ void MeshCoreProtocol::onTransportDisconnected()
         abortChannelSync();
         abortMessageSync();
         messagesWaiting = true;
+        currentPublicKeyHex.clear();
         emit disconnected();
         emit deviceStateChanged(deviceState);
     }

@@ -1,4 +1,6 @@
 #include "matrix.h"
+#include "matrixavatarkeypolicy.h"
+#include "matrixsessionpolicy.h"
 #include "matrixnetwork.h"
 #include "matrixroominvite.h"
 #include "matrixdatabase.h"
@@ -23,6 +25,7 @@
 #include <QFile>
 #include <QFileDialog>
 #include <QInputDialog>
+#include <QLineEdit>
 #include <QMessageBox>
 #include <QTimer>
 #include <QPointer>
@@ -106,8 +109,90 @@ QString Matrix::emojiPickerType() const
 
 bool Matrix::setPresence(int AShow, const QString &AStatus)
 {
-	if (!FMatrixNetwork || FNetworkUserId.isEmpty() || !FNetworkLoggedIn)
+	if (!FMatrixNetwork || !FMatrixAccount || !FMatrixAccount->isActive())
 		return false;
+
+	const MatrixSessionPolicy::PresenceAction action =
+		MatrixSessionPolicy::actionForPresence(AShow, FNetworkLoggedIn);
+	if (action == MatrixSessionPolicy::PresenceAction::Disconnect)
+	{
+		++FLoginGeneration;
+		FLoginRequested = false;
+		FLoginAccountId.clear();
+		FLoginUserId.clear();
+		FPendingShow = IPresence::Offline;
+		FPendingStatus.clear();
+		FNetworkLoggedIn = false;
+		FNetworkInitialSyncComplete = false;
+		FNetworkUserId.clear();
+		const bool invoked = QMetaObject::invokeMethod(FMatrixNetwork, "logout", Qt::QueuedConnection);
+		FShow = AShow;
+		FStatus = AStatus;
+		if (!FStreamId.isEmpty())
+			emit protocolPresenceChanged(FStreamId, FShow, FStatus);
+		return invoked;
+	}
+	if (action == MatrixSessionPolicy::PresenceAction::Connect)
+	{
+		const OptionsNode options = FMatrixAccount->optionsNode();
+		const QString username = options.value("matrix.username").toString();
+		if (username.isEmpty())
+			return false;
+
+		const QString currentAccountId = accountId();
+		if (FLoginRequested)
+		{
+			if (FLoginAccountId != currentAccountId || FLoginUserId != username)
+				return false;
+			FPendingShow = AShow;
+			FPendingStatus = AStatus;
+			return true;
+		}
+
+		FPendingShow = AShow;
+		FPendingStatus = AStatus;
+		FLoginAccountId = currentAccountId;
+		FLoginUserId = username;
+		FLoginRequested = true;
+		const quint64 sessionGeneration = ++FLoginGeneration;
+
+		const QString deviceId = options.value("matrix.device-id").toString();
+		const QString accessToken = qEnvironmentVariable("MATRIX_ACCESS_TOKEN");
+		bool invoked = false;
+		if (!accessToken.isEmpty() && qEnvironmentVariable("MATRIX_USER_ID") == username)
+		{
+			invoked = QMetaObject::invokeMethod(FMatrixNetwork, "loginWithAccessTokenForSession",
+				Qt::QueuedConnection, Q_ARG(QString, username), Q_ARG(QString, accessToken),
+				Q_ARG(QString, deviceId), Q_ARG(quint64, sessionGeneration));
+		}
+		else
+		{
+			const QString password = FMatrixAccount->password();
+			if (password.isEmpty())
+			{
+				FLoginRequested = false;
+				FLoginAccountId.clear();
+				FLoginUserId.clear();
+				FPendingStatus.clear();
+				return false;
+			}
+			invoked = QMetaObject::invokeMethod(FMatrixNetwork, "loginForSession", Qt::QueuedConnection,
+				Q_ARG(QString, username), Q_ARG(QString, password), Q_ARG(QString, deviceId),
+				Q_ARG(quint64, sessionGeneration));
+		}
+		if (!invoked)
+		{
+			FLoginRequested = false;
+			FLoginAccountId.clear();
+			FLoginUserId.clear();
+			FPendingStatus.clear();
+			return false;
+		}
+		return true;
+	}
+	if (FNetworkUserId.isEmpty())
+		return false;
+
 	QString presence = QStringLiteral("online");
 	if (AShow == IPresence::Offline || AShow == IPresence::Error)
 		presence = QStringLiteral("offline");
@@ -125,6 +210,13 @@ bool Matrix::setPresence(int AShow, const QString &AStatus)
 QString Matrix::accountId() const
 {
 	return FMatrixAccount ? FMatrixAccount->accountId().toString() : QString();
+}
+
+ProtocolAccountIdentifier Matrix::accountIdentifier() const
+{
+	return FNetworkUserId.isEmpty()
+		? ProtocolAccountIdentifier()
+		: ProtocolAccountIdentifier{tr("Matrix user ID"), FNetworkUserId};
 }
 
 void Matrix::requestCurrentSync(const QString &accountId)
@@ -482,11 +574,6 @@ bool Matrix::initConnections(IPluginManager *APluginManager, int &AInitOrder)
 	plugin = APluginManager->pluginInterface("IRostersViewPlugin").value(0, NULL);
 	if (plugin) {
 		FRostersViewPlugin = qobject_cast<IRostersViewPlugin *>(plugin->instance());
-		if (FRostersViewPlugin && FRostersViewPlugin->rostersView())
-			connect(FRostersViewPlugin->rostersView()->instance(),
-				SIGNAL(indexContextMenu(const QList<IRosterIndex *> &, quint32, Menu *)),
-				SLOT(onRostersViewIndexContextMenu(const QList<IRosterIndex *> &, quint32, Menu *)),
-				Qt::UniqueConnection);
 	}
 	plugin = APluginManager->pluginInterface("IMessageWidgets").value(0, NULL);
 	if (plugin)
@@ -503,28 +590,68 @@ bool Matrix::initConnections(IPluginManager *APluginManager, int &AInitOrder)
 	return true;
 }
 
-void Matrix::onRostersViewIndexContextMenu(const QList<IRosterIndex *> &indexes,
-	quint32 labelId, Menu *menu)
+IProtocolCapabilities::Capabilities Matrix::capabilitiesForAccount(
+	const AccountId &accountId, const ConversationId &targetId) const
 {
-	if (!menu || labelId != AdvancedDelegateItem::DisplayId || indexes.size() != 1 ||
-		!FAccountManager || !FMatrixAccount)
-		return;
-	IRosterIndex *index = indexes.first();
-	if (!index || index->type() != RIT_STREAM_ROOT)
-		return;
-	const QString clickedStreamId = index->data(RDR_ACCOUNT_ID).toString();
-	IAccount *account = FAccountManager->accountById(FMatrixAccount->accountId());
-	if (!account || !account->isActive() ||
-		!isMatrixAccountContext(clickedStreamId, streamId(), account, FMatrixAccount))
-		return;
+	if (accountId != this->accountId() || !FMatrixAccount || !FMatrixAccount->isActive() ||
+		!FMatrixAccount->isValid() || !FMatrixNetwork)
+		return IProtocolCapabilities::Capabilities();
+	IProtocolCapabilities::Capabilities capabilities(IProtocolCapabilities::CapabilitySetPresence);
+	if (!FNetworkLoggedIn)
+		return capabilities;
+	capabilities |= IProtocolCapabilities::CapabilityEditProfile;
+	if (!FNetworkInitialSyncComplete)
+		return capabilities;
+	capabilities |= IProtocolCapabilities::CapabilityAddContact;
+	capabilities |= IProtocolCapabilities::CapabilitySetPresence;
+	capabilities |= IProtocolCapabilities::CapabilitySetAccountAvatar;
+	if (!targetId.isEmpty())
+		capabilities |= IProtocolCapabilities::CapabilityViewHistory;
+	return capabilities;
+}
 
-	const QString accountId = account->accountId().toString();
-	Action *action = new Action(menu);
-	action->setText(tr("Join Matrix room / start direct chat…"));
-	connect(action, &QAction::triggered, this, [this, accountId](bool) {
-		showRoomChatDialog(accountId);
-	});
-	menu->addAction(action, AG_DEFAULT, true);
+bool Matrix::showAddContactDialog(const AccountId &accountId)
+{
+	if (!hasCapabilities(accountId, IProtocolCapabilities::CapabilityAddContact))
+		return false;
+	showRoomChatDialog(accountId);
+	return true;
+}
+
+bool Matrix::setAccountAvatar(const AccountId &accountId, const QByteArray &imageData)
+{
+	if (!hasCapabilities(accountId, IProtocolCapabilities::CapabilitySetAccountAvatar))
+		return false;
+	return QMetaObject::invokeMethod(FMatrixNetwork, "setOwnAvatar", Qt::QueuedConnection,
+		Q_ARG(QByteArray, imageData));
+}
+
+bool Matrix::showProfile(const AccountId &accountId, const UserId &userId)
+{
+	Q_UNUSED(accountId);
+	Q_UNUSED(userId);
+	return false;
+}
+
+bool Matrix::editProfile(const AccountId &accountId)
+{
+	if (!hasCapabilities(accountId, IProtocolCapabilities::CapabilityEditProfile) ||
+		!FMatrixNetwork || FNetworkUserId.isEmpty())
+		return false;
+	const QString userId = FNetworkUserId;
+	const quint64 loginGeneration = FLoginGeneration;
+	QWidget *parent = FRostersViewPlugin && FRostersViewPlugin->rostersView()
+		? FRostersViewPlugin->rostersView()->instance() : nullptr;
+	bool accepted = false;
+	const QString displayName = QInputDialog::getText(parent, tr("Edit Matrix profile"),
+		tr("Display name for %1 (leave empty to clear it):").arg(userId),
+		QLineEdit::Normal, QString(), &accepted);
+	if (!accepted || !FMatrixNetwork || FNetworkUserId != userId ||
+		FLoginGeneration != loginGeneration ||
+		!hasCapabilities(accountId, IProtocolCapabilities::CapabilityEditProfile))
+		return false;
+	return QMetaObject::invokeMethod(FMatrixNetwork, "setOwnDisplayName", Qt::QueuedConnection,
+		Q_ARG(QString, displayName));
 }
 
 void Matrix::showRoomChatDialog(const QString &boundAccountId)
@@ -636,14 +763,14 @@ void Matrix::onAccountShown(IAccount *AAccount)
 	{
 		return;
 	}
-	
+
 	OptionsNode options = AAccount->optionsNode();
 	QString accountType = options.value("type").toString();
 	if (accountType != QStringLiteral("matrix"))
 	{
 		return;
 	}
-	
+
 	FMatrixAccount = AAccount;
 	QString serverUrl = options.value("matrix.instance").toString();
 	QString username = options.value("matrix.username").toString();
@@ -665,9 +792,10 @@ void Matrix::onAccountShown(IAccount *AAccount)
 	FDatabaseUserId = username;
 	FNetworkDeviceId = deviceId;
 
-	connect(FMatrixNetwork, SIGNAL(loginSuccess(QString,QString,QString)),
-		this, SLOT(onLoginSuccess(QString,QString,QString)), Qt::UniqueConnection);
-	connect(FMatrixNetwork, SIGNAL(loginError(QString)), this, SLOT(onLoginError(QString)), Qt::UniqueConnection);
+	connect(FMatrixNetwork, SIGNAL(loginSuccessForSession(QString,QString,QString,quint64)),
+		this, SLOT(onLoginSuccess(QString,QString,QString,quint64)), Qt::UniqueConnection);
+	connect(FMatrixNetwork, SIGNAL(loginErrorForSession(QString,quint64)),
+		this, SLOT(onLoginError(QString,quint64)), Qt::UniqueConnection);
 	connect(FMatrixNetwork, SIGNAL(syncError(QString)), this, SLOT(onSyncError(QString)), Qt::UniqueConnection);
 	connect(FMatrixNetwork, SIGNAL(rosterChanged(QList<ProtocolRoom>)),
 		this, SLOT(onRosterChanged(QList<ProtocolRoom>)), Qt::UniqueConnection);
@@ -679,6 +807,10 @@ void Matrix::onAccountShown(IAccount *AAccount)
 		this, &Matrix::onNetworkNotificationEvent, Qt::UniqueConnection);
 	connect(FMatrixNetwork, &MatrixNetwork::avatarImageReceived, this,
 		&Matrix::onAvatarImageReceived, Qt::UniqueConnection);
+	connect(FMatrixNetwork, &MatrixNetwork::accountAvatarUpdateFinished, this,
+		&Matrix::onAccountAvatarUpdateFinished, Qt::UniqueConnection);
+	connect(FMatrixNetwork, &MatrixNetwork::accountDisplayNameUpdateFinished, this,
+		&Matrix::onAccountDisplayNameUpdateFinished, Qt::UniqueConnection);
 	connect(FMatrixNetwork, &MatrixNetwork::displayNameReceived, this,
 		&Matrix::onDisplayNameReceived, Qt::UniqueConnection);
 	connect(FMatrixNetwork, &MatrixNetwork::roomNameReceived, this,
@@ -708,30 +840,6 @@ void Matrix::onAccountShown(IAccount *AAccount)
 
 	// SQLite cache is available offline; loading it must not depend on login or /sync.
 	loadRoomsFromDatabase();
-
-	if (username.isEmpty())
-	{
-		qWarning() << "Matrix::onAccountShown: username is empty, cannot login";
-		return;
-	}
-	
-	QString password = AAccount->password();
-	const QString accessToken = qEnvironmentVariable("MATRIX_ACCESS_TOKEN");
-	if (!accessToken.isEmpty() &&
-		qEnvironmentVariable("MATRIX_USER_ID") == username) {
-		QMetaObject::invokeMethod(FMatrixNetwork, "loginWithAccessToken", Qt::QueuedConnection,
-			Q_ARG(QString, username), Q_ARG(QString, accessToken), Q_ARG(QString, deviceId));
-		return;
-	}
-
-	if (password.isEmpty())
-	{
-		qWarning() << "Matrix::onAccountShown: password decryption failed or is empty, cannot login";
-		return;
-	}
-	
-	QMetaObject::invokeMethod(FMatrixNetwork, "login", Qt::QueuedConnection,
-		Q_ARG(QString, username), Q_ARG(QString, password), Q_ARG(QString, deviceId));
 }
 
 void Matrix::onAccountAppended(IAccount *AAccount)
@@ -748,7 +856,8 @@ void Matrix::onAccountChanged(IAccount *AAccount, const OptionsNode &ANode)
 
 void Matrix::onAccountHidden(IAccount *AAccount)
 {
-	if (AAccount && AAccount->optionsNode().value("type").toString() == QStringLiteral("matrix") && FMatrixNetwork)
+	if (AAccount && AAccount == FMatrixAccount &&
+		AAccount->optionsNode().value("type").toString() == QStringLiteral("matrix") && FMatrixNetwork)
 	{
 		if (!FStreamId.isEmpty())
 			emit protocolPresenceClosed(FStreamId);
@@ -756,14 +865,20 @@ void Matrix::onAccountHidden(IAccount *AAccount)
 		FShow = 0;
 		FStatus.clear();
 		FNetworkLoggedIn = false;
+		FNetworkInitialSyncComplete = false;
+		++FLoginGeneration;
+		FLoginRequested = false;
+		FLoginAccountId.clear();
+		FLoginUserId.clear();
+		FPendingShow = IPresence::Offline;
+		FPendingStatus.clear();
 		FNetworkUserId.clear();
 		FProtocolRooms.clear();
 		FProtocolEntries.clear();
 		QMetaObject::invokeMethod(FMatrixNetwork, "logout", Qt::QueuedConnection);
 		if (FInitialSyncWindow)
 			FInitialSyncWindow->close();
-		if (FMatrixAccount == AAccount)
-			FMatrixAccount = nullptr;
+		FMatrixAccount = nullptr;
 		emit protocolRosterChanged();
 	}
 }
@@ -890,8 +1005,30 @@ void Matrix::emitCachedHistoryBatch()
 }
 
 void Matrix::onLoginSuccess(const QString &AUserId, const QString &AAccessToken,
-	const QString &ADeviceId)
+	const QString &ADeviceId, quint64 ASessionGeneration)
 {
+	if (ASessionGeneration != FLoginGeneration ||
+		!MatrixSessionPolicy::acceptLoginSuccess(FLoginRequested))
+		return;
+	if (!FMatrixAccount || !FMatrixAccount->isActive() ||
+		FLoginAccountId != accountId() ||
+		!MatrixSessionPolicy::matchesLoginUserId(FLoginUserId, AUserId))
+	{
+		FLoginRequested = false;
+		FLoginAccountId.clear();
+		FLoginUserId.clear();
+		FPendingStatus.clear();
+		if (FMatrixNetwork)
+			QMetaObject::invokeMethod(FMatrixNetwork, "logout", Qt::QueuedConnection);
+		return;
+	}
+	const int requestedShow = FPendingShow;
+	const QString requestedStatus = FPendingStatus;
+	FLoginRequested = false;
+	FLoginAccountId.clear();
+	FLoginUserId.clear();
+	FPendingStatus.clear();
+
 	FNetworkUserId = AUserId;
 	if (!ADeviceId.isEmpty())
 		FNetworkDeviceId = ADeviceId;
@@ -911,8 +1048,8 @@ void Matrix::onLoginSuccess(const QString &AUserId, const QString &AAccessToken,
 		if (colon >= 0) user.truncate(colon);
 		const QString host = QUrl(options.value("matrix.instance").toString()).host();
 		FStreamId = user + "@" + host;
-		FShow = IPresence::Online;
-		FStatus = QStringLiteral("Online");
+		FShow = requestedShow;
+		FStatus = requestedStatus;
 		emit protocolPresenceChanged(FStreamId, FShow, FStatus);
 	}
 	if (FMatrixNetwork)
@@ -935,6 +1072,12 @@ void Matrix::onLoginSuccess(const QString &AUserId, const QString &AAccessToken,
 			if (FOptionsManager && !FOptionsManager->saveOptions())
 				qWarning() << "[Matrix-E2EE] failed to persist the server device ID";
 		}
+		QString presence = QStringLiteral("online");
+		if (FShow == IPresence::Away || FShow == IPresence::ExtendedAway ||
+			FShow == IPresence::DoNotDisturb)
+			presence = QStringLiteral("unavailable");
+		QMetaObject::invokeMethod(FMatrixNetwork, "setPresence", Qt::QueuedConnection,
+			Q_ARG(QString, FNetworkUserId), Q_ARG(QString, presence), Q_ARG(QString, FStatus));
 	QMetaObject::invokeMethod(FMatrixNetwork, "sync", Qt::QueuedConnection);
 	}
 }
@@ -1291,7 +1434,17 @@ QString Matrix::userAvatarPath(const QString &conversationId, const QString &use
 QString Matrix::userAvatarKey(const QString &conversationId, const QString &userId) const
 {
 	Q_UNUSED(conversationId);
-	return accountId() + QStringLiteral("\nuser\n") + userId;
+	QString avatarUrl;
+	for (const ProtocolRoom &room : FProtocolRooms) {
+		for (const ProtocolRosterEntry &member : room.members)
+			if (member.id == userId && !member.avatarUrl.isEmpty()) {
+				avatarUrl = member.avatarUrl;
+				break;
+			}
+		if (!avatarUrl.isEmpty())
+			break;
+	}
+	return MatrixAvatarKeyPolicy::userAvatarKey(accountId(), userId, avatarUrl);
 }
 
 bool Matrix::markConversationRead(const QString &conversationId, const QString &eventId)
@@ -1498,8 +1651,15 @@ void Matrix::onNetworkNotificationEvent(const MatrixNotificationEvent &event)
 	appendNotification(notification);
 }
 
-void Matrix::onLoginError(const QString &AError)
+void Matrix::onLoginError(const QString &AError, quint64 ASessionGeneration)
 {
+	if (ASessionGeneration != FLoginGeneration || !FLoginRequested)
+		return;
+	FLoginRequested = false;
+	FLoginAccountId.clear();
+	FLoginUserId.clear();
+	FPendingShow = IPresence::Offline;
+	FPendingStatus.clear();
 	FNetworkLoggedIn = false;
 	FNetworkInitialSyncComplete = false;
 	FNetworkUserId.clear();
@@ -1513,6 +1673,44 @@ void Matrix::onLoginError(const QString &AError)
 void Matrix::onSyncError(const QString &AError)
 {
 	qWarning() << "Matrix sync error:" << AError;
+}
+
+void Matrix::onAccountAvatarUpdateFinished(const QString &userId, bool success,
+	const QString &avatarUrl, const QString &error)
+{
+	if (userId != FNetworkUserId)
+		return;
+	if (success) {
+		bool changed = false;
+		for (ProtocolRoom &room : FProtocolRooms)
+			for (ProtocolRosterEntry &member : room.members)
+				if (member.id == userId && member.avatarUrl != avatarUrl) {
+					member.avatarUrl = avatarUrl;
+					changed = true;
+				}
+		if (changed)
+			emit protocolRosterChanged();
+		return;
+	}
+	QWidget *parent = FRostersViewPlugin && FRostersViewPlugin->rostersView()
+		? FRostersViewPlugin->rostersView()->instance() : nullptr;
+	QMessageBox::warning(parent, tr("Matrix avatar update"), error.isEmpty()
+		? tr("The Matrix avatar could not be updated.") : error);
+}
+
+void Matrix::onAccountDisplayNameUpdateFinished(const QString &userId, bool success,
+	const QString &displayName, const QString &error)
+{
+	if (userId != FNetworkUserId)
+		return;
+	if (success) {
+		onDisplayNameReceived(userId, displayName);
+		return;
+	}
+	QWidget *parent = FRostersViewPlugin && FRostersViewPlugin->rostersView()
+		? FRostersViewPlugin->rostersView()->instance() : nullptr;
+	QMessageBox::warning(parent, tr("Matrix profile update"), error.isEmpty()
+		? tr("The Matrix display name could not be updated.") : error);
 }
 
 void Matrix::onSyncReceived(const QList<MatrixTextEvent> &events)

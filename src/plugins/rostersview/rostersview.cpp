@@ -1,4 +1,5 @@
 #include "rostersview.h"
+#include "rosterclipboardidentifierpolicy.h"
 
 #include <QCursor>
 #include <QToolTip>
@@ -441,11 +442,19 @@ void RostersView::clipboardMenuForIndex(const QList<IRosterIndex *> &AIndexes, c
 		if (labelId==AdvancedDelegateItem::DisplayId && AIndexes.count()==1)
 		{
 			IRosterIndex *index = AIndexes.first();
-			if (!index->data(RDR_FULL_JID).toString().isEmpty())
+			const ProtocolAccountIdentifier accountIdentifier = {
+				index->data(RDR_IDENTIFIER_LABEL).toString(),
+				index->data(RDR_IDENTIFIER_VALUE).toString()};
+			const RosterClipboardIdentifierPolicy::Result identifier =
+				RosterClipboardIdentifierPolicy::resolve(accountIdentifier,
+					index->data(RDR_CONVERSATION_ID).toString());
+			if (identifier.isValid())
 			{
 				Action *action = new Action(AMenu);
-				action->setText(tr("Jabber ID"));
-				action->setData(ADR_CLIPBOARD_DATA, Jid(index->data(RDR_FULL_JID).toString()).uBare());
+				action->setText(identifier.source == RosterClipboardIdentifierPolicy::Source::Conversation
+					? tr("Conversation ID")
+					: (identifier.label.isEmpty() ? tr("Identifier") : identifier.label));
+				action->setData(ADR_CLIPBOARD_DATA, identifier.value);
 				action->setShortcutId(SCT_ROSTERVIEW_COPYJID);
 				connect(action,SIGNAL(triggered(bool)),SLOT(onCopyToClipboardActionTriggered(bool)));
 				AMenu->addAction(action, AG_DEFAULT, true);

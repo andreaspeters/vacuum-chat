@@ -6,6 +6,7 @@
 #include <QStringList>
 #include <QVector>
 #include <QDateTime>
+#include <interfaces/identity.h>
 
 /* Protocol-neutral presence and typing primitives.
  * Independent of chat type (XMPP/JID-specific or Matrix-specific).
@@ -102,6 +103,7 @@ public:
     virtual ~IProtocolPresence() {}
     virtual QObject *instance() = 0;
     virtual QString streamId() const =0;
+    virtual AccountId accountId() const { return AccountId(); }
     virtual int show() const =0;
     virtual QString status() const =0;
     virtual bool setPresence(int AShow, const QString &AStatus) =0;

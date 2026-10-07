@@ -18,7 +18,13 @@
 #include <definitions/menuicons.h>
 #include <definitions/vcardvaluenames.h>
 #include <interfaces/ipluginmanager.h>
+#include <interfaces/iaccountmanager.h>
 #include <interfaces/iavatars.h>
+#include <interfaces/iprotocolaccountavataractions.h>
+#include <interfaces/iprotocolcapabilities.h>
+#include <interfaces/iprotocolprofileactions.h>
+#include <interfaces/iprotocolpresence.h>
+#include <interfaces/iprotocolroster.h>
 #include <interfaces/ixmppstreams.h>
 #include <interfaces/istanzaprocessor.h>
 #include <interfaces/ivcard.h>
@@ -97,6 +103,11 @@ protected:
 	bool updateVCardAvatar(const Jid &AContactJid, const QString &AHash, bool AFromVCard);
 	bool updateIqAvatar(const Jid &AContactJid, const QString &AHash);
 	bool isSelectionAccepted(const QList<IRosterIndex *> &ASelected) const;
+	AccountId accountIdForRoot(const IRosterIndex *AIndex) const;
+	IProtocolAccountAvatarActions *accountAvatarActions(const AccountId &AAccountId) const;
+	bool profileActionProviderForAccount(const AccountId &AAccountId, const QString &AProviderStreamId,
+		const UserId &AUserId, bool AEdit,
+		IProtocolCapabilities *&ACapabilities, IProtocolProfileActions *&AActions) const;
 protected slots:
 	void onStreamOpened(IXmppStream *AXmppStream);
 	void onStreamClosed(IXmppStream *AXmppStream);
@@ -107,12 +118,14 @@ protected slots:
 	void onRosterIndexToolTips(IRosterIndex *AIndex, quint32 ALabelId, QMap<int, QString> &AToolTips);
 	void onSetAvatarByAction(bool);
 	void onClearAvatarByAction(bool);
+	void onProfileActionByAction(bool);
 	void onIconStorageChanged();
 	void onOptionsOpened();
 	void onOptionsClosed();
 	void onOptionsChanged(const OptionsNode &ANode);
 private:
 	IPluginManager *FPluginManager;
+	IAccountManager *FAccountManager;
 	IXmppStreams *FXmppStreams;
 	IStanzaProcessor *FStanzaProcessor;
 	IVCardPlugin *FVCardPlugin;

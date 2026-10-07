@@ -57,6 +57,8 @@ enum RosterIndexDataRoles {
 	//MultiUser Chats
 	RDR_MUC_NICK,
 	RDR_MUC_PASSWORD,
+	RDR_IDENTIFIER_LABEL,
+	RDR_IDENTIFIER_VALUE,
 	//Other Roles
 	RDR_USER_ROLE = 128
 };

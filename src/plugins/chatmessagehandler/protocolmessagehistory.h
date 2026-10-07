@@ -5,6 +5,7 @@
 
 #include <QList>
 #include <QHash>
+#include <QSet>
 #include <QString>
 #include <QTimer>
 
@@ -22,6 +23,14 @@ enum class TransactionEchoMergeResult
 	RestoredLocalEcho,
 	IgnoredLocalEcho
 };
+
+inline void finishHistoryLoad(QSet<QString> &ALoading, QSet<QString> &ALoaded,
+	const QString &AConversationKey, bool AHasHistory)
+{
+	ALoading.remove(AConversationKey);
+	if (AHasHistory)
+		ALoaded.insert(AConversationKey);
+}
 
 class ConversationRebuildScheduler
 {

@@ -80,6 +80,12 @@ if (BUILD_TESTING)
 	target_include_directories(matrix_history_retry_tests PRIVATE "${CMAKE_SOURCE_DIR}/src")
 	target_link_libraries(matrix_history_retry_tests PRIVATE
 		${VACUUM_UTILS_NAME} Qt6::Core Qt6::Gui Qt6::Network Qt6::Sql ${ADD_LIBS})
+	add_executable(matrix_network_login_tests EXCLUDE_FROM_ALL
+		matrix_network_login_tests.cpp matrixnetwork.cpp matrixnetworkinvite.cpp matrixroominvite.cpp matrixdatabase.cpp matrixdatabaseworker.cpp
+		matrixolm.cpp matrixssss.cpp matrixdirectroom.cpp matrixpublicrooms.cpp)
+	target_include_directories(matrix_network_login_tests PRIVATE "${CMAKE_SOURCE_DIR}/src")
+	target_link_libraries(matrix_network_login_tests PRIVATE
+		${VACUUM_UTILS_NAME} Qt6::Core Qt6::Gui Qt6::Network Qt6::Sql ${ADD_LIBS})
 	if (OLM_FOUND)
 		add_executable(matrix_avatar_cache_tests EXCLUDE_FROM_ALL
 			matrixavatarcache_test.cpp matrixnetwork.cpp matrixnetworkinvite.cpp matrixroominvite.cpp matrixdatabase.cpp matrixdatabaseworker.cpp
@@ -87,6 +93,35 @@ if (BUILD_TESTING)
 		target_link_libraries(matrix_avatar_cache_tests PRIVATE
 			${VACUUM_UTILS_NAME} Qt6::Core Qt6::Gui Qt6::Network Qt6::Sql ${ADD_LIBS})
 	endif()
+	add_executable(matrix_account_avatar_tests EXCLUDE_FROM_ALL
+		matrixaccountavatar_test.cpp matrixnetwork.cpp matrixnetworkinvite.cpp matrixroominvite.cpp matrixdatabase.cpp matrixdatabaseworker.cpp
+		matrixolm.cpp matrixssss.cpp matrixdirectroom.cpp matrixpublicrooms.cpp)
+	target_include_directories(matrix_account_avatar_tests PRIVATE "${CMAKE_SOURCE_DIR}/src")
+	target_link_libraries(matrix_account_avatar_tests PRIVATE
+		${VACUUM_UTILS_NAME} Qt6::Core Qt6::Gui Qt6::Network Qt6::Sql ${ADD_LIBS})
+	add_executable(matrix_avatar_key_policy_tests EXCLUDE_FROM_ALL matrixavatarkeypolicy_test.cpp)
+	target_include_directories(matrix_avatar_key_policy_tests PRIVATE "${CMAKE_SOURCE_DIR}/src")
+	target_compile_features(matrix_avatar_key_policy_tests PRIVATE cxx_std_11)
+	target_link_libraries(matrix_avatar_key_policy_tests PRIVATE Qt6::Core)
+	add_executable(matrix_presence_session_policy_tests EXCLUDE_FROM_ALL
+		matrixsessionpolicy_test.cpp)
+	target_include_directories(matrix_presence_session_policy_tests PRIVATE "${CMAKE_SOURCE_DIR}/src")
+	target_compile_features(matrix_presence_session_policy_tests PRIVATE cxx_std_11)
+	target_link_libraries(matrix_presence_session_policy_tests PRIVATE Qt6::Core Qt6::Xml)
+		add_executable(matrix_presence_lifecycle_tests EXCLUDE_FROM_ALL
+			matrix_presence_lifecycle_test.cpp)
+		target_include_directories(matrix_presence_lifecycle_tests PRIVATE
+			"${CMAKE_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}")
+		target_compile_features(matrix_presence_lifecycle_tests PRIVATE cxx_std_17)
+		target_link_libraries(matrix_presence_lifecycle_tests PRIVATE
+			matrix ${VACUUM_UTILS_NAME} Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::Xml Qt6::Sql ${ADD_LIBS})
+	add_executable(matrix_presence_status_send_tests EXCLUDE_FROM_ALL
+		matrix_presence_status_send_test.cpp)
+	target_include_directories(matrix_presence_status_send_tests PRIVATE
+		"${CMAKE_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}")
+	target_compile_features(matrix_presence_status_send_tests PRIVATE cxx_std_17)
+	target_link_libraries(matrix_presence_status_send_tests PRIVATE
+		matrix ${VACUUM_UTILS_NAME} Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::Xml Qt6::Sql ${ADD_LIBS})
 endif()
 
 if(TARGET matrix)

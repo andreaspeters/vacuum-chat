@@ -5,6 +5,8 @@
 #include "meshcoreblelifecycle.h"
 
 #include <interfaces/iprotocolmessaging.h>
+#include <interfaces/iprotocolpresence.h>
+#include <interfaces/ipresence.h>
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -16,6 +18,7 @@
 #include <QJsonObject>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <utils/options.h>
 #include <functional>
 #include <iostream>
 
@@ -25,6 +28,7 @@ public:
     bool open(const QString &endpoint) override
     {
         openCalled = true;
+        ++openCount;
         openedEndpoint = endpoint;
         if (!asynchronousOpen)
             completeConnection();
@@ -35,6 +39,12 @@ public:
     {
         connectedState = true;
         emit connected();
+    }
+
+    void loseConnection()
+    {
+        connectedState = false;
+        emit disconnected();
     }
 
     void close() override
@@ -61,6 +71,7 @@ public:
     }
 
     bool openCalled = false;
+    int openCount = 0;
     bool asynchronousOpen = false;
     bool connectedState = false;
     QString openedEndpoint;
@@ -87,6 +98,40 @@ protected:
 
 private:
     FakeTransport *fakeTransport;
+};
+
+class SyntheticMeshCoreAccount final : public QObject, public IAccount
+{
+public:
+    explicit SyntheticMeshCoreAccount(const QUuid &id = QUuid::createUuid())
+        : accountUuid(id)
+    {
+    }
+
+    QObject *instance() override { return this; }
+    ProtocolKind protocolKind() const override { return ProtocolMeshCore; }
+    Capabilities capabilities() const override { return Capabilities(); }
+    ConnectionState connectionState() const override { return StateDisconnected; }
+    QUuid accountId() const override { return accountUuid; }
+    bool isActive() const override { return active; }
+    QString name() const override { return QStringLiteral("Synthetic MeshCore"); }
+    OptionsNode optionsNode() const override { return Options::node(QString()); }
+    bool isValid() const override { return true; }
+    void setActive(bool value) override { active = value; }
+    void setName(const QString &) override {}
+    Jid streamJid() const override { return Jid(); }
+    void setStreamJid(const Jid &) override {}
+    QString password() const override { return QString(); }
+    void setPassword(const QString &) override {}
+    IXmppStream *xmppStream() const override { return nullptr; }
+
+protected:
+    void activeChanged(bool) override {}
+    void optionsChanged(const OptionsNode &) override {}
+
+private:
+    QUuid accountUuid;
+    bool active = true;
 };
 
 namespace
@@ -271,6 +316,13 @@ int main(int argc, char *argv[])
     QCoreApplication application(argc, argv);
     application.setOrganizationName(QStringLiteral("VacuumTests"));
     application.setApplicationName(QStringLiteral("meshcore_protocol_tests"));
+    QDomDocument optionsDocument;
+    optionsDocument.appendChild(optionsDocument.createElement(QStringLiteral("options")));
+    Options::setOptions(optionsDocument, dataHome.path(), QByteArray());
+    OptionsNode syntheticAccountOptions = Options::node(QString());
+    syntheticAccountOptions.setValue(QStringLiteral("usb"), QStringLiteral("meshcore.transport"));
+    syntheticAccountOptions.setValue(QStringLiteral("/dev/meshcore-presence-test"),
+                                     QStringLiteral("meshcore.port"));
     if (!testBleLifecyclePolicy())
         return 1;
     const QString historyDirectory = QDir(QStandardPaths::writableLocation(
@@ -397,6 +449,8 @@ int main(int argc, char *argv[])
 
     QByteArray selfInfo(58, '\0');
     selfInfo[0] = static_cast<char>(0x05);
+    for (int i = 0; i < 32; ++i)
+        selfInfo[4 + i] = static_cast<char>(i);
     transport->receivePacket(selfInfo);
     if (transport->sentPayloads.size() != 2 ||
         transport->sentPayloads.constLast() != QByteArray(1, static_cast<char>(0x04))) {
@@ -502,6 +556,13 @@ int main(int argc, char *argv[])
         lastReceivedMessage.messageId() != expectedChannelMessageId(
             QStringLiteral("channel:0"), 3457, QStringLiteral("🌻Alice: Hello room"))) {
         std::cerr << "channel queued message with prefix was not properly split\n";
+        return 1;
+    }
+
+    const QString expectedPublicKey = QStringLiteral(
+        "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
+    if (protocol.localPublicKeyHex() != expectedPublicKey) {
+        std::cerr << "SELF_INFO public key was not exposed exactly\n";
         return 1;
     }
 
@@ -856,6 +917,12 @@ int main(int argc, char *argv[])
     interfaceTransport->receivePacket(QByteArray(1, static_cast<char>(0x0a)));
 
     MeshCorePlugin interfaceProvider(interfaceProtocol);
+    IProtocolPresence *genericPresence =
+        qobject_cast<IProtocolPresence *>(interfaceProvider.instance());
+    if (!genericPresence) {
+        std::cerr << "active MeshCore provider did not expose IProtocolPresence\n";
+        return 1;
+    }
     IProtocolMessaging *genericMessaging =
         qobject_cast<IProtocolMessaging *>(interfaceProvider.instance());
     if (!genericMessaging) {
@@ -899,6 +966,146 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    SyntheticMeshCoreAccount activationAccount;
+    const OptionsNode activationOptions = activationAccount.optionsNode();
+    if (activationOptions.value(QStringLiteral("meshcore.transport")).toString() != QStringLiteral("usb") ||
+        activationOptions.value(QStringLiteral("meshcore.port")).toString().isEmpty()) {
+        std::cerr << "synthetic MeshCore account configuration was not initialized\n";
+        return 1;
+    }
+    MeshCorePlugin activationPlugin;
+    if (!QMetaObject::invokeMethod(&activationPlugin, "onAccountShown",
+            Qt::DirectConnection, Q_ARG(IAccount *, &activationAccount))) {
+        std::cerr << "MeshCore account activation event was not dispatched\n";
+        return 1;
+    }
+    MeshCoreProtocol *activationProtocol = activationPlugin.findChild<MeshCoreProtocol *>();
+    if (!activationProtocol || activationProtocol->getProtocolState() != MeshCoreProtocol::Idle ||
+        activationProtocol->getDeviceState() != MeshCoreProtocol::UnknownDevice) {
+        std::cerr << "activating a MeshCore account attempted to connect\n";
+        return 1;
+    }
+    IProtocolCapabilities *activationCapabilities =
+        qobject_cast<IProtocolCapabilities *>(activationPlugin.instance());
+    if (!activationCapabilities || !activationCapabilities->hasCapabilities(
+            activationAccount.accountId().toString(),
+            IProtocolCapabilities::CapabilitySetPresence) ||
+        activationCapabilities->hasCapabilities(activationAccount.accountId().toString(),
+            IProtocolCapabilities::CapabilityAddContact)) {
+        std::cerr << "disconnected configured MeshCore account did not expose only SetPresence\n";
+        return 1;
+    }
+
+    FakeTransport *presenceTransport = new FakeTransport();
+    presenceTransport->asynchronousOpen = true;
+    TestMeshCoreProtocol *presenceProtocol = new TestMeshCoreProtocol(presenceTransport);
+    if (!presenceProtocol->initialize(QStringLiteral("synthetic-endpoint"))) {
+        std::cerr << "presence protocol initialization failed\n";
+        return 1;
+    }
+    presenceProtocol->setBackend(QStringLiteral("ble"));
+    MeshCorePlugin presencePlugin(presenceProtocol);
+    IProtocolPresence *presence = qobject_cast<IProtocolPresence *>(presencePlugin.instance());
+    if (!presence || !presence->setPresence(IPresence::Online, QStringLiteral("ready"))) {
+        std::cerr << "explicit Online did not start a MeshCore connection\n";
+        return 1;
+    }
+    if (presenceTransport->openCount != 1 ||
+        presenceProtocol->getProtocolState() != MeshCoreProtocol::Connecting ||
+        presence->show() == IPresence::Online) {
+        std::cerr << "MeshCore reported Online before device readiness\n";
+        return 1;
+    }
+    presenceTransport->completeConnection();
+    if (presence->show() != IPresence::Online || presence->status() != QStringLiteral("ready")) {
+        std::cerr << "MeshCore did not report Online after device readiness\n";
+        return 1;
+    }
+    if (!presence->setPresence(IPresence::Offline, QString()) ||
+        presencePlugin.findChild<MeshCoreProtocol *>()->getProtocolState() != MeshCoreProtocol::Disconnected ||
+        presence->show() != IPresence::Offline) {
+        std::cerr << "explicit Offline did not disconnect and update presence\n";
+        return 1;
+    }
+    if (!QMetaObject::invokeMethod(&presencePlugin, "attemptReconnect", Qt::DirectConnection) ||
+        presenceTransport->openCount != 1) {
+        std::cerr << "explicit Offline did not suppress a stale reconnect attempt\n";
+        return 1;
+    }
+    if (!presence->setPresence(IPresence::Online, QStringLiteral("late")) ||
+        presenceTransport->openCount != 2 ||
+        presenceProtocol->getProtocolState() != MeshCoreProtocol::Connecting ||
+        !presence->setPresence(IPresence::Offline, QString())) {
+        std::cerr << "could not establish an in-flight connection cancellation\n";
+        return 1;
+    }
+    const int sentBeforeLateConnection = presenceTransport->sentPayloads.size();
+    presenceTransport->completeConnection();
+    if (presenceProtocol->getProtocolState() != MeshCoreProtocol::Disconnected ||
+        presenceTransport->sentPayloads.size() != sentBeforeLateConnection ||
+        presence->show() != IPresence::Offline) {
+        std::cerr << "late connection completion revived an explicitly offline MeshCore session\n";
+        return 1;
+    }
+
+    FakeTransport *switchTransport = new FakeTransport();
+    switchTransport->asynchronousOpen = true;
+    TestMeshCoreProtocol *switchProtocol = new TestMeshCoreProtocol(switchTransport);
+    if (!switchProtocol->initialize(QStringLiteral("synthetic-switch-endpoint"))) {
+        std::cerr << "account-switch protocol initialization failed\n";
+        return 1;
+    }
+    switchProtocol->setBackend(QStringLiteral("ble"));
+    MeshCorePlugin switchPlugin(switchProtocol);
+    IProtocolPresence *switchPresence = qobject_cast<IProtocolPresence *>(switchPlugin.instance());
+    if (!switchPresence || !switchPresence->setPresence(IPresence::Online, QStringLiteral("switch"))) {
+        std::cerr << "could not establish account-switch lifecycle setup\n";
+        return 1;
+    }
+    switchTransport->completeConnection();
+    if (switchPresence->show() != IPresence::Online) {
+        std::cerr << "account-switch lifecycle setup did not become Online\n";
+        return 1;
+    }
+    if (!QMetaObject::invokeMethod(&switchPlugin, "onAccountShown",
+            Qt::DirectConnection, Q_ARG(IAccount *, &activationAccount))) {
+        std::cerr << "MeshCore account-switch event was not dispatched\n";
+        return 1;
+    }
+    MeshCoreProtocol *switchedProtocol = switchPlugin.findChild<MeshCoreProtocol *>();
+    if (!switchedProtocol || switchedProtocol->getProtocolState() != MeshCoreProtocol::Idle ||
+        switchPresence->show() != IPresence::Offline || !switchPresence->status().isEmpty()) {
+        std::cerr << "switching accounts retained the prior session presence\n";
+        return 1;
+    }
+
+    SyntheticMeshCoreAccount firstAccount;
+    SyntheticMeshCoreAccount secondAccount;
+    MeshCorePlugin accountSwitchPlugin;
+    bool closedFirstAccount = false;
+    bool announcedSecondOffline = false;
+    QObject::connect(&accountSwitchPlugin, &MeshCorePlugin::protocolPresenceClosed,
+                     &application, [&](const QString &streamId) {
+        closedFirstAccount = closedFirstAccount ||
+            streamId == firstAccount.accountId().toString();
+    });
+    QObject::connect(&accountSwitchPlugin, &MeshCorePlugin::protocolPresenceChanged,
+                     &application, [&](const QString &streamId, int show, const QString &) {
+        announcedSecondOffline = announcedSecondOffline ||
+            (streamId == secondAccount.accountId().toString() && show == IPresence::Offline);
+    });
+    if (!QMetaObject::invokeMethod(&accountSwitchPlugin, "onAccountShown",
+            Qt::DirectConnection, Q_ARG(IAccount *, &firstAccount)) ||
+        !QMetaObject::invokeMethod(&accountSwitchPlugin, "onAccountShown",
+            Qt::DirectConnection, Q_ARG(IAccount *, &secondAccount))) {
+        std::cerr << "MeshCore account-switch notifications were not dispatched\n";
+        return 1;
+    }
+    if (!closedFirstAccount || !announcedSecondOffline) {
+        std::cerr << "account switch did not close the old provider and publish new Offline state\n";
+        return 1;
+    }
+
     // Test 2: Explicit backend selection
     FakeTransport *bleTransport = new FakeTransport();
     bleTransport->asynchronousOpen = true;
@@ -927,15 +1134,36 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    bleTransport->receivePacket(selfInfo);
+    if (protocol2.localPublicKeyHex() != expectedPublicKey) {
+        std::cerr << "SELF_INFO public key was not exposed for BLE\n";
+        return 1;
+    }
+
     protocol2.disconnect();
+    if (!protocol2.localPublicKeyHex().isEmpty()) {
+        std::cerr << "public key was not cleared by explicit disconnect\n";
+        return 1;
+    }
     if (!protocol2.connectToDevice()) {
         std::cerr << "BLE reconnect attempt failed\n";
         return 1;
     }
     bleTransport->completeConnection();
     if (protocol2.getProtocolState() != MeshCoreProtocol::Connected ||
-        bleTransport->sentPayloads.size() != 2) {
+        bleTransport->sentPayloads.size() != 3) {
         std::cerr << "BLE reconnect did not restart the Companion session\n";
+        return 1;
+    }
+
+    bleTransport->receivePacket(selfInfo);
+    if (protocol2.localPublicKeyHex() != expectedPublicKey) {
+        std::cerr << "SELF_INFO public key was not restored after reconnect\n";
+        return 1;
+    }
+    bleTransport->loseConnection();
+    if (!protocol2.localPublicKeyHex().isEmpty()) {
+        std::cerr << "public key was not cleared after transport disconnect\n";
         return 1;
     }
 

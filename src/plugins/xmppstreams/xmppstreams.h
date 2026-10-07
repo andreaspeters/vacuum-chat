@@ -6,6 +6,10 @@
 #include <definitions/optionvalues.h>
 #include <interfaces/ipluginmanager.h>
 #include <interfaces/ixmppstreams.h>
+#include <interfaces/iprotocolcapabilities.h>
+#include <interfaces/iprotocolcontactactions.h>
+#include <interfaces/iprotocolprofileactions.h>
+#include <interfaces/iprotocolaccountavataractions.h>
 #include <utils/options.h>
 #include <utils/xmpperror.h>
 #include "xmppstream.h"
@@ -13,11 +17,15 @@
 class XmppStreams :
 			public QObject,
 			public IPlugin,
-			public IXmppStreams
+			public IXmppStreams,
+			public IProtocolCapabilities,
+			public IProtocolContactActions,
+			public IProtocolProfileActions,
+			public IProtocolAccountAvatarActions
 {
 	Q_OBJECT;
 	Q_PLUGIN_METADATA(IID "org.vacuum-im.xmppstreams")
-	Q_INTERFACES(IPlugin IXmppStreams);
+	Q_INTERFACES(IPlugin IXmppStreams IProtocolCapabilities IProtocolContactActions IProtocolProfileActions IProtocolAccountAvatarActions);
 public:
 	XmppStreams();
 	~XmppStreams();
@@ -29,6 +37,12 @@ public:
 	virtual bool initObjects();
 	virtual bool initSettings();
 	virtual bool startPlugin() { return true; }
+	IProtocolCapabilities::Capabilities capabilitiesForAccount(const AccountId &accountId,
+		const ConversationId &targetId = ConversationId()) const override;
+	bool showAddContactDialog(const AccountId &accountId) override;
+	bool showProfile(const AccountId &accountId, const UserId &userId) override;
+	bool editProfile(const AccountId &accountId) override;
+	bool setAccountAvatar(const AccountId &accountId, const QByteArray &imageData) override;
 	//IXmppStreams
 	virtual QList<IXmppStream *> xmppStreams() const;
 	virtual IXmppStream *xmppStream(const Jid &AStreamJid) const;
@@ -65,6 +79,7 @@ protected slots:
 	void onStreamConnectionChanged(IConnection *AConnection);
 	void onStreamDestroyed();
 private:
+	IPluginManager *FPluginManager;
 	QList<IXmppStream *> FStreams;
 	QList<IXmppStream *> FActiveStreams;
 	QMultiMap<int, QString> FFeatureOrders;

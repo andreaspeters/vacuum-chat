@@ -1,17 +1,19 @@
 #include "protocolpresencerouting.h"
 
+#include <interfaces/iprotocolcapabilities.h>
 #include <iostream>
 
 namespace
 {
-class MockProtocolPresence final : public IProtocolPresence
+class MockProtocolPresence final : public IProtocolPresence, public IProtocolCapabilities
 {
 public:
-    explicit MockProtocolPresence(const QString &id, int value)
-        : accountId(id), currentShow(value) {}
+    MockProtocolPresence(const AccountId &stableId, const QString &stream, int value)
+        : persistentId(stableId), protocolStreamId(stream), currentShow(value), enabled(true) {}
 
     QObject *instance() override { return nullptr; }
-    QString streamId() const override { return accountId; }
+    QString streamId() const override { return protocolStreamId; }
+    AccountId accountId() const override { return persistentId; }
     int show() const override { return currentShow; }
     QString status() const override { return QString(); }
     bool setPresence(int value, const QString &) override
@@ -19,10 +21,18 @@ public:
         currentShow = value;
         return true;
     }
+    Capabilities capabilitiesForAccount(const AccountId &id,
+        const ConversationId &targetId = ConversationId()) const override
+    {
+        Q_UNUSED(targetId);
+        return enabled && id == persistentId
+            ? Capabilities(CapabilitySetPresence) : Capabilities();
+    }
 
-private:
-    QString accountId;
+    AccountId persistentId;
+    QString protocolStreamId;
     int currentShow;
+    bool enabled;
 };
 
 bool check(bool condition, const char *message)
@@ -35,30 +45,53 @@ bool check(bool condition, const char *message)
 
 int main()
 {
-    MockProtocolPresence matrix(QStringLiteral("matrix-account"), 1);
-    MockProtocolPresence another(QStringLiteral("another-account"), 2);
+    MockProtocolPresence matrix(QStringLiteral("matrix-account-uuid"),
+        QStringLiteral("@alice:example.org"), 1);
+    MockProtocolPresence another(QStringLiteral("other-account-uuid"),
+        QStringLiteral("@bob:example.org"), 2);
     const QList<IProtocolPresence *> providers{&matrix, &another};
     bool passed = true;
 
     passed &= check(ProtocolPresenceRouting::providerForAccountId(providers,
-        QStringLiteral("another-account")) == &another,
-        "account IDs route to their matching provider");
+        QStringLiteral("other-account-uuid")) == &another,
+        "provider lookup uses stable account ID, not protocol stream ID");
     passed &= check(ProtocolPresenceRouting::providerForAccountId(providers,
-        QStringLiteral("missing-account")) == nullptr,
-        "unknown account IDs have no provider");
+        QStringLiteral("@bob:example.org")) == nullptr,
+        "protocol stream ID is not accepted as persistent account ID");
     passed &= check(ProtocolPresenceRouting::providerForAccountId(providers,
-        QString()) == nullptr, "empty account IDs have no provider");
+        QStringLiteral("missing-account-uuid")) == nullptr,
+        "unknown stable account ID has no provider");
 
     passed &= check(ProtocolPresenceRouting::setPresenceForAccountId(providers,
-        QStringLiteral("another-account"), 3, QStringLiteral("busy")),
-        "status changes are sent to the matching provider");
+        QStringLiteral("other-account-uuid"), 3, QStringLiteral("busy")),
+        "status update reaches the matching account");
     passed &= check(another.show() == 3 && matrix.show() == 1,
-        "account status routing does not affect other providers");
+        "account-scoped status update does not affect another provider");
+
+    another.enabled = false;
     passed &= check(!ProtocolPresenceRouting::setPresenceForAccountId(providers,
-        QStringLiteral("missing-account"), 3, QStringLiteral("busy")),
-        "status changes for unsupported accounts are harmless");
-    passed &= check(!ProtocolPresenceRouting::setPresenceForAccountId({},
-        QStringLiteral("matrix-account"), 3, QStringLiteral("busy")),
-        "no providers safely rejects an unsupported status change");
+        QStringLiteral("other-account-uuid"), 4, QStringLiteral("offline")),
+        "dispatch rechecks live SetPresence capability");
+    passed &= check(another.show() == 3,
+        "unsupported or stale capability does not mutate presence");
+
+    passed &= check(ProtocolPresenceRouting::setPresenceForAutoConnect(providers,
+        QStringLiteral("matrix-account-uuid"), true, true, false, 7,
+        QStringLiteral("startup")),
+        "enabled generic startup account dispatches by persistent account ID");
+    passed &= check(matrix.show() == 7 && another.show() == 3,
+        "startup dispatch updates only the matching protocol provider");
+    passed &= check(!ProtocolPresenceRouting::setPresenceForAutoConnect(providers,
+        QStringLiteral("matrix-account-uuid"), false, true, false, 8,
+        QStringLiteral("inactive")) && matrix.show() == 7,
+        "inactive accounts do not auto-connect");
+    passed &= check(!ProtocolPresenceRouting::setPresenceForAutoConnect(providers,
+        QStringLiteral("matrix-account-uuid"), true, false, false, 8,
+        QStringLiteral("disabled")) && matrix.show() == 7,
+        "accounts without Auto connect on startup do not dispatch");
+    passed &= check(!ProtocolPresenceRouting::setPresenceForAutoConnect(providers,
+        QStringLiteral("matrix-account-uuid"), true, true, true, 8,
+        QStringLiteral("legacy")) && matrix.show() == 7,
+        "accounts handled by the legacy XMPP path are not dispatched twice");
     return passed ? 0 : 1;
 }

@@ -1,5 +1,7 @@
 #include "messagearchiver.h"
 #include <algorithm>
+#include <interfaces/iprotocolcapabilities.h>
+#include <interfaces/protocolhistoryactionpolicy.h>
 
 #include <QDir>
 #include <QFile>
@@ -194,13 +196,13 @@ bool MessageArchiver::initConnections(IPluginManager *APluginManager, int &AInit
 
 bool MessageArchiver::initObjects()
 {
-	Shortcuts::declareShortcut(SCT_MESSAGEWINDOWS_SHOWHISTORY, tr("Show history"), tr("Ctrl+H","Show history"));
+	Shortcuts::declareShortcut(SCT_MESSAGEWINDOWS_SHOWHISTORY, tr("View remote archive"), tr("Ctrl+H","View remote archive"));
 	Shortcuts::declareShortcut(SCT_MESSAGEWINDOWS_HISTORYENABLE, tr("Enable message archiving"), QKeySequence::UnknownKey);
 	Shortcuts::declareShortcut(SCT_MESSAGEWINDOWS_HISTORYDISABLE, tr("Disable message archiving"), QKeySequence::UnknownKey);
 	Shortcuts::declareShortcut(SCT_MESSAGEWINDOWS_HISTORYREQUIREOTR, tr("Start Off-The-Record session"), QKeySequence::UnknownKey);
 	Shortcuts::declareShortcut(SCT_MESSAGEWINDOWS_HISTORYTERMINATEOTR, tr("Terminate Off-The-Record session"), QKeySequence::UnknownKey);
 
-	Shortcuts::declareShortcut(SCT_ROSTERVIEW_SHOWHISTORY,tr("Show history"),tr("Ctrl+H","Show history"),Shortcuts::WidgetShortcut);
+	Shortcuts::declareShortcut(SCT_ROSTERVIEW_SHOWHISTORY,tr("View remote archive"),tr("Ctrl+H","View remote archive"),Shortcuts::WidgetShortcut);
 
 	XmppError::registerError(NS_INTERNAL_ERROR,IERR_HISTORY_HEADERS_LOAD_ERROR,tr("Failed to load conversation headers"));
 	XmppError::registerError(NS_INTERNAL_ERROR,IERR_HISTORY_CONVERSATION_SAVE_ERROR,tr("Failed to save conversation"));
@@ -607,6 +609,8 @@ bool MessageArchiver::isArchivingAllowed(const Jid &AStreamJid, const Jid &AItem
 
 QWidget *MessageArchiver::showArchiveWindow(const Jid &AStreamJid, const Jid &AContactJid)
 {
+	if (!hasRemoteArchiveCapability(AStreamJid))
+		return NULL;
 	IRoster *roster = FRosterPlugin!=NULL ? FRosterPlugin->findRoster(AStreamJid) : NULL;
 	if (roster)
 	{
@@ -1527,6 +1531,25 @@ QMultiMap<int, IArchiveEngine *> MessageArchiver::engineOrderByCapability(quint3
 	return order;
 }
 
+bool MessageArchiver::hasRemoteArchiveCapability(const Jid &AStreamJid) const
+{
+	IAccount *account = FAccountManager && AStreamJid.isValid()
+		? FAccountManager->accountByStream(AStreamJid) : NULL;
+	if (!account || !FPluginManager)
+		return false;
+
+	const AccountId accountId = account->accountId().toString();
+	const QList<IPlugin *> providers = FPluginManager->pluginInterface("IProtocolCapabilities");
+	for (IPlugin *provider : providers)
+	{
+		IProtocolCapabilities *capabilities = provider
+			? qobject_cast<IProtocolCapabilities *>(provider->instance()) : NULL;
+		if (ProtocolHistoryActionPolicy::canManageRemoteArchive(capabilities, accountId))
+			return true;
+	}
+	return false;
+}
+
 void MessageArchiver::openHistoryOptionsNode(const Jid &AStreamJid)
 {
 	IAccount *account = FAccountManager!=NULL ? FAccountManager->accountByStream(AStreamJid) : NULL;
@@ -1549,15 +1572,17 @@ void MessageArchiver::closeHistoryOptionsNode(const Jid &AStreamJid)
 Menu *MessageArchiver::createContextMenu(const Jid &AStreamJid, const QStringList &AContacts, QWidget *AParent) const
 {
 	bool isStreamMenu = AStreamJid==AContacts.value(0);
+	bool remoteArchiveAvailable = hasRemoteArchiveCapability(AStreamJid);
 
 	Menu *menu = new Menu(AParent);
-	menu->setTitle(tr("History"));
+	menu->setTitle(tr("Remote archive"));
 	menu->setIcon(RSR_STORAGE_MENUICONS,MNI_HISTORY);
 
-	if (AContacts.count()==1 && !engineOrderByCapability(IArchiveEngine::ArchiveManagement,AStreamJid).isEmpty())
+	if (remoteArchiveAvailable && AContacts.count()==1 &&
+		!engineOrderByCapability(IArchiveEngine::ArchiveManagement,AStreamJid).isEmpty())
 	{
 		Action *viewAction = new Action(menu);
-		viewAction->setText(tr("View History"));
+		viewAction->setText(tr("View remote archive"));
 		viewAction->setIcon(RSR_STORAGE_MENUICONS,MNI_HISTORY);
 		viewAction->setData(ADR_STREAM_JID,AStreamJid.full());
 		if (!isStreamMenu)
@@ -1567,7 +1592,7 @@ Menu *MessageArchiver::createContextMenu(const Jid &AStreamJid, const QStringLis
 		menu->addAction(viewAction,AG_DEFAULT,false);
 	}
 
-	if (isStreamMenu && isSupported(AStreamJid,NS_ARCHIVE_AUTO))
+	if (remoteArchiveAvailable && isStreamMenu && isSupported(AStreamJid,NS_ARCHIVE_AUTO))
 	{
 		Action *autoAction = new Action(menu);
 		autoAction->setCheckable(true);
@@ -1578,7 +1603,7 @@ Menu *MessageArchiver::createContextMenu(const Jid &AStreamJid, const QStringLis
 		menu->addAction(autoAction,AG_DEFAULT+100,false);
 	}
 
-	if (isArchivePrefsEnabled(AStreamJid))
+	if (remoteArchiveAvailable && isArchivePrefsEnabled(AStreamJid))
 	{
 		IArchiveStreamPrefs prefs = archivePrefs(AStreamJid);
 		bool isSingleItemPrefs = AContacts.count()==1;
@@ -2268,6 +2293,8 @@ void MessageArchiver::onSetItemPrefsByAction(bool)
 	if (action)
 	{
 		Jid streamJid = action->data(ADR_STREAM_JID).toString();
+		if (!hasRemoteArchiveCapability(streamJid))
+			return;
 		IArchiveStreamPrefs prefs = archivePrefs(streamJid);
 		foreach(Jid contactJid, action->data(ADR_CONTACT_JID).toStringList())
 		{
@@ -2309,6 +2336,8 @@ void MessageArchiver::onSetAutoArchivingByAction(bool)
 	if (action)
 	{
 		Jid streamJid = action->data(ADR_STREAM_JID).toString();
+		if (!hasRemoteArchiveCapability(streamJid))
+			return;
 		setArchiveAutoSave(streamJid,!isArchiveAutoSave(streamJid));
 	}
 }
@@ -2319,6 +2348,8 @@ void MessageArchiver::onRemoveItemPrefsByAction(bool)
 	if (action)
 	{
 		Jid streamJid = action->data(ADR_STREAM_JID).toString();
+		if (!hasRemoteArchiveCapability(streamJid))
+			return;
 		foreach(Jid contactJid, action->data(ADR_CONTACT_JID).toStringList())
 			removeArchiveItemPrefs(streamJid,contactJid);
 	}

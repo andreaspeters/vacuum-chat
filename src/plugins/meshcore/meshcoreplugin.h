@@ -7,8 +7,11 @@
 #include <interfaces/irostersview.h>
 #include <interfaces/iprotocolroster.h>
 #include <interfaces/iprotocolmessaging.h>
-#include <interfaces/iaccountmanager.h>
 #include <interfaces/iprotocolaccount.h>
+#include <interfaces/iprotocolcapabilities.h>
+#include <interfaces/iprotocolcontactactions.h>
+#include <interfaces/iprotocolpresence.h>
+#include <interfaces/iaccountmanager.h>
 
 class IAccount;
 class IProtocolRoster;
@@ -16,11 +19,11 @@ class IMessageWidgets;
 class MeshCoreProtocol;
 class QTimer;
 
-class MeshCorePlugin : public QObject, public IPlugin, public IProtocolRoster, public IProtocolMessaging
+class MeshCorePlugin : public QObject, public IPlugin, public IProtocolRoster, public IProtocolMessaging, public IProtocolCapabilities, public IProtocolContactActions, public IProtocolPresence
 {
     Q_OBJECT
     Q_PLUGIN_METADATA(IID "Vacuum.Core.IPlugin/1.0" FILE "meshcore.json")
-    Q_INTERFACES(IPlugin IProtocolRoster IProtocolMessaging)
+    Q_INTERFACES(IPlugin IProtocolRoster IProtocolMessaging IProtocolCapabilities IProtocolContactActions IProtocolPresence)
 
 public:
     MeshCorePlugin();
@@ -38,6 +41,10 @@ public:
 
     // IProtocolRoster interface
     QString accountId() const override;
+    ProtocolAccountIdentifier accountIdentifier() const override;
+    IProtocolCapabilities::Capabilities capabilitiesForAccount(const AccountId &accountId,
+        const ConversationId &targetId = ConversationId()) const override;
+    bool showAddContactDialog(const AccountId &accountId) override;
     QString protocol() const override;
     QString streamId() const override;
     QList<ProtocolRosterEntry> entries() const override;
@@ -52,6 +59,12 @@ public:
     bool sendMessage(const BasicMessage &message) override;
     QList<BasicMessage> conversationHistory(const ConversationId &conversationId) const override;
 
+    // IProtocolPresence interface; instance(), accountId(), and streamId() are
+    // shared with the interfaces declared above.
+    int show() const override;
+    QString status() const override;
+    bool setPresence(int AShow, const QString &AStatus) override;
+
 private slots:
     void onProtocolMessageReceived(const BasicMessage &message);
     void onAccountAppended(IAccount *AAccount);
@@ -59,15 +72,16 @@ private slots:
     void onAccountHidden(IAccount *AAccount);
     void onChannelsChanged();
     void attemptReconnect();
-    void onRostersViewIndexContextMenu(const QList<IRosterIndex *> &indexes,
-                                       quint32 labelId, Menu *menu);
 
 signals:
     void protocolRosterChanged();
     void protocolMessageReceived(const BasicMessage &message);
+    void protocolPresenceChanged(const QString &streamId, int show, const QString &status);
+    void protocolPresenceClosed(const QString &streamId);
 
 private:
     void activateAccount(IAccount *account);
+    void bindProtocolSignals();
     void onContactsChanged();
     void scheduleReconnect();
     void showJoinChatDialog(const QString &boundAccountId);
@@ -78,6 +92,11 @@ private:
     IAccountManager *FAccountManager;
     IMessageWidgets *FMessageWidgets;
     IAccount *FSelectedAccount;
+    bool FConnectRequested;
+    int FPresenceShow;
+    QString FPresenceStatus;
+    int FRequestedShow;
+    QString FRequestedStatus;
     MeshCoreProtocol *FProtocol;
     QTimer *FReconnectTimer;
     int FReconnectDelayMs;

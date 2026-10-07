@@ -68,6 +68,8 @@ struct ProtocolReactionSource
 	QString senderId;
 };
 
+class IProtocolCapabilities;
+
 class ChatMessageHandler :
 	public QObject,
 	public IPlugin,
@@ -163,6 +165,10 @@ protected slots:
 	void onPresenceItemReceived(IPresence *APresence, const IPresenceItem &AItem, const IPresenceItem &ABefore);
 	void onStyleOptionsChanged(const IMessageStyleOptions &AOptions, int AMessageType, const QString &AContext);
 private:
+	IProtocolMessaging *findLocalHistoryProvider(const QString &ARosterStreamId,
+		IProtocolRoster *&AProviderRoster, IProtocolCapabilities *&ACapabilities) const;
+	void showLocalConversationHistory(const QString &ARosterStreamId,
+		const ConversationId &AConversationId);
 	IMessageWidgets *FMessageWidgets;
 	IMessageProcessor *FMessageProcessor;
 	IPluginManager *FPluginManager;

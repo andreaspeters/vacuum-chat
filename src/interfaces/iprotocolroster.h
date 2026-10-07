@@ -48,6 +48,14 @@ struct ProtocolRoom
 	int memberCount = -1;
 };
 
+struct ProtocolAccountIdentifier
+{
+	QString label;
+	QString value;
+
+	bool isValid() const { return !value.isEmpty(); }
+};
+
 Q_DECLARE_METATYPE(ProtocolRoom)
 Q_DECLARE_METATYPE(QList<ProtocolRoom>)
 
@@ -63,6 +71,7 @@ public:
 	virtual ProtocolRosterEntry entry(const QString &AId) const = 0;
 	virtual ProtocolRoom room(const QString &AId) const = 0;
 	virtual void loadRoomAvatar(const QString &roomId) const { (void)roomId; }
+	virtual ProtocolAccountIdentifier accountIdentifier() const { return {}; }
 };
 
 Q_DECLARE_INTERFACE(IProtocolRoster, "Vacuum.Plugin.IProtocolRoster/1.0")

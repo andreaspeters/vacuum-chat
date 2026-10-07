@@ -1,8 +1,56 @@
 #include "xmppstreams.h"
+#include <interfaces/iaccountmanager.h>
+#include <interfaces/iroster.h>
+#include <interfaces/irosterchanger.h>
+#include <interfaces/iavatars.h>
+#include <interfaces/imessagearchiver.h>
+#include <interfaces/ivcard.h>
+#include "xmppprofileactionpolicy.h"
+
+namespace
+{
+IAccount *configuredXmppAccount(IPluginManager *pluginManager, const AccountId &accountId)
+{
+	if (!pluginManager || accountId.isEmpty())
+		return NULL;
+	const QUuid persistentAccountId = QUuid::fromString(accountId);
+	if (persistentAccountId.isNull())
+		return NULL;
+	IPlugin *plugin = pluginManager->pluginInterface("IAccountManager").value(0, NULL);
+	IAccountManager *accountManager = plugin
+		? qobject_cast<IAccountManager *>(plugin->instance()) : NULL;
+	IAccount *account = accountManager ? accountManager->accountById(persistentAccountId) : NULL;
+	return account && account->accountId() == persistentAccountId && account->isActive() &&
+		account->protocolKind() == IProtocolAccount::ProtocolXmpp ? account : NULL;
+}
+
+IAccount *connectedXmppAccount(IPluginManager *pluginManager, const AccountId &accountId)
+{
+	IAccount *account = configuredXmppAccount(pluginManager, accountId);
+	return account && account->connectionState() == IProtocolAccount::StateConnected ? account : NULL;
+}
+
+IVCardPlugin *vcardPlugin(IPluginManager *pluginManager)
+{
+	IPlugin *plugin = pluginManager ? pluginManager->pluginInterface("IVCardPlugin").value(0, NULL) : NULL;
+	return plugin ? qobject_cast<IVCardPlugin *>(plugin->instance()) : NULL;
+}
+
+IRoster *openXmppRoster(IPluginManager *pluginManager, IAccount *account)
+{
+	if (!pluginManager || !account)
+		return NULL;
+	IPlugin *plugin = pluginManager->pluginInterface("IRosterPlugin").value(0, NULL);
+	IRosterPlugin *rosterPlugin = plugin
+		? qobject_cast<IRosterPlugin *>(plugin->instance()) : NULL;
+	IRoster *roster = rosterPlugin ? rosterPlugin->findRoster(account->streamJid()) : NULL;
+	return roster && roster->isOpen() ? roster : NULL;
+}
+}
 
 XmppStreams::XmppStreams()
 {
-
+	FPluginManager = NULL;
 }
 
 XmppStreams::~XmppStreams()
@@ -21,8 +69,89 @@ void XmppStreams::pluginInfo(IPluginInfo *APluginInfo)
 
 bool XmppStreams::initConnections(IPluginManager *APluginManager, int &AInitOrder)
 {
-	Q_UNUSED(APluginManager); Q_UNUSED(AInitOrder);
+	FPluginManager = APluginManager;
+	Q_UNUSED(AInitOrder);
 	return true;
+}
+
+IProtocolCapabilities::Capabilities XmppStreams::capabilitiesForAccount(
+	const AccountId &accountId, const ConversationId &targetId) const
+{
+	IAccount *account = connectedXmppAccount(FPluginManager, accountId);
+	IProtocolCapabilities::Capabilities capabilities;
+	if (openXmppRoster(FPluginManager, account))
+		capabilities |= IProtocolCapabilities::CapabilityAddContact;
+	if (account && Jid(targetId).isValid())
+		capabilities |= IProtocolCapabilities::CapabilityQuerySoftwareVersion;
+	IPlugin *archivePlugin = FPluginManager
+		? FPluginManager->pluginInterface("IMessageArchiver").value(0, NULL) : NULL;
+	IMessageArchiver *messageArchiver = archivePlugin
+		? qobject_cast<IMessageArchiver *>(archivePlugin->instance()) : NULL;
+	if (account && messageArchiver && messageArchiver->isReady(account->streamJid()) &&
+		(messageArchiver->totalCapabilities(account->streamJid()) & IArchiveEngine::ArchiveManagement))
+		capabilities |= IProtocolCapabilities::CapabilityManageRemoteArchive;
+	IPlugin *avatarPlugin = FPluginManager
+		? FPluginManager->pluginInterface("IAvatars").value(0, NULL) : NULL;
+	IAvatars *avatars = avatarPlugin
+		? qobject_cast<IAvatars *>(avatarPlugin->instance()) : NULL;
+	if (account && avatars)
+		capabilities |= IProtocolCapabilities::CapabilitySetAccountAvatar;
+	IAccount *profileAccount = configuredXmppAccount(FPluginManager, accountId);
+	IVCardPlugin *vcard = vcardPlugin(FPluginManager);
+	const Jid targetJid(targetId);
+	capabilities |= XmppProfileActionPolicy::capabilities(account != NULL,
+		profileAccount != NULL && vcard != NULL, targetJid.isValid(),
+		targetJid.isValid() && vcard && vcard->hasVCard(targetJid.bare()));
+	return capabilities;
+}
+
+bool XmppStreams::showAddContactDialog(const AccountId &accountId)
+{
+	if (!hasCapabilities(accountId, IProtocolCapabilities::CapabilityAddContact))
+		return false;
+	IAccount *account = connectedXmppAccount(FPluginManager, accountId);
+	if (!openXmppRoster(FPluginManager, account))
+		return false;
+	IPlugin *plugin = FPluginManager->pluginInterface("IRosterChanger").value(0, NULL);
+	IRosterChanger *rosterChanger = plugin
+		? qobject_cast<IRosterChanger *>(plugin->instance()) : NULL;
+	return rosterChanger && rosterChanger->showAddContactDialog(account->streamJid()) != NULL;
+}
+
+bool XmppStreams::showProfile(const AccountId &accountId, const UserId &userId)
+{
+	if (!hasCapabilities(accountId, IProtocolCapabilities::CapabilityShowProfile, userId))
+		return false;
+	IAccount *account = configuredXmppAccount(FPluginManager, accountId);
+	IVCardPlugin *vcard = vcardPlugin(FPluginManager);
+	const Jid targetJid(userId);
+	if (!account || !vcard || !targetJid.isValid())
+		return false;
+	const bool sessionReady = connectedXmppAccount(FPluginManager, accountId) != NULL;
+	if (!sessionReady && !vcard->hasVCard(targetJid.bare()))
+		return false;
+	return XmppProfileActionPolicy::showProfile(vcard, account->streamJid(), userId);
+}
+
+bool XmppStreams::editProfile(const AccountId &accountId)
+{
+	if (!hasCapabilities(accountId, IProtocolCapabilities::CapabilityEditProfile))
+		return false;
+	IAccount *account = connectedXmppAccount(FPluginManager, accountId);
+	IVCardPlugin *vcard = vcardPlugin(FPluginManager);
+	return account && vcard && XmppProfileActionPolicy::editProfile(vcard, account->streamJid());
+}
+
+bool XmppStreams::setAccountAvatar(const AccountId &accountId, const QByteArray &imageData)
+{
+	if (!hasCapabilities(accountId, IProtocolCapabilities::CapabilitySetAccountAvatar))
+		return false;
+	IAccount *account = connectedXmppAccount(FPluginManager, accountId);
+	IPlugin *avatarPlugin = FPluginManager
+		? FPluginManager->pluginInterface("IAvatars").value(0, NULL) : NULL;
+	IAvatars *avatars = avatarPlugin
+		? qobject_cast<IAvatars *>(avatarPlugin->instance()) : NULL;
+	return account && avatars && avatars->setAvatar(account->streamJid(), imageData);
 }
 
 bool XmppStreams::initObjects()

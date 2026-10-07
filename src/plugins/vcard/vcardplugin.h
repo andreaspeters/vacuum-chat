@@ -26,6 +26,7 @@
 #include <utils/xmpperror.h>
 #include "vcard.h"
 #include "vcarddialog.h"
+#include "vcarddialogbindingpolicy.h"
 
 struct VCardItem
 {
@@ -81,7 +82,7 @@ protected:
 	void registerDiscoFeatures();
 protected slots:
 	void onShortcutActivated(const QString &AId, QWidget *AWidget);
-	void onRosterIndexContextMenu(const QList<IRosterIndex *> &AIndexes, quint32 ALabelId, Menu *AMenu);
+
 	void onMultiUserContextMenu(IMultiUserChatWindow *AWindow, IMultiUser *AUser, Menu *AMenu);
 	void onShowVCardDialogByAction(bool);
 	void onShowVCardDialogByChatWindowAction(bool);
@@ -103,7 +104,7 @@ private:
 	QMap<QString, Jid> FVCardRequestId;
 	QMap<QString, Jid> FVCardPublishId;
 	QMap<QString, Stanza> FVCardPublishStanza;
-	QMap<Jid, VCardDialog *> FVCardDialogs;
+	QMap<VCardDialogBindingPolicy::DialogKey, VCardDialog *> FVCardDialogs;
 };
 
 #endif // VCARDPLUGIN_H

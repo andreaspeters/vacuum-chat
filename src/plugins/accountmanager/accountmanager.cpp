@@ -1,4 +1,5 @@
 #include "accountmanager.h"
+#include "protocolaccountrootresolver.h"
 #include <QMessageBox>
 
 #define ADR_ACCOUNT_ID              Action::DR_Parametr1
@@ -336,7 +337,38 @@ void AccountManager::onRosterIndexContextMenu(const QList<IRosterIndex *> &AInde
 {
 	if (ALabelId==AdvancedDelegateItem::DisplayId && AIndexes.count()==1 && AIndexes.first()->type()==RIT_STREAM_ROOT)
 	{
-		IAccount *account = accountByStream(AIndexes.first()->data(RDR_STREAM_JID).toString());
+		IRosterIndex *index = AIndexes.first();
+		IAccount *account = NULL;
+		QList<IProtocolRoster *> rosters;
+		if (FPluginManager)
+		{
+			foreach (IPlugin *plugin, FPluginManager->pluginInterface("IProtocolRoster"))
+			{
+				QObject *instance = plugin ? plugin->instance() : NULL;
+				IProtocolRoster *roster = instance
+					? qobject_cast<IProtocolRoster *>(instance) : NULL;
+				if (roster)
+					rosters.append(roster);
+			}
+			const AccountId accountId = ProtocolAccountRootResolver::persistentAccountIdForStreamId(
+				index->data(RDR_ACCOUNT_ID).toString(), rosters);
+			if (!accountId.isEmpty())
+			{
+				account = accountByProtocolId(accountId);
+				if (account && account->accountId().toString() != accountId)
+					account = NULL;
+			}
+		}
+		if (!account)
+		{
+			const Jid streamJid = index->data(RDR_STREAM_JID).toString();
+			if (streamJid.isValid())
+			{
+				IAccount *legacyAccount = accountByStream(streamJid);
+				if (legacyAccount && legacyAccount->protocolKind() == IProtocolAccount::ProtocolXmpp)
+					account = legacyAccount;
+			}
+		}
 		if (account)
 		{
 			Action *action = new Action(AMenu);

@@ -9,6 +9,7 @@
 
 #define ADR_STREAMJID                       Action::DR_StreamJid
 #define ADR_STATUS_CODE                     Action::DR_Parametr1
+#define ADR_PROTOCOL_ACCOUNT_ID             Action::DR_Parametr2
 
 StatusChanger::StatusChanger()
 {
@@ -180,8 +181,8 @@ void StatusChanger::bindProtocolPresenceProviders()
 			this, SLOT(onProtocolPresenceChanged(QString,int,QString)), Qt::UniqueConnection);
 		connect(provider->instance(), SIGNAL(protocolPresenceClosed(QString)),
 			this, SLOT(onProtocolPresenceClosed(QString)), Qt::UniqueConnection);
-		if (!provider->streamId().isEmpty())
-			FProtocolStatuses.insert(provider->streamId(), provider->show());
+		if (!provider->accountId().isEmpty())
+			FProtocolStatuses.insert(provider->accountId(), provider->show());
 	}
 }
 
@@ -376,11 +377,11 @@ QList<AccountId> StatusChanger::statusAccounts(int AStatusId) const
 {
 	QList<AccountId> accounts;
 	for (IProtocolPresence *presence : FProtocolPresences) {
-		if (!presence || presence->streamId().isEmpty())
+		if (!presence || presence->accountId().isEmpty())
 			continue;
 		const QList<int> statuses = statusByShow(presence->show());
 		if (!statuses.isEmpty() && statuses.first() == AStatusId)
-			accounts.append(presence->streamId());
+			accounts.append(presence->accountId());
 	}
 	return accounts;
 }
@@ -397,7 +398,12 @@ int StatusChanger::accountStatus(const AccountId &AAccountId) const
 
 void StatusChanger::setAccountStatus(const AccountId &AAccountId, int AStatusId)
 {
-	if (!FStatusItems.contains(AStatusId))
+	bindProtocolPresenceProviders();
+	if (!FAccountManager || AAccountId.isEmpty() || !FStatusItems.contains(AStatusId))
+		return;
+	const QUuid accountUuid = QUuid::fromString(AAccountId);
+	IAccount *account = !accountUuid.isNull() ? FAccountManager->accountById(accountUuid) : NULL;
+	if (!account || !account->isActive() || account->accountId() != accountUuid)
 		return;
 	const StatusItem status = FStatusItems.value(AStatusId);
 	if (ProtocolPresenceRouting::setPresenceForAccountId(FProtocolPresences,
@@ -421,9 +427,10 @@ void StatusChanger::setStreamStatus(const Jid &AStreamJid, int AStatusId)
 		// main status applies once to every provider which exposes this capability.
 		if (!AStreamJid.isValid())
 			for (IProtocolPresence *presence : FProtocolPresences)
-				if (presence && !presence->streamId().isEmpty() &&
-					presence->setPresence(newStatus.show, newStatus.text))
-					FProtocolStatuses.insert(presence->streamId(), presence->show());
+				if (presence && !presence->accountId().isEmpty() &&
+					ProtocolPresenceRouting::setPresenceForAccountId(FProtocolPresences,
+						presence->accountId(), newStatus.show, newStatus.text))
+					FProtocolStatuses.insert(presence->accountId(), presence->show());
 		IPresence *mainPresence = visibleMainStatusPresence();
 		StatusItem oldMainStatus = FStatusItems.value(FCurrentStatus.value(mainPresence,STATUS_OFFLINE));
 
@@ -1077,6 +1084,15 @@ void StatusChanger::onSetStatusByAction(bool)
 	}
 }
 
+void StatusChanger::onSetProtocolStatusByAction(bool)
+{
+	Action *action = qobject_cast<Action *>(sender());
+	if (!action || Options::node(OPV_STATUSES_MODIFY).value().toBool())
+		return;
+	setAccountStatus(action->data(ADR_PROTOCOL_ACCOUNT_ID).toString(),
+		action->data(ADR_STATUS_CODE).toInt());
+}
+
 void StatusChanger::onPresenceAdded(IPresence *APresence)
 {
 	if (FStreamMenu.count() == 1)
@@ -1195,17 +1211,62 @@ void StatusChanger::onStreamJidChanged(const Jid &ABefore, const Jid &AAfter)
 
 void StatusChanger::onRosterIndexContextMenu(const QList<IRosterIndex *> &AIndexes, quint32 ALabelId, Menu *AMenu)
 {
-	if (ALabelId==AdvancedDelegateItem::DisplayId && AIndexes.count()==1 && AIndexes.first()->data(RDR_TYPE).toInt()==RIT_STREAM_ROOT)
+	if (!AMenu || ALabelId != AdvancedDelegateItem::DisplayId || AIndexes.count() != 1 ||
+		AIndexes.first()->data(RDR_TYPE).toInt() != RIT_STREAM_ROOT)
+		return;
+
+	bindProtocolPresenceProviders();
+	IRosterIndex *index = AIndexes.first();
+	IProtocolPresence *provider = ProtocolPresenceRouting::providerForStreamId(
+		FProtocolPresences, index->data(RDR_ACCOUNT_ID).toString());
+	if (provider)
 	{
-		Menu *menu = streamMenu(AIndexes.first()->data(RDR_STREAM_JID).toString());
-		if (menu)
+		const AccountId accountId = provider->accountId();
+		const QUuid accountUuid = QUuid::fromString(accountId);
+		IAccount *account = FAccountManager && !accountUuid.isNull()
+			? FAccountManager->accountById(accountUuid) : NULL;
+		if (!account || !account->isActive() || account->accountId() != accountUuid ||
+			Options::node(OPV_STATUSES_MODIFY).value().toBool() ||
+			!ProtocolPresenceRouting::canSetPresenceForAccountId(FProtocolPresences, accountId))
+			return;
+
+		Menu *statusMenu = new Menu(AMenu);
+		for (QMap<int, StatusItem>::const_iterator it = FStatusItems.constBegin();
+			it != FStatusItems.constEnd(); ++it)
 		{
-			Action *action = new Action(AMenu);
-			action->setText(tr("Status"));
-			action->setMenu(menu);
-			action->setIcon(menu->menuAction()->icon());
-			AMenu->addAction(action,AG_RVCM_STATUSCHANGER,true);
+			if (it.key() <= STATUS_NULL_ID)
+				continue;
+			Action *statusAction = new Action(statusMenu);
+			updateStatusAction(it.key(), statusAction);
+			statusAction->setData(ADR_STATUS_CODE, it.key());
+			statusAction->setData(ADR_PROTOCOL_ACCOUNT_ID, accountId);
+			connect(statusAction, SIGNAL(triggered(bool)), SLOT(onSetProtocolStatusByAction(bool)));
+			const int group = it.key() > STATUS_MAX_STANDART_ID
+				? AG_SCSM_STATUSCHANGER_CUSTOM_STATUS : AG_SCSM_STATUSCHANGER_DEFAULT_STATUS;
+			statusMenu->addAction(statusAction, group, true);
 		}
+		if (statusMenu->isEmpty())
+		{
+			delete statusMenu;
+			return;
+		}
+
+		Action *action = new Action(AMenu);
+		action->setText(tr("Status"));
+		action->setMenu(statusMenu);
+		action->setIcon(iconByShow(provider->show()));
+		AMenu->addAction(action, AG_RVCM_STATUSCHANGER, true);
+		return;
+	}
+
+	Menu *menu = streamMenu(index->data(RDR_STREAM_JID).toString());
+	if (menu)
+	{
+		Action *action = new Action(AMenu);
+		action->setText(tr("Status"));
+		action->setMenu(menu);
+		action->setIcon(menu->menuAction()->icon());
+		AMenu->addAction(action, AG_RVCM_STATUSCHANGER, true);
 	}
 }
 
@@ -1301,15 +1362,43 @@ void StatusChanger::onOptionsChanged(const OptionsNode &ANode)
 void StatusChanger::onProfileOpened(const QString &AProfile)
 {
 	Q_UNUSED(AProfile);
+	bindProtocolPresenceProviders();
+	QSet<AccountId> legacyPresenceAccountIds;
 	foreach(IPresence *presence, FCurrentStatus.keys())
 	{
 		IAccount *account = FAccountManager!=NULL ? FAccountManager->accountByStream(presence->streamJid()) : NULL;
-		if (account!=NULL && account->optionsNode().value("auto-connect").toBool())
+		if (account!=NULL)
 		{
-			int statusId = !FMainStatusStreams.contains(presence) ? FLastOnlineStatus.value(presence, STATUS_MAIN_ID) : STATUS_MAIN_ID;
-			if (!FStatusItems.contains(statusId))
-				statusId = STATUS_MAIN_ID;
-			setStreamStatus(presence->streamJid(), statusId);
+			const AccountId accountId = account->accountId().toString();
+			legacyPresenceAccountIds.insert(accountId);
+			if (account->optionsNode().value("auto-connect").toBool())
+			{
+				int statusId = !FMainStatusStreams.contains(presence) ? FLastOnlineStatus.value(presence, STATUS_MAIN_ID) : STATUS_MAIN_ID;
+				if (!FStatusItems.contains(statusId))
+					statusId = STATUS_MAIN_ID;
+				setStreamStatus(presence->streamJid(), statusId);
+			}
+		}
+	}
+
+	if (!FAccountManager || !FStatusItems.contains(STATUS_MAIN_ID))
+		return;
+	const StatusItem startupStatus = FStatusItems.value(STATUS_MAIN_ID);
+	for (IAccount *account : FAccountManager->accounts())
+	{
+		if (!account)
+			continue;
+		const AccountId accountId = account->accountId().toString();
+		if (ProtocolPresenceRouting::setPresenceForAutoConnect(FProtocolPresences,
+			accountId, account->isActive(),
+			account->optionsNode().value("auto-connect").toBool(),
+			legacyPresenceAccountIds.contains(accountId),
+			startupStatus.show, startupStatus.text))
+		{
+			IProtocolPresence *provider = ProtocolPresenceRouting::providerForAccountId(
+				FProtocolPresences, accountId);
+			if (provider)
+				FProtocolStatuses.insert(accountId, provider->show());
 		}
 	}
 }
@@ -1383,13 +1472,21 @@ void StatusChanger::onNotificationActivated(int ANotifyId)
 void StatusChanger::onProtocolPresenceChanged(const QString &AStreamId, int AShow, const QString &AStatus)
 {
 	Q_UNUSED(AStatus);
-	FProtocolStatuses.insert(AStreamId, AShow);
+	IProtocolPresence *presence = ProtocolPresenceRouting::providerForStreamId(
+		FProtocolPresences, AStreamId);
+	if (!presence || presence->accountId().isEmpty())
+		return;
+	FProtocolStatuses.insert(presence->accountId(), AShow);
 	updateMainMenu();
 }
 
 void StatusChanger::onProtocolPresenceClosed(const QString &AStreamId)
 {
-	FProtocolStatuses.remove(AStreamId);
+	IProtocolPresence *presence = ProtocolPresenceRouting::providerForStreamId(
+		FProtocolPresences, AStreamId);
+	if (!presence || presence->accountId().isEmpty())
+		return;
+	FProtocolStatuses.remove(presence->accountId());
 	updateMainMenu();
 }
 

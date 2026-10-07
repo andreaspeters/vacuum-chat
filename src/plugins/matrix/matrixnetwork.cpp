@@ -28,7 +28,9 @@
 #include <QFileInfo>
 #include <QSaveFile>
 #include <QStandardPaths>
+#include <QBuffer>
 #include <QImage>
+#include <QImageReader>
 #include <QUrlQuery>
 #include <algorithm>
 
@@ -614,17 +616,26 @@ QString MatrixNetwork::generateTransactionId() const
 
 QString MatrixNetwork::login(const QString &userId, const QString &password, const QString &deviceId)
 {
+	return loginForSession(userId, password, deviceId, 0);
+}
+
+QString MatrixNetwork::loginForSession(const QString &userId, const QString &password,
+	const QString &deviceId, quint64 sessionGeneration)
+{
 	// Prevent concurrent login requests
 	if (isRequestInProgress())
 	{
 		qInfo() << "Matrix login request already active; ignoring duplicate invocation";
+		emit loginErrorForSession(QStringLiteral("Matrix login request already active"), sessionGeneration);
 		return QString();
 	}
+	FActiveLoginGeneration = sessionGeneration;
 	
 	if (userId.trimmed().isEmpty() || password.trimmed().isEmpty())
 	{
 		qWarning() << "MatrixNetwork::login: empty username or password";
 		emit loginError("Username and password cannot be empty");
+		emit loginErrorForSession(QStringLiteral("Username and password cannot be empty"), sessionGeneration);
 		return QString();
 	}
 	
@@ -632,6 +643,7 @@ QString MatrixNetwork::login(const QString &userId, const QString &password, con
 	{
 		qWarning() << "MatrixNetwork::login: server URL not configured";
 		emit loginError("Server URL not configured");
+		emit loginErrorForSession(QStringLiteral("Server URL not configured"), sessionGeneration);
 		return QString();
 	}
 	
@@ -652,6 +664,7 @@ QString MatrixNetwork::login(const QString &userId, const QString &password, con
 	if (normalizedUser.trimmed().isEmpty()) {
 		qWarning() << "MatrixNetwork::login: empty normalized user ID after stripping @ and :server";
 		emit loginError("Invalid user ID");
+		emit loginErrorForSession(QStringLiteral("Invalid user ID"), sessionGeneration);
 		return QString();
 	}
 
@@ -679,6 +692,7 @@ QString MatrixNetwork::login(const QString &userId, const QString &password, con
 #endif
 
 	reply->setProperty("requestType", "login");
+	reply->setProperty("loginGeneration", QVariant::fromValue(sessionGeneration));
 	setRequestType(RequestLogin);
 	emit connectionStateChanged(1);  // Connecting state
 	return QString();
@@ -687,8 +701,17 @@ QString MatrixNetwork::login(const QString &userId, const QString &password, con
 void MatrixNetwork::loginWithAccessToken(const QString &userId, const QString &accessToken,
 	const QString &deviceId)
 {
+	loginWithAccessTokenForSession(userId, accessToken, deviceId, 0);
+}
+
+void MatrixNetwork::loginWithAccessTokenForSession(const QString &userId, const QString &accessToken,
+	const QString &deviceId, quint64 sessionGeneration)
+{
+	FActiveLoginGeneration = sessionGeneration;
 	if (userId.trimmed().isEmpty() || accessToken.trimmed().isEmpty() || FNormalizedServerUrl.isEmpty()) {
-		emit loginError(QStringLiteral("Matrix access-token login requires user, token and server"));
+		const QString error = QStringLiteral("Matrix access-token login requires user, token and server");
+		emit loginError(error);
+		emit loginErrorForSession(error, sessionGeneration);
 		return;
 	}
 	FAccesToken = accessToken.trimmed();
@@ -705,7 +728,9 @@ void MatrixNetwork::loginWithAccessToken(const QString &userId, const QString &a
 	}
 	if (!databaseOpened) {
 		FAccesToken.clear();
-		emit loginError(QStringLiteral("Matrix SQLite database could not be opened"));
+		const QString error = QStringLiteral("Matrix SQLite database could not be opened");
+		emit loginError(error);
+		emit loginErrorForSession(error, sessionGeneration);
 		return;
 	}
 	bool localOlmContextChanged = false;
@@ -718,7 +743,9 @@ void MatrixNetwork::loginWithAccessToken(const QString &userId, const QString &a
 	});
 	if (!localOlmContextKnown) {
 		FAccesToken.clear();
-		emit loginError(QStringLiteral("Matrix Olm session context could not be initialized"));
+		const QString error = QStringLiteral("Matrix Olm session context could not be initialized");
+		emit loginError(error);
+		emit loginErrorForSession(error, sessionGeneration);
 		return;
 	}
 	if (localOlmContextChanged)
@@ -745,6 +772,9 @@ void MatrixNetwork::loginWithAccessToken(const QString &userId, const QString &a
 	FFilterCreationAttempted = false;
 	FMessageHistory.clear();
 	FHistoryLoadedRooms.clear();
+	// E2EE is an optional build feature. A valid Matrix access-token session
+	// must still be usable for sync and unencrypted rooms without libolm.
+#if HAVE_OLM
 	QByteArray olmPickle;
 	QByteArray olmPickleKey;
 	bool olmInitialized = false;
@@ -764,12 +794,18 @@ void MatrixNetwork::loginWithAccessToken(const QString &userId, const QString &a
 					olmPickleKey, olmPickle);
 			});
 	}
+
 	if (!olmInitialized) {
 		FAccesToken.clear();
-		emit loginError(QStringLiteral("Matrix Olm account initialization failed"));
+		const QString error = QStringLiteral("Matrix Olm account initialization failed");
+		emit loginError(error);
+		emit loginErrorForSession(error, sessionGeneration);
 		return;
 	}
+#endif
+
 	emit loginSuccess(FUserId, FAccesToken, FDeviceId);
+	emit loginSuccessForSession(FUserId, FAccesToken, FDeviceId, sessionGeneration);
 	queryOwnDevices();
 	sync();
 }
@@ -777,8 +813,17 @@ void MatrixNetwork::loginWithAccessToken(const QString &userId, const QString &a
 void MatrixNetwork::logout()
 {
 	// Clear access token and sync state
+	FActiveLoginGeneration = 0;
 	if (!FAccesToken.isEmpty() && !FUserId.isEmpty())
 		setPresence(FUserId, QStringLiteral("offline"));
+	if (!FAccesToken.isEmpty() && FNetworkAccessManager) {
+		QNetworkRequest request(QUrl(constructUrl(QStringLiteral("/_matrix/client/v3/logout"))));
+		request.setAttribute(QNetworkRequest::Http2AllowedAttribute, FUseHttp2);
+		request.setRawHeader("Authorization", QByteArrayLiteral("Bearer ") + FAccesToken.toUtf8());
+		request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+		QNetworkReply *reply = FNetworkAccessManager->post(request, QByteArrayLiteral("{}"));
+		reply->setProperty("requestType", QStringLiteral("logout"));
+	}
 	FAccesToken.clear();
 	FSsssRecoveryInput.clear();
 	FSsssKeyId.clear();
@@ -837,6 +882,7 @@ void MatrixNetwork::shutdown()
 	FSyncInFlight = false;
 	FSendInFlight = false;
 	FKeysUploadInFlight = false;
+	FActiveLoginGeneration = 0;
 	setRequestType(RequestNone);
 }
 
@@ -1569,6 +1615,99 @@ void MatrixNetwork::requestDisplayName(const QString &userId)
 	reply->setProperty("displayNameUserId", userId);
 }
 
+void MatrixNetwork::setOwnDisplayName(const QString &displayName)
+{
+	const QString userId = FUserId;
+	const QString serverUrl = FNormalizedServerUrl;
+	const quint64 sessionGeneration = FActiveLoginGeneration;
+	if (FAccesToken.isEmpty() || userId.isEmpty() || serverUrl.isEmpty()) {
+		emit accountDisplayNameUpdateFinished(userId, false, QString(),
+			QStringLiteral("Matrix display-name update requires an active account and server"));
+		return;
+	}
+
+	const QString path = QStringLiteral("/_matrix/client/v3/profile/%1/displayname")
+		.arg(QString::fromUtf8(QUrl::toPercentEncoding(userId)));
+	QNetworkRequest request(QUrl(constructUrl(path)));
+	request.setAttribute(QNetworkRequest::Http2AllowedAttribute, FUseHttp2);
+	request.setRawHeader("Authorization", QByteArray("Bearer ") + FAccesToken.toUtf8());
+	request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+	QJsonObject content;
+	content.insert(QStringLiteral("displayname"), displayName);
+	QNetworkReply *reply = FNetworkAccessManager->put(request,
+		QJsonDocument(content).toJson(QJsonDocument::Compact));
+	reply->setProperty("requestType", QStringLiteral("account_displayname_profile_update"));
+	reply->setProperty("accountDisplayNameUserId", userId);
+	reply->setProperty("accountDisplayNameServerUrl", serverUrl);
+	reply->setProperty("accountDisplayNameValue", displayName);
+	reply->setProperty("accountDisplayNameSessionGeneration", QVariant::fromValue(sessionGeneration));
+}
+
+void MatrixNetwork::setOwnAvatar(const QByteArray &imageData)
+{
+	const QString userId = FUserId;
+	if (FAccesToken.isEmpty() || userId.isEmpty() || FNormalizedServerUrl.isEmpty()) {
+		emit accountAvatarUpdateFinished(userId, false, QString(),
+			QStringLiteral("Matrix avatar update requires an active account and server"));
+		return;
+	}
+	if (imageData.isEmpty()) {
+		updateOwnAvatarProfile(userId, QString());
+		return;
+	}
+
+	QBuffer imageBuffer;
+	imageBuffer.setData(imageData);
+	if (!imageBuffer.open(QIODevice::ReadOnly)) {
+		emit accountAvatarUpdateFinished(userId, false, QString(),
+			QStringLiteral("Matrix avatar image could not be read"));
+		return;
+	}
+	QImageReader imageReader(&imageBuffer);
+	const QByteArray format = imageReader.format().toLower();
+	if (format.isEmpty() || imageReader.read().isNull()) {
+		emit accountAvatarUpdateFinished(userId, false, QString(),
+			QStringLiteral("Matrix avatar image is invalid or unsupported"));
+		return;
+	}
+	const QString mimeType = format == QByteArrayLiteral("jpg") || format == QByteArrayLiteral("jpeg")
+		? QStringLiteral("image/jpeg")
+		: format == QByteArrayLiteral("svg") ? QStringLiteral("image/svg+xml")
+		: QStringLiteral("image/%1").arg(QString::fromLatin1(format));
+
+	QNetworkRequest request(QUrl(constructUrl(QStringLiteral("/_matrix/media/v3/upload"))));
+	request.setAttribute(QNetworkRequest::Http2AllowedAttribute, FUseHttp2);
+	request.setRawHeader("Authorization", QByteArray("Bearer ") + FAccesToken.toUtf8());
+	request.setHeader(QNetworkRequest::ContentTypeHeader, mimeType);
+	QNetworkReply *reply = FNetworkAccessManager->post(request, imageData);
+	reply->setProperty("requestType", QStringLiteral("account_avatar_upload"));
+	reply->setProperty("accountAvatarUserId", userId);
+	reply->setProperty("accountAvatarServerUrl", FNormalizedServerUrl);
+}
+
+void MatrixNetwork::updateOwnAvatarProfile(const QString &userId, const QString &avatarUrl)
+{
+	if (FAccesToken.isEmpty() || userId.isEmpty() || userId != FUserId || FNormalizedServerUrl.isEmpty()) {
+		emit accountAvatarUpdateFinished(userId, false, QString(),
+			QStringLiteral("Matrix account changed before its avatar could be updated"));
+		return;
+	}
+	const QString path = QStringLiteral("/_matrix/client/v3/profile/%1/avatar_url")
+		.arg(QString::fromUtf8(QUrl::toPercentEncoding(userId)));
+	QNetworkRequest request(QUrl(constructUrl(path)));
+	request.setAttribute(QNetworkRequest::Http2AllowedAttribute, FUseHttp2);
+	request.setRawHeader("Authorization", QByteArray("Bearer ") + FAccesToken.toUtf8());
+	request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+	QJsonObject content;
+	content.insert(QStringLiteral("avatar_url"), avatarUrl);
+	QNetworkReply *reply = FNetworkAccessManager->put(request,
+		QJsonDocument(content).toJson(QJsonDocument::Compact));
+	reply->setProperty("requestType", QStringLiteral("account_avatar_profile_update"));
+	reply->setProperty("accountAvatarUserId", userId);
+	reply->setProperty("accountAvatarServerUrl", FNormalizedServerUrl);
+	reply->setProperty("accountAvatarUrl", avatarUrl);
+}
+
 void MatrixNetwork::uploadFileAndSend(const QString &roomId, const QString &filePath,
 	const QString &mimeType, const QString &messageType, const QString &body, const QString &txnId)
 {
@@ -2125,7 +2264,7 @@ void MatrixNetwork::onReplyFinished(QNetworkReply *reply)
 				roomSaved = database.saveRoomState(roomId, room.name, room.subject,
 					room.avatarUrl, action, room.isDirect, room.isEncrypted,
 					QString(), FRoomPrevBatch.value(roomId));
-		});
+			});
 			if (!roomSaved)
 				qWarning() << "Failed to persist Matrix membership action" << roomId << action;
 			emitRosterSnapshot();
@@ -2259,6 +2398,63 @@ void MatrixNetwork::onReplyFinished(QNetworkReply *reply)
 				QStringLiteral("Room created, but the local direct-room cache could not be saved"));
 			if (!FSyncInFlight)
 				sync(true);
+		}
+		reply->deleteLater();
+	} else if (type == "account_avatar_upload") {
+		const QString userId = reply->property("accountAvatarUserId").toString();
+		const QString serverUrl = reply->property("accountAvatarServerUrl").toString();
+		const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+		if (userId != FUserId || serverUrl != FNormalizedServerUrl || FAccesToken.isEmpty()) {
+			emit accountAvatarUpdateFinished(userId, false, QString(),
+				QStringLiteral("Matrix account changed before its avatar could be updated"));
+		} else if (reply->error() != QNetworkReply::NoError || status < 200 || status >= 300) {
+			emit accountAvatarUpdateFinished(userId, false, QString(),
+				QStringLiteral("Matrix avatar upload failed (HTTP %1)").arg(status));
+		} else {
+			QJsonParseError parseError;
+			const QJsonDocument document = QJsonDocument::fromJson(reply->readAll(), &parseError);
+			const QString contentUri = document.object().value(QStringLiteral("content_uri")).toString();
+			const QUrl uri(contentUri);
+			if (parseError.error != QJsonParseError::NoError || !document.isObject() ||
+				uri.scheme() != QStringLiteral("mxc") || uri.host().isEmpty() || uri.path().isEmpty()) {
+				emit accountAvatarUpdateFinished(userId, false, QString(),
+					QStringLiteral("Matrix media upload returned an invalid content URI"));
+			} else {
+				updateOwnAvatarProfile(userId, contentUri);
+			}
+		}
+		reply->deleteLater();
+	} else if (type == "account_avatar_profile_update") {
+		const QString userId = reply->property("accountAvatarUserId").toString();
+		const QString serverUrl = reply->property("accountAvatarServerUrl").toString();
+		const QString avatarUrl = reply->property("accountAvatarUrl").toString();
+		const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+		if (userId != FUserId || serverUrl != FNormalizedServerUrl || FAccesToken.isEmpty()) {
+			emit accountAvatarUpdateFinished(userId, false, QString(),
+				QStringLiteral("Matrix account changed before its avatar could be updated"));
+		} else if (reply->error() != QNetworkReply::NoError || status < 200 || status >= 300) {
+			emit accountAvatarUpdateFinished(userId, false, QString(),
+				QStringLiteral("Matrix profile-avatar update failed (HTTP %1)").arg(status));
+		} else {
+			emit accountAvatarUpdateFinished(userId, true, avatarUrl, QString());
+		}
+		reply->deleteLater();
+	} else if (type == "account_displayname_profile_update") {
+		const QString userId = reply->property("accountDisplayNameUserId").toString();
+		const QString serverUrl = reply->property("accountDisplayNameServerUrl").toString();
+		const QString displayName = reply->property("accountDisplayNameValue").toString();
+		const quint64 sessionGeneration =
+			reply->property("accountDisplayNameSessionGeneration").toULongLong();
+		const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+		if (userId != FUserId || serverUrl != FNormalizedServerUrl ||
+			sessionGeneration != FActiveLoginGeneration || FAccesToken.isEmpty()) {
+			emit accountDisplayNameUpdateFinished(userId, false, QString(),
+				QStringLiteral("Matrix account changed before its display name could be updated"));
+		} else if (reply->error() != QNetworkReply::NoError || status < 200 || status >= 300) {
+			emit accountDisplayNameUpdateFinished(userId, false, QString(),
+				QStringLiteral("Matrix profile display-name update failed (HTTP %1)").arg(status));
+		} else {
+			emit accountDisplayNameUpdateFinished(userId, true, displayName, QString());
 		}
 		reply->deleteLater();
 	} else if (type == "media_upload") {
@@ -2824,12 +3020,15 @@ void MatrixNetwork::uploadOwnMasterKeySignature(const QJsonObject &masterKey)
 
 void MatrixNetwork::onLoginFinished(QNetworkReply *reply)
 {
-	Q_UNUSED(reply);
-	
-	if (FInFlightRequest != RequestLogin) {
+	const quint64 sessionGeneration = reply->property("loginGeneration").toULongLong();
+	if (FInFlightRequest != RequestLogin || sessionGeneration != FActiveLoginGeneration) {
 		// Not waiting for a login response
 		return;
 	}
+	auto emitLoginError = [this, sessionGeneration](const QString &error) {
+		emit loginError(error);
+		emit loginErrorForSession(error, sessionGeneration);
+	};
 	
 	setRequestType(RequestNone);
 	
@@ -2837,7 +3036,7 @@ void MatrixNetwork::onLoginFinished(QNetworkReply *reply)
 		QString error = reply->errorString();
 		const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
 		qWarning() << "Matrix login failed:" << error << "HTTP status:" << httpStatus;
-		emit loginError(error);
+		emitLoginError(error);
 		emit connectionStateChanged(0);
 		return;
 	}
@@ -2852,12 +3051,12 @@ void MatrixNetwork::onLoginFinished(QNetworkReply *reply)
 		qWarning() << "Matrix login HTTP failure:" << httpStatus
 			<< "response bytes:" << response.size()
 			<< "retry_after_ms:" << retryAfter;
-		emit loginError(QStringLiteral("Matrix login failed (HTTP %1)").arg(httpStatus));
+		emitLoginError(QStringLiteral("Matrix login failed (HTTP %1)").arg(httpStatus));
 		emit connectionStateChanged(0);
 		return;
 	}
 	if (response.isEmpty()) {
-		emit loginError("Empty login response from server");
+		emitLoginError(QStringLiteral("Empty login response from server"));
 		emit connectionStateChanged(0);
 		return;
 	}
@@ -2868,7 +3067,7 @@ void MatrixNetwork::onLoginFinished(QNetworkReply *reply)
 	if (parseError.error != QJsonParseError::NoError) {
 		QString errorMsg = QString("Malformed JSON in login response: %1").arg(parseError.errorString());
 		qWarning() << errorMsg;
-		emit loginError(errorMsg);
+		emitLoginError(errorMsg);
 		emit connectionStateChanged(0);
 		return;
 	}
@@ -2882,7 +3081,7 @@ void MatrixNetwork::onLoginFinished(QNetworkReply *reply)
 	if (userId.isEmpty() || accessToken.isEmpty()) {
 		QString errorMsg = "Matrix login response lacks user_id or access_token";
 		qWarning() << errorMsg;
-		emit loginError(errorMsg);
+		emitLoginError(errorMsg);
 		emit connectionStateChanged(0);
 		return;
 	}
@@ -2923,7 +3122,7 @@ void MatrixNetwork::onLoginFinished(QNetworkReply *reply)
 	if (!databaseOpened) {
 		const QString error = QStringLiteral("Matrix SQLite database could not be opened");
 		qCritical() << error;
-		emit loginError(error);
+		emitLoginError(error);
 		emit connectionStateChanged(0);
 		return;
 	}
@@ -2937,7 +3136,7 @@ void MatrixNetwork::onLoginFinished(QNetworkReply *reply)
 	});
 	if (!localOlmContextKnown) {
 		qCritical() << "[Matrix-E2EE] failed to initialize local Olm session context";
-		emit loginError(QStringLiteral("Matrix Olm session context could not be initialized"));
+		emitLoginError(QStringLiteral("Matrix Olm session context could not be initialized"));
 		emit connectionStateChanged(0);
 		return;
 	}
@@ -3019,6 +3218,7 @@ void MatrixNetwork::onLoginFinished(QNetworkReply *reply)
 	FHistoryLoadedRooms.clear();
 	setPresence(FUserId, QStringLiteral("online"));
 	emit loginSuccess(userId, accessToken, deviceId);
+	emit loginSuccessForSession(userId, accessToken, deviceId, sessionGeneration);
 	queryOwnDevices();
 	emit connectionStateChanged(2);  // Connected state
 	

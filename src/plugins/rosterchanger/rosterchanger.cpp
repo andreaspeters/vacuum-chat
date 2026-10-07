@@ -1,4 +1,5 @@
 #include "rosterchanger.h"
+#include "protocolcontactactionpolicy.h"
 
 #include <QMap>
 #include <QDropEvent>
@@ -9,6 +10,8 @@
 #include <QDragLeaveEvent>
 #include <QMimeData>
 #include <QItemEditorFactory>
+#include <interfaces/iaccountmanager.h>
+#include <interfaces/iprotocolroster.h>
 
 #define ADR_STREAM_JID      Action::DR_StreamJid
 #define ADR_CONTACT_JID     Action::DR_Parametr1
@@ -769,6 +772,77 @@ void RosterChanger::onShowAddContactDialog(bool)
 	}
 }
 
+QString RosterChanger::protocolAccountIdForRoot(IRosterIndex *AIndex) const
+{
+	if (!FPluginManager || !AIndex || AIndex->type() != RIT_STREAM_ROOT)
+		return QString();
+
+	IPlugin *accountPlugin = FPluginManager->pluginInterface("IAccountManager").value(0, NULL);
+	IAccountManager *accountManager = accountPlugin
+		? qobject_cast<IAccountManager *>(accountPlugin->instance()) : NULL;
+	if (!accountManager)
+		return QString();
+
+	const QString protocolStreamId = AIndex->data(RDR_ACCOUNT_ID).toString();
+	if (!protocolStreamId.isEmpty())
+	{
+		for (IPlugin *plugin : FPluginManager->pluginInterface("IProtocolRoster"))
+		{
+			IProtocolRoster *roster = plugin
+				? qobject_cast<IProtocolRoster *>(plugin->instance()) : NULL;
+			if (!roster || roster->streamId() != protocolStreamId)
+				continue;
+
+			const QUuid persistentAccountId = QUuid::fromString(roster->accountId());
+			if (persistentAccountId.isNull())
+				return QString();
+			IAccount *account = accountManager->accountById(persistentAccountId);
+			return account && account->isActive() && account->accountId() == persistentAccountId
+				? account->accountId().toString() : QString();
+		}
+	}
+
+	const Jid streamJid = AIndex->data(RDR_STREAM_JID).toString();
+	if (!streamJid.isValid())
+		return QString();
+	IAccount *account = accountManager->accountByStream(streamJid);
+	return account && account->isActive() ? account->accountId().toString() : QString();
+}
+
+bool RosterChanger::showProtocolAddContactDialog(const QString &AAccountId)
+{
+	if (!FPluginManager || AAccountId.isEmpty())
+		return false;
+
+	IPlugin *accountPlugin = FPluginManager->pluginInterface("IAccountManager").value(0, NULL);
+	IAccountManager *accountManager = accountPlugin
+		? qobject_cast<IAccountManager *>(accountPlugin->instance()) : NULL;
+	const QUuid persistentAccountId = QUuid::fromString(AAccountId);
+	IAccount *account = accountManager && !persistentAccountId.isNull()
+		? accountManager->accountById(persistentAccountId) : NULL;
+	if (!account || !account->isActive() || account->accountId() != persistentAccountId)
+		return false;
+
+	for (IPlugin *plugin : FPluginManager->pluginInterface("IProtocolCapabilities"))
+	{
+		QObject *instance = plugin ? plugin->instance() : NULL;
+		IProtocolCapabilities *capabilities = instance
+			? qobject_cast<IProtocolCapabilities *>(instance) : NULL;
+		IProtocolContactActions *actions = instance
+			? qobject_cast<IProtocolContactActions *>(instance) : NULL;
+		if (dispatchAddContactAction(capabilities, actions, AAccountId))
+			return true;
+	}
+	return false;
+}
+
+void RosterChanger::onShowProtocolAddContactDialog(bool)
+{
+	Action *action = qobject_cast<Action *>(sender());
+	if (action)
+		showProtocolAddContactDialog(action->data(Action::DR_Parametr1).toString());
+}
+
 void RosterChanger::onShortcutActivated(const QString &AId, QWidget *AWidget)
 {
 	if (FRostersView && AWidget==FRostersView->instance())
@@ -781,19 +855,22 @@ void RosterChanger::onShortcutActivated(const QString &AId, QWidget *AWidget)
 			Jid streamJid = index->data(RDR_STREAM_JID).toString();
 			if (AId==SCT_ROSTERVIEW_ADDCONTACT && !FRostersView->hasMultiSelection())
 			{
-				IRoster *roster = FRosterPlugin!=NULL ? FRosterPlugin->findRoster(streamJid) : NULL;
-				IRosterItem ritem = roster!=NULL ? roster->rosterItem(index->data(RDR_PREP_BARE_JID).toString()) : IRosterItem();
-				
-				bool showDialog = indexType==RIT_GROUP || indexType==RIT_STREAM_ROOT;
-				showDialog = showDialog || (!ritem.isValid && (indexType==RIT_CONTACT || indexType==RIT_AGENT));
-				
-				IAddContactDialog *dialog = showDialog ? showAddContactDialog(streamJid) : NULL;
-				if (dialog)
+				if (indexType == RIT_STREAM_ROOT)
+					showProtocolAddContactDialog(protocolAccountIdForRoot(index));
+				else
 				{
-					if (indexType == RIT_GROUP)
-						dialog->setGroup(index->data(RDR_GROUP).toString());
-					else if (indexType==RIT_CONTACT || indexType==RIT_AGENT)
-						dialog->setContactJid(index->data(RDR_PREP_BARE_JID).toString());
+					IRoster *roster = FRosterPlugin!=NULL ? FRosterPlugin->findRoster(streamJid) : NULL;
+					IRosterItem ritem = roster!=NULL ? roster->rosterItem(index->data(RDR_PREP_BARE_JID).toString()) : IRosterItem();
+					bool showDialog = indexType==RIT_GROUP;
+					showDialog = showDialog || (!ritem.isValid && (indexType==RIT_CONTACT || indexType==RIT_AGENT));
+					IAddContactDialog *dialog = showDialog ? showAddContactDialog(streamJid) : NULL;
+					if (dialog)
+					{
+						if (indexType == RIT_GROUP)
+							dialog->setGroup(index->data(RDR_GROUP).toString());
+						else if (indexType==RIT_CONTACT || indexType==RIT_AGENT)
+							dialog->setContactJid(index->data(RDR_PREP_BARE_JID).toString());
+					}
 				}
 			}
 			else if (AId==SCT_ROSTERVIEW_RENAME && !FRostersView->hasMultiSelection())
@@ -850,24 +927,37 @@ void RosterChanger::onRosterIndexContextMenu(const QList<IRosterIndex *> &AIndex
 	if (ALabelId==AdvancedDelegateItem::DisplayId && isSelectionAccepted(AIndexes))
 	{
 		int indexType = AIndexes.first()->type();
+		if (indexType == RIT_STREAM_ROOT && AIndexes.count() == 1)
+		{
+			const QString accountId = protocolAccountIdForRoot(AIndexes.first());
+			if (!accountId.isEmpty() && FPluginManager)
+			{
+				for (IPlugin *plugin : FPluginManager->pluginInterface("IProtocolCapabilities"))
+				{
+					QObject *instance = plugin ? plugin->instance() : NULL;
+					IProtocolCapabilities *capabilities = instance
+						? qobject_cast<IProtocolCapabilities *>(instance) : NULL;
+					IProtocolContactActions *actions = instance
+						? qobject_cast<IProtocolContactActions *>(instance) : NULL;
+					if (!canOfferAddContactAction(capabilities, actions, accountId))
+						continue;
+
+					Action *action = new Action(AMenu);
+					action->setText(tr("Add contact..."));
+					action->setIcon(RSR_STORAGE_MENUICONS,MNI_RCHANGER_ADD_CONTACT);
+					action->setData(Action::DR_Parametr1, accountId);
+					action->setShortcutId(SCT_ROSTERVIEW_ADDCONTACT);
+					connect(action,SIGNAL(triggered(bool)),SLOT(onShowProtocolAddContactDialog(bool)));
+					AMenu->addAction(action,AG_RVCM_RCHANGER_ADD_CONTACT,true);
+					break;
+				}
+			}
+		}
 		Jid streamJid = AIndexes.first()->data(RDR_STREAM_JID).toString();
 		IRoster *roster = FRosterPlugin!=NULL ? FRosterPlugin->findRoster(streamJid) : NULL;
 		if (roster && roster->isOpen())
 		{
-			if (indexType==RIT_STREAM_ROOT)
-			{
-				if (AIndexes.count() == 1)
-				{
-					Action *action = new Action(AMenu);
-					action->setText(tr("Add contact..."));
-					action->setIcon(RSR_STORAGE_MENUICONS,MNI_RCHANGER_ADD_CONTACT);
-					action->setData(ADR_STREAM_JID, AIndexes.first()->data(RDR_STREAM_JID));
-					action->setShortcutId(SCT_ROSTERVIEW_ADDCONTACT);
-					connect(action,SIGNAL(triggered(bool)),SLOT(onShowAddContactDialog(bool)));
-					AMenu->addAction(action,AG_RVCM_RCHANGER_ADD_CONTACT,true);
-				}
-			}
-			else if (indexType == RIT_CONTACT || indexType == RIT_AGENT)
+			if (indexType == RIT_CONTACT || indexType == RIT_AGENT)
 			{
 				QMap<int, QStringList> rolesMap = FRostersView->indexesRolesMap(AIndexes,QList<int>()<<RDR_PREP_BARE_JID<<RDR_GROUP<<RDR_NAME,RDR_PREP_BARE_JID);
 				

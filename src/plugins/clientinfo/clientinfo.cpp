@@ -4,6 +4,9 @@
 #include <QProcess>
 #include <QFileInfo>
 #include <QTextStream>
+#include <interfaces/iaccountmanager.h>
+#include <interfaces/iprotocolcapabilities.h>
+#include "protocolsoftwareversionpolicy.h"
 
 #if defined(Q_OS_UNIX)
 # include <sys/utsname.h>
@@ -27,15 +30,41 @@
 #define ADR_STREAM_JID                  Action::DR_StreamJid
 #define ADR_CONTACT_JID                 Action::DR_Parametr1
 #define ADR_INFO_TYPES                  Action::DR_Parametr2
+#define ADR_ACCOUNT_ID                  Action::DR_Parametr3
 
 #define FORM_FIELD_SOFTWARE             "software"
 #define FORM_FIELD_SOFTWARE_VERSION     "software_version"
 #define FORM_FIELD_OS                   "os"
 #define FORM_FIELD_OS_VERSION           "os_version"
 
+namespace
+{
+bool hasSoftwareVersionCapability(IPluginManager *pluginManager, const AccountId &accountId,
+	const ConversationId &targetId)
+{
+	if (!pluginManager)
+		return false;
+	foreach (IPlugin *plugin, pluginManager->pluginInterface("IProtocolCapabilities"))
+	{
+		IProtocolCapabilities *capabilities = plugin
+			? qobject_cast<IProtocolCapabilities *>(plugin->instance()) : NULL;
+		if (ClientInfoPolicy::canQuerySoftwareVersion(capabilities, accountId, targetId))
+			return true;
+	}
+	return false;
+}
+
+AccountId accountIdForStream(IAccountManager *accountManager, const Jid &streamJid)
+{
+	IAccount *account = accountManager ? accountManager->accountByStream(streamJid) : NULL;
+	return account ? account->accountId().toString() : AccountId();
+}
+}
+
 ClientInfo::ClientInfo()
 {
 	FPluginManager = NULL;
+	FAccountManager = NULL;
 	FRosterPlugin = NULL;
 	FPresencePlugin = NULL;
 	FStanzaProcessor = NULL;
@@ -69,7 +98,11 @@ bool ClientInfo::initConnections(IPluginManager *APluginManager, int &/*AInitOrd
 {
 	FPluginManager = APluginManager;
 
-	IPlugin *plugin = APluginManager->pluginInterface("IStanzaProcessor").value(0,NULL);
+	IPlugin *plugin = APluginManager->pluginInterface("IAccountManager").value(0,NULL);
+	if (plugin)
+		FAccountManager = qobject_cast<IAccountManager *>(plugin->instance());
+
+	plugin = APluginManager->pluginInterface("IStanzaProcessor").value(0,NULL);
 	if (plugin)
 		FStanzaProcessor = qobject_cast<IStanzaProcessor *>(plugin->instance());
 
@@ -709,12 +742,18 @@ Action *ClientInfo::createInfoAction(const Jid &AStreamJid, const Jid &AContactJ
 {
 	if (AFeature == NS_JABBER_VERSION)
 	{
+		const AccountId accountId = accountIdForStream(FAccountManager, AStreamJid);
+		const ConversationId targetId = AContactJid.full();
+		if (!hasSoftwareVersionCapability(FPluginManager, accountId, targetId))
+			return NULL;
+
 		Action *action = new Action(AParent);
 		action->setText(tr("Software Version"));
 		action->setIcon(RSR_STORAGE_MENUICONS,MNI_CLIENTINFO_VERSION);
 		action->setData(ADR_STREAM_JID,AStreamJid.full());
 		action->setData(ADR_CONTACT_JID,AContactJid.full());
 		action->setData(ADR_INFO_TYPES,IClientInfo::SoftwareVersion);
+		action->setData(ADR_ACCOUNT_ID,accountId);
 		connect(action,SIGNAL(triggered(bool)),SLOT(onClientInfoActionTriggered(bool)));
 		return action;
 	}
@@ -841,7 +880,8 @@ void ClientInfo::onRosterIndexContextMenu(const QList<IRosterIndex *> &AIndexes,
 				if (show!=IPresence::Offline && show!=IPresence::Error && !features.contains(NS_JABBER_VERSION))
 				{
 					Action *action = createInfoAction(streamJid,contactJid,NS_JABBER_VERSION,AMenu);
-					AMenu->addAction(action,AG_RVCM_CLIENTINFO,true);
+					if (action)
+						AMenu->addAction(action,AG_RVCM_CLIENTINFO,true);
 				}
 				if ((show == IPresence::Offline || show == IPresence::Error) && !features.contains(NS_JABBER_LAST))
 				{
@@ -875,6 +915,27 @@ void ClientInfo::onClientInfoActionTriggered(bool)
 		Jid streamJid = action->data(ADR_STREAM_JID).toString();
 		Jid contactJid = action->data(ADR_CONTACT_JID).toString();
 		int infoTypes = action->data(ADR_INFO_TYPES).toInt();
+		if (infoTypes == IClientInfo::SoftwareVersion)
+		{
+			const AccountId accountId = action->data(ADR_ACCOUNT_ID).toString();
+			const ConversationId targetId = contactJid.full();
+			if (!hasSoftwareVersionCapability(FPluginManager, accountId, targetId) || !FAccountManager)
+				return;
+
+			const QUuid persistentAccountId = QUuid::fromString(accountId);
+			IAccount *account = persistentAccountId.isNull()
+				? NULL : FAccountManager->accountById(persistentAccountId);
+			if (!account || account->accountId() != persistentAccountId || !account->isActive())
+				return;
+
+			const Jid currentStreamJid = account->streamJid();
+			const IPresence *presence = FPresencePlugin ? FPresencePlugin->findPresence(currentStreamJid) : NULL;
+			if (!presence || !presence->isOpen() || !contactJid.isValid())
+				return;
+
+			showClientInfo(currentStreamJid, contactJid, infoTypes);
+			return;
+		}
 		showClientInfo(streamJid,contactJid,infoTypes);
 	}
 }

@@ -76,6 +76,7 @@ public:
     DeviceState getDeviceState() const { return deviceState; }
     QString getBackend() const { return backend; }
     void setBackend(const QString &backend) { this->backend = backend; }
+    QString localPublicKeyHex() const { return currentPublicKeyHex; }
 
 public slots:
     bool setChannel(int channelIndex, const QString &name, const QByteArray &secret);
@@ -125,6 +126,7 @@ private:
     QString backend;
     QString devicePath;
     QString deviceMacAddress;
+    QString currentPublicKeyHex;
     State protocolState = Idle;
     DeviceState deviceState = UnknownDevice;
     MeshCoreTransport* transport = nullptr;

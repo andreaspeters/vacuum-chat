@@ -4,6 +4,7 @@
 #include <QEventLoop>
 #include <QTimeZone>
 #include <QTimer>
+#include <QSet>
 #include <iostream>
 
 namespace {
@@ -38,6 +39,23 @@ int main(int argc, char **argv)
 	pendingEncryptedEcho.setMetadata(encryptedMetadata);
 
 	bool passed = true;
+	const QString emptyHistoryKey = QStringLiteral("account-stream\n!empty:example.org");
+	QSet<QString> loadingConversations{emptyHistoryKey};
+	QSet<QString> loadedConversations;
+	ProtocolMessageHistory::finishHistoryLoad(loadingConversations, loadedConversations,
+		emptyHistoryKey, false);
+	passed &= check(!loadingConversations.contains(emptyHistoryKey) &&
+		!loadedConversations.contains(emptyHistoryKey),
+		"empty history clears loading without permanently marking the conversation loaded");
+
+	const QString populatedHistoryKey = QStringLiteral("account-stream\n!populated:example.org");
+	loadingConversations.insert(populatedHistoryKey);
+	ProtocolMessageHistory::finishHistoryLoad(loadingConversations, loadedConversations,
+		populatedHistoryKey, true);
+	passed &= check(!loadingConversations.contains(populatedHistoryKey) &&
+		loadedConversations.contains(populatedHistoryKey),
+		"non-empty history clears loading and records completion");
+
 	QList<BasicMessage> encryptedHistory;
 	encryptedHistory.append(localEcho);
 	const auto pendingMerge = ProtocolMessageHistory::mergeTransactionEcho(encryptedHistory,

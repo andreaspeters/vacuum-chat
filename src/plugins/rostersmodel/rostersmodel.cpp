@@ -3,6 +3,33 @@
 
 #include <QTimer>
 
+namespace
+{
+IProtocolPresence *protocolPresenceForStreamId(
+	const QList<IProtocolPresence *> &presences, const QString &streamId)
+{
+	for (IProtocolPresence *presence : presences)
+		if (presence && presence->streamId() == streamId)
+			return presence;
+	return nullptr;
+}
+
+void updateProtocolContactShows(IRosterIndex *parentIndex, int show)
+{
+	if (!parentIndex)
+		return;
+	for (int row = 0; row < parentIndex->childCount(); ++row)
+	{
+		IRosterIndex *child = parentIndex->child(row);
+		if (!child)
+			continue;
+		if (child->type() == RIT_CONTACT)
+			child->setData(RDR_SHOW, show);
+		updateProtocolContactShows(child, show);
+	}
+}
+}
+
 #define INDEX_CHANGES_FOR_RESET 20
 
 RostersModel::RostersModel()
@@ -204,16 +231,24 @@ bool RostersModel::setData(const QModelIndex &AIndex, const QVariant &AValue, in
 IRosterIndex *RostersModel::addProtocolStream(const QString &AAccountId)
 {
 	IRosterIndex *streamIndex = FProtocolStreams.value(AAccountId);
+	IProtocolPresence *presence = protocolPresenceForStreamId(FProtocolPresences, AAccountId);
 	if (!streamIndex && !AAccountId.isEmpty())
 	{
 		streamIndex = createRosterIndex(RIT_STREAM_ROOT, FRootIndex);
 		streamIndex->setRemoveOnLastChildRemoved(false);
 		streamIndex->setData(RDR_ACCOUNT_ID, AAccountId);
 		streamIndex->setData(RDR_NAME, AAccountId);
-		streamIndex->setData(RDR_SHOW, IPresence::Online);
-		streamIndex->setData(RDR_STATUS, QStringLiteral("Online"));
+		streamIndex->setData(RDR_IDENTIFIER_LABEL, QString());
+		streamIndex->setData(RDR_IDENTIFIER_VALUE, QString());
+		streamIndex->setData(RDR_SHOW, presence ? presence->show() : IPresence::Offline);
+		streamIndex->setData(RDR_STATUS, presence ? presence->status() : QStringLiteral("Offline"));
 		FProtocolStreams.insert(AAccountId, streamIndex);
 		insertRosterIndex(streamIndex, FRootIndex);
+	}
+	else if (streamIndex && presence)
+	{
+		streamIndex->setData(RDR_SHOW, presence->show());
+		streamIndex->setData(RDR_STATUS, presence->status());
 	}
 	return streamIndex;
 }
@@ -257,6 +292,8 @@ IRosterIndex *RostersModel::addStream(const Jid &AStreamJid)
 			streamIndex->setRemoveOnLastChildRemoved(false);
 			streamIndex->setData(RDR_STREAM_JID,AStreamJid.pFull());
 			streamIndex->setData(RDR_FULL_JID,AStreamJid.full());
+			streamIndex->setData(RDR_IDENTIFIER_LABEL,tr("Jabber ID"));
+			streamIndex->setData(RDR_IDENTIFIER_VALUE,AStreamJid.uBare());
 			streamIndex->setData(RDR_PREP_FULL_JID,AStreamJid.pFull());
 			streamIndex->setData(RDR_PREP_BARE_JID,AStreamJid.pBare());
 
@@ -630,6 +667,7 @@ void RostersModel::onProtocolPresenceChanged(const QString &AStreamId, int AShow
 		streamIndex->setData(RDR_NAME, AStreamId);
 		streamIndex->setData(RDR_SHOW, AShow);
 		streamIndex->setData(RDR_STATUS, AStatus);
+		updateProtocolContactShows(streamIndex, AShow);
 	}
 }
 
@@ -687,6 +725,9 @@ void RostersModel::rebuildProtocolRoster(IProtocolRoster *roster)
 	IRosterIndex *streamIndex = addProtocolStream(streamId);
 	if (!streamIndex) return;
 	streamIndex->setData(RDR_NAME, streamId);
+	const ProtocolAccountIdentifier identifier = roster->accountIdentifier();
+	streamIndex->setData(RDR_IDENTIFIER_LABEL, identifier.label);
+	streamIndex->setData(RDR_IDENTIFIER_VALUE, identifier.value);
 	FPendingProtocolRoster = roster;
 	FPendingProtocolStreamId = streamId;
 	FPendingDirectGroup = createGroupIndex(RIT_GROUP, tr("Direct Chats"), QStringLiteral("::"), streamIndex);
@@ -735,7 +776,9 @@ void RostersModel::rebuildProtocolRosterBatch()
 		// conversation ID separate; RDR_FULL_JID is only the generic avatar key.
 		index->setData(RDR_AVATAR_KEY, room.avatarKey);
 		index->setData(RDR_ACCOUNT_ID, FPendingProtocolStreamId);
-		index->setData(RDR_SHOW, IPresence::Online);
+		IProtocolPresence *presence = protocolPresenceForStreamId(
+			FProtocolPresences, FPendingProtocolStreamId);
+		index->setData(RDR_SHOW, presence ? presence->show() : IPresence::Offline);
 	}
 	if (FPendingProtocolRoomIndex < FPendingProtocolRooms.size()) {
 		QTimer::singleShot(0, this, [this]() { rebuildProtocolRosterBatch(); });
@@ -852,6 +895,8 @@ void RostersModel::onRosterItemReceived(IRoster *ARoster, const IRosterItem &AIt
 						{
 							itemIndex = createRosterIndex(itemType,groupIndex);
 							itemIndex->setData(RDR_FULL_JID,pitem.itemJid.full());
+							itemIndex->setData(RDR_IDENTIFIER_LABEL,tr("Jabber ID"));
+							itemIndex->setData(RDR_IDENTIFIER_VALUE,pitem.itemJid.uBare());
 							itemIndex->setData(RDR_PREP_FULL_JID,pitem.itemJid.pFull());
 							itemIndex->setData(RDR_PRIORITY,pitem.priority);
 						}
@@ -859,6 +904,8 @@ void RostersModel::onRosterItemReceived(IRoster *ARoster, const IRosterItem &AIt
 						{
 							itemIndex = createRosterIndex(itemType,groupIndex);
 							itemIndex->setData(RDR_FULL_JID,AItem.itemJid.bare());
+							itemIndex->setData(RDR_IDENTIFIER_LABEL,tr("Jabber ID"));
+							itemIndex->setData(RDR_IDENTIFIER_VALUE,AItem.itemJid.uBare());
 							itemIndex->setData(RDR_PREP_FULL_JID,AItem.itemJid.pBare());
 						}
 
@@ -877,6 +924,8 @@ void RostersModel::onRosterItemReceived(IRoster *ARoster, const IRosterItem &AIt
 				else foreach(IRosterIndex *itemIndex, groupItemList)
 				{
 					itemIndex->setData(RDR_NAME,AItem.name);
+					itemIndex->setData(RDR_IDENTIFIER_LABEL,tr("Jabber ID"));
+					itemIndex->setData(RDR_IDENTIFIER_VALUE,AItem.itemJid.uBare());
 					itemIndex->setData(RDR_SUBSCRIBTION,AItem.subscription);
 					itemIndex->setData(RDR_ASK,AItem.ask);
 					itemList.append(itemIndex);
@@ -905,6 +954,8 @@ void RostersModel::onRosterStreamJidChanged(IRoster *ARoster, const Jid &ABefore
 			itemIndex->setData(RDR_STREAM_JID,after.pFull());
 
 		streamIndex->setData(RDR_FULL_JID,after.full());
+		streamIndex->setData(RDR_IDENTIFIER_LABEL,tr("Jabber ID"));
+		streamIndex->setData(RDR_IDENTIFIER_VALUE,after.uBare());
 		streamIndex->setData(RDR_PREP_FULL_JID,after.pFull());
 
 		FStreamsRoot.remove(ABefore);
@@ -953,6 +1004,8 @@ void RostersModel::onPresenceItemReceived(IPresence *APresence, const IPresenceI
 				else
 				{
 					itemIndex->setData(RDR_FULL_JID,AItem.itemJid.bare());
+					itemIndex->setData(RDR_IDENTIFIER_LABEL,tr("Jabber ID"));
+					itemIndex->setData(RDR_IDENTIFIER_VALUE,AItem.itemJid.uBare());
 					itemIndex->setData(RDR_PREP_FULL_JID,AItem.itemJid.pBare());
 					itemIndex->setData(RDR_SHOW,AItem.show);
 					itemIndex->setData(RDR_STATUS,AItem.status);
@@ -1023,6 +1076,8 @@ void RostersModel::onPresenceItemReceived(IPresence *APresence, const IPresenceI
 						}
 
 						itemIndex->setData(RDR_FULL_JID,AItem.itemJid.full());
+						itemIndex->setData(RDR_IDENTIFIER_LABEL,tr("Jabber ID"));
+						itemIndex->setData(RDR_IDENTIFIER_VALUE,AItem.itemJid.uBare());
 						itemIndex->setData(RDR_PREP_FULL_JID,AItem.itemJid.pFull());
 						itemIndex->setData(RDR_SHOW,AItem.show);
 						itemIndex->setData(RDR_STATUS,AItem.status);

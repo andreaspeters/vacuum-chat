@@ -112,8 +112,12 @@ public:
 	QString userId() const { return FUserId; }
 
 	Q_INVOKABLE QString login(const QString &userId, const QString &password, const QString &deviceId = QString());
+	Q_INVOKABLE QString loginForSession(const QString &userId, const QString &password,
+		const QString &deviceId, quint64 sessionGeneration);
 	Q_INVOKABLE void loginWithAccessToken(const QString &userId, const QString &accessToken,
 		const QString &deviceId = QString());
+	Q_INVOKABLE void loginWithAccessTokenForSession(const QString &userId, const QString &accessToken,
+		const QString &deviceId, quint64 sessionGeneration);
 
 	Q_INVOKABLE void logout();  // Clears access token and sync state
 	Q_INVOKABLE void shutdown(); // Abort network activity before thread teardown
@@ -166,13 +170,22 @@ public:
 	Q_INVOKABLE bool markRoomRead(const QString &roomId, const QString &eventId);
 	QList<MatrixTextEvent> messageHistory(const QString &roomId);
 	QList<MatrixTextEvent> historyBackfill(const QString &roomId, int limit);
+	Q_INVOKABLE void setOwnAvatar(const QByteArray &imageData);
+	Q_INVOKABLE void setOwnDisplayName(const QString &displayName);
 
 signals:
 	void connectionStateChanged(int state);  // 0=disconnected, 1=connecting, 2=connected
 	void loginSuccess(const QString &userId, const QString &accessToken,
 		const QString &deviceId);
+	void loginSuccessForSession(const QString &userId, const QString &accessToken,
+		const QString &deviceId, quint64 sessionGeneration);
 	void loginError(const QString &error);
+	void loginErrorForSession(const QString &error, quint64 sessionGeneration);
 	void syncReceived(const QList<MatrixTextEvent> &events);
+	void accountAvatarUpdateFinished(const QString &userId, bool success,
+		const QString &avatarUrl, const QString &error);
+	void accountDisplayNameUpdateFinished(const QString &userId, bool success,
+		const QString &displayName, const QString &error);
 	void initialSyncCompleted();
 	void ssssRecoveryFinished(bool success, const QString &error);
 	void syncError(const QString &error);
@@ -223,6 +236,7 @@ private:
 	void runDatabase(const std::function<void(MatrixDatabase &)> &operation);
 	bool validateAndNormalizeServerUrl(const QString &serverUrl, QString &normalized) const;
 	QString constructUrl(const QString &path) const;
+	void updateOwnAvatarProfile(const QString &userId, const QString &avatarUrl);
 	QString generateTransactionId() const;
 
 	// In-flight request tracking
@@ -305,6 +319,7 @@ private:
 	QStringList FHighlightBodyPatterns;
 	QStringList FHighlightUserPatterns;
 	RequestType FInFlightRequest;
+	quint64 FActiveLoginGeneration = 0;
 	QMap<QString, QJsonObject> FPendingKeyRequests;
 	QSet<QString> FRequestedRoomKeys;
 	QMap<QString, qint64> FRequestedRoomKeyTimes;

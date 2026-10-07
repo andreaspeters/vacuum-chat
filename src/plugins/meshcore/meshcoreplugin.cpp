@@ -6,6 +6,7 @@
 #include <interfaces/iaccountmanager.h>
 #include <interfaces/imessagewidgets.h>
 #include <interfaces/iprotocolaccount.h>
+#include <interfaces/ipresence.h>
 #include <utils/action.h>
 #include <utils/menu.h>
 #include <QTimer>
@@ -50,6 +51,11 @@ MeshCorePlugin::MeshCorePlugin()
     FAccountManager = NULL;
     FMessageWidgets = NULL;
     FSelectedAccount = NULL;
+    FConnectRequested = false;
+    FPresenceShow = IPresence::Offline;
+    FPresenceStatus.clear();
+    FRequestedShow = IPresence::Online;
+    FRequestedStatus.clear();
     FProtocol = NULL;
     FReconnectTimer = new QTimer(this);
     FReconnectTimer->setSingleShot(true);
@@ -64,8 +70,7 @@ MeshCorePlugin::MeshCorePlugin(MeshCoreProtocol *protocol)
     FProtocol = protocol;
     if (FProtocol) {
         FProtocol->setParent(this);
-        connect(FProtocol, &MeshCoreProtocol::messageReceived,
-                this, &MeshCorePlugin::onProtocolMessageReceived, Qt::UniqueConnection);
+        bindProtocolSignals();
     }
 }
 
@@ -83,6 +88,52 @@ MeshCorePlugin::~MeshCorePlugin()
 QObject *MeshCorePlugin::instance()
 {
     return this;
+}
+
+int MeshCorePlugin::show() const
+{
+    return FPresenceShow;
+}
+
+QString MeshCorePlugin::status() const
+{
+    return FPresenceStatus;
+}
+
+bool MeshCorePlugin::setPresence(int AShow, const QString &AStatus)
+{
+    if (!FProtocol || (FSelectedAccount && !FSelectedAccount->isActive()))
+        return false;
+
+    if (AShow == IPresence::Offline) {
+        FConnectRequested = false;
+        if (FReconnectTimer)
+            FReconnectTimer->stop();
+        FReconnectDelayMs = 1000;
+        FProtocol->disconnect();
+        FPresenceShow = IPresence::Offline;
+        FPresenceStatus.clear();
+        emit protocolPresenceChanged(streamId(), FPresenceShow, FPresenceStatus);
+        return true;
+    }
+
+    FConnectRequested = true;
+    FRequestedShow = AShow;
+    FRequestedStatus = AStatus;
+    if (FProtocol->getProtocolState() == MeshCoreProtocol::Connected &&
+        FProtocol->getDeviceState() == MeshCoreProtocol::DeviceReady) {
+        FPresenceShow = FRequestedShow;
+        FPresenceStatus = FRequestedStatus;
+    } else {
+        FPresenceShow = IPresence::Offline;
+        FPresenceStatus.clear();
+        if (FProtocol->getProtocolState() != MeshCoreProtocol::Connecting &&
+            FProtocol->getProtocolState() != MeshCoreProtocol::Connected &&
+            !FProtocol->connectToDevice())
+            scheduleReconnect();
+    }
+    emit protocolPresenceChanged(streamId(), FPresenceShow, FPresenceStatus);
+    return true;
 }
 
 QUuid MeshCorePlugin::pluginUuid() const
@@ -109,11 +160,6 @@ bool MeshCorePlugin::initConnections(IPluginManager *APluginManager, int &AInitO
         ? FPluginManager->pluginInterface("IRostersViewPlugin").value(0, NULL) : NULL;
     if (plugin) {
         FRostersViewPlugin = qobject_cast<IRostersViewPlugin *>(plugin->instance());
-        if (FRostersViewPlugin && FRostersViewPlugin->rostersView())
-            connect(FRostersViewPlugin->rostersView()->instance(),
-                SIGNAL(indexContextMenu(const QList<IRosterIndex *> &, quint32, Menu *)),
-                SLOT(onRostersViewIndexContextMenu(const QList<IRosterIndex *> &, quint32, Menu *)),
-                Qt::UniqueConnection);
     }
 
     plugin = FPluginManager
@@ -171,6 +217,16 @@ QString MeshCorePlugin::accountId() const
     if (FSelectedAccount)
         return FSelectedAccount->accountId().toString();
     return QString();
+}
+
+ProtocolAccountIdentifier MeshCorePlugin::accountIdentifier() const
+{
+    if (!FSelectedAccount || !FProtocol)
+        return {};
+    const QString publicKey = FProtocol->localPublicKeyHex();
+    return publicKey.isEmpty()
+        ? ProtocolAccountIdentifier()
+        : ProtocolAccountIdentifier{tr("MeshCore public key"), publicKey};
 }
 
 QString MeshCorePlugin::protocol() const
@@ -361,9 +417,17 @@ void MeshCorePlugin::activateAccount(IAccount *account)
     if (account == FSelectedAccount && FProtocol)
         return;
 
+    const QString previousStreamId = streamId();
+
     if (FReconnectTimer)
         FReconnectTimer->stop();
+    FConnectRequested = false;
+    FPresenceShow = IPresence::Offline;
+    FPresenceStatus.clear();
     FReconnectDelayMs = 1000;
+
+    if (!previousStreamId.isEmpty())
+        emit protocolPresenceClosed(previousStreamId);
 
     if (FProtocol) {
         FProtocol->disconnect();
@@ -381,32 +445,58 @@ void MeshCorePlugin::activateAccount(IAccount *account)
             : options.value("meshcore.port").toString().trimmed();
 
         FProtocol = new MeshCoreProtocol(this);
-        connect(FProtocol, &MeshCoreProtocol::messageReceived,
-                this, &MeshCorePlugin::onProtocolMessageReceived, Qt::UniqueConnection);
-        connect(FProtocol, &MeshCoreProtocol::contactsChanged,
-                this, &MeshCorePlugin::onContactsChanged);
-        connect(FProtocol, &MeshCoreProtocol::channelsChanged,
-                this, &MeshCorePlugin::onChannelsChanged);
-        connect(FProtocol, &MeshCoreProtocol::deviceStateChanged, this,
-                [this](MeshCoreProtocol::DeviceState state) {
-            if (state == MeshCoreProtocol::DeviceReady) {
-                FReconnectDelayMs = 1000;
-                if (FReconnectTimer)
-                    FReconnectTimer->stop();
-            } else if (state == MeshCoreProtocol::DeviceOffline ||
-                       state == MeshCoreProtocol::DeviceError) {
-                scheduleReconnect();
-            }
-        });
-        connect(FProtocol, &MeshCoreProtocol::disconnected, this,
-                [this]() { scheduleReconnect(); });
+        bindProtocolSignals();
         FProtocol->initialize(endpoint);
         FProtocol->setBackend(backend);
-        if (!FProtocol->connectToDevice())
-            scheduleReconnect();
+        emit protocolPresenceChanged(streamId(), FPresenceShow, FPresenceStatus);
     }
 
     emit protocolRosterChanged();
+}
+
+void MeshCorePlugin::bindProtocolSignals()
+{
+    if (!FProtocol)
+        return;
+
+    connect(FProtocol, &MeshCoreProtocol::messageReceived,
+            this, &MeshCorePlugin::onProtocolMessageReceived, Qt::UniqueConnection);
+    connect(FProtocol, &MeshCoreProtocol::contactsChanged,
+            this, &MeshCorePlugin::onContactsChanged, Qt::UniqueConnection);
+    connect(FProtocol, &MeshCoreProtocol::channelsChanged,
+            this, &MeshCorePlugin::onChannelsChanged, Qt::UniqueConnection);
+    connect(FProtocol, &MeshCoreProtocol::deviceStateChanged, this,
+            [this](MeshCoreProtocol::DeviceState state) {
+        if (state == MeshCoreProtocol::DeviceReady) {
+            FReconnectDelayMs = 1000;
+            if (FReconnectTimer)
+                FReconnectTimer->stop();
+            if (FConnectRequested &&
+                (FPresenceShow != FRequestedShow || FPresenceStatus != FRequestedStatus)) {
+                FPresenceShow = FRequestedShow;
+                FPresenceStatus = FRequestedStatus;
+                emit protocolPresenceChanged(streamId(), FPresenceShow, FPresenceStatus);
+            }
+        } else if ((state == MeshCoreProtocol::DeviceOffline ||
+                    state == MeshCoreProtocol::DeviceError) && FConnectRequested) {
+            if (FPresenceShow != IPresence::Offline || !FPresenceStatus.isEmpty()) {
+                FPresenceShow = IPresence::Offline;
+                FPresenceStatus.clear();
+                emit protocolPresenceChanged(streamId(), FPresenceShow, FPresenceStatus);
+            }
+            scheduleReconnect();
+        }
+    });
+    connect(FProtocol, &MeshCoreProtocol::disconnected, this, [this]() {
+        if (FConnectRequested) {
+            if (FPresenceShow != IPresence::Offline || !FPresenceStatus.isEmpty()) {
+                FPresenceShow = IPresence::Offline;
+                FPresenceStatus.clear();
+                emit protocolPresenceChanged(streamId(), FPresenceShow, FPresenceStatus);
+            }
+            scheduleReconnect();
+        }
+    });
 }
 
 void MeshCorePlugin::onContactsChanged()
@@ -419,37 +509,44 @@ void MeshCorePlugin::onChannelsChanged()
     emit protocolRosterChanged();
 }
 
-void MeshCorePlugin::onRostersViewIndexContextMenu(
-    const QList<IRosterIndex *> &indexes, quint32 labelId, Menu *menu)
+IProtocolCapabilities::Capabilities MeshCorePlugin::capabilitiesForAccount(
+    const AccountId &accountId, const ConversationId &targetId) const
 {
-    if (!menu || labelId != AdvancedDelegateItem::DisplayId || indexes.size() != 1 ||
-        !FAccountManager || !FSelectedAccount)
-        return;
+    if (accountId != this->accountId() || !FSelectedAccount ||
+        !FSelectedAccount->isActive() || !FProtocol)
+        return IProtocolCapabilities::Capabilities();
 
-    IRosterIndex *index = indexes.first();
-    if (!index || index->type() != RIT_STREAM_ROOT)
-        return;
+    const OptionsNode options = FSelectedAccount->optionsNode();
+    const QString backend = FProtocol->getBackend();
+    const bool isConfigured = backend == QStringLiteral("ble")
+        ? !options.value(QStringLiteral("meshcore.mac")).toString().trimmed().isEmpty()
+        : backend == QStringLiteral("usb") &&
+            !options.value(QStringLiteral("meshcore.port")).toString().trimmed().isEmpty();
+    if (!isConfigured)
+        return IProtocolCapabilities::Capabilities();
 
-    const QString clickedAccountId = index->data(RDR_ACCOUNT_ID).toString();
-    IAccount *account = FAccountManager->accountById(FSelectedAccount->accountId());
-    if (!account || !account->isActive() ||
-        account->protocolKind() != IProtocolAccount::ProtocolMeshCore ||
-        account->accountId() != FSelectedAccount->accountId() ||
-        clickedAccountId != account->accountId().toString() || clickedAccountId != streamId())
-        return;
+    IProtocolCapabilities::Capabilities capabilities(IProtocolCapabilities::CapabilitySetPresence);
+    if (FProtocol->getProtocolState() != MeshCoreProtocol::Connected)
+        return capabilities;
 
-    const QString accountId = account->accountId().toString();
-    Action *action = new Action(menu);
-    action->setText(tr("Join MeshCore channel / start direct chat…"));
-    connect(action, &QAction::triggered, this, [this, accountId](bool) {
-        showJoinChatDialog(accountId);
-    });
-    menu->addAction(action, AG_DEFAULT, true);
+    capabilities |= IProtocolCapabilities::CapabilityAddContact;
+    if (!targetId.isEmpty())
+        capabilities |= IProtocolCapabilities::CapabilityViewHistory;
+    return capabilities;
+}
+
+bool MeshCorePlugin::showAddContactDialog(const AccountId &accountId)
+{
+    if (!hasCapabilities(accountId, IProtocolCapabilities::CapabilityAddContact))
+        return false;
+    showJoinChatDialog(accountId);
+    return true;
 }
 
 void MeshCorePlugin::showJoinChatDialog(const QString &boundAccountId)
 {
-    if (!FProtocol || !FSelectedAccount ||
+    if (!FProtocol || !FSelectedAccount || !FSelectedAccount->isActive() ||
+        FProtocol->getProtocolState() != MeshCoreProtocol::Connected ||
         FSelectedAccount->accountId().toString() != boundAccountId)
         return;
 
@@ -518,8 +615,8 @@ void MeshCorePlugin::onProtocolMessageReceived(const BasicMessage &message)
 
 void MeshCorePlugin::scheduleReconnect()
 {
-    if (!FReconnectTimer || !FProtocol || !FSelectedAccount ||
-        !FSelectedAccount->isActive() ||
+    if (!FConnectRequested || !FReconnectTimer || !FProtocol ||
+        (FSelectedAccount && !FSelectedAccount->isActive()) ||
         FProtocol->getProtocolState() == MeshCoreProtocol::Connected ||
         FProtocol->getProtocolState() == MeshCoreProtocol::Connecting ||
         FReconnectTimer->isActive())
@@ -531,7 +628,8 @@ void MeshCorePlugin::scheduleReconnect()
 
 void MeshCorePlugin::attemptReconnect()
 {
-    if (!FProtocol || !FSelectedAccount || !FSelectedAccount->isActive())
+    if (!FConnectRequested || !FProtocol ||
+        (FSelectedAccount && !FSelectedAccount->isActive()))
         return;
     if (FProtocol->getProtocolState() == MeshCoreProtocol::Connected ||
         FProtocol->getProtocolState() == MeshCoreProtocol::Connecting)

@@ -176,6 +176,7 @@ protected:
 	bool processMessage(const Jid &AStreamJid, const Message &AMessage, bool ADirectionIn);
 	IArchiveEngine *findEngineByCapability(quint32 ACapability, const Jid &AStreamJid) const;
 	QMultiMap<int, IArchiveEngine *> engineOrderByCapability(quint32 ACapability, const Jid &AStreamJid) const;
+	bool hasRemoteArchiveCapability(const Jid &AStreamJid) const;
 	void openHistoryOptionsNode(const Jid &AStreamJid);
 	void closeHistoryOptionsNode(const Jid &AStreamJid);
 	Menu *createContextMenu(const Jid &AStreamJid, const QStringList &AContacts, QWidget *AParent) const;

@@ -13,6 +13,10 @@
 #include <interfaces/iprotocolroster.h>
 #include <interfaces/iprotocolmessaging.h>
 #include <interfaces/iprotocolnotifications.h>
+#include <interfaces/iprotocolcapabilities.h>
+#include <interfaces/iprotocolcontactactions.h>
+#include <interfaces/iprotocolaccountavataractions.h>
+#include <interfaces/iprotocolprofileactions.h>
 #include <interfaces/iavatars.h>
 #include <interfaces/iemoticons.h>
 #include <interfaces/irostersview.h>
@@ -26,11 +30,11 @@
 
 class IMessageWidgets;
 
-class Matrix : public QObject, public IPlugin, public IProtocolPresence, public IProtocolRoster, public IProtocolMessaging, public IProtocolNotifications
+class Matrix : public QObject, public IPlugin, public IProtocolPresence, public IProtocolRoster, public IProtocolMessaging, public IProtocolNotifications, public IProtocolCapabilities, public IProtocolContactActions, public IProtocolAccountAvatarActions, public IProtocolProfileActions
 {
 	Q_OBJECT
 	Q_PLUGIN_METADATA(IID "Vacuum.Core.IPlugin/1.0" FILE "matrix.json")
-	Q_INTERFACES(IPlugin IProtocolPresence IProtocolRoster IProtocolMessaging IProtocolNotifications)
+	Q_INTERFACES(IPlugin IProtocolPresence IProtocolRoster IProtocolMessaging IProtocolNotifications IProtocolCapabilities IProtocolContactActions IProtocolAccountAvatarActions IProtocolProfileActions)
 
 public:
 	Matrix();
@@ -45,7 +49,14 @@ public:
 	virtual bool startPlugin();
 	virtual QString streamId() const;
 	virtual bool setPresence(int AShow, const QString &AStatus);
-	virtual QString accountId() const;
+	virtual QString accountId() const override;
+	ProtocolAccountIdentifier accountIdentifier() const override;
+	IProtocolCapabilities::Capabilities capabilitiesForAccount(const AccountId &accountId,
+		const ConversationId &targetId = ConversationId()) const override;
+	bool showAddContactDialog(const AccountId &accountId) override;
+	bool setAccountAvatar(const AccountId &accountId, const QByteArray &imageData) override;
+	bool showProfile(const AccountId &accountId, const UserId &userId) override;
+	bool editProfile(const AccountId &accountId) override;
 	virtual QString protocol() const { return QStringLiteral("matrix"); }
 	virtual QString formatEmoticonForSending(const QString &iconKey) const;
 	virtual QString formatEmoticonsForSending(const QString &text) const;
@@ -119,8 +130,8 @@ private slots:
 	void onAccountHidden(IAccount *AAccount);
 
 	void onLoginSuccess(const QString &AUserId, const QString &AAccessToken,
-		const QString &ADeviceId);
-	void onLoginError(const QString &AError);
+		const QString &ADeviceId, quint64 ASessionGeneration);
+	void onLoginError(const QString &AError, quint64 ASessionGeneration);
 	void onSyncError(const QString &AError);
 	void onInitialSyncCompleted();
 	void onSyncReceived(const QList<MatrixTextEvent> &events);
@@ -132,8 +143,11 @@ private slots:
 	void onRoomNameReceived(const QString &roomId, const QString &roomName);
 	void onNetworkTypingChanged(const ProtocolTypingUpdate &update);
 	void onNetworkNotificationEvent(const MatrixNotificationEvent &event);
-	void onRostersViewIndexContextMenu(const QList<IRosterIndex *> &indexes,
-		quint32 labelId, Menu *menu);
+	void onAccountAvatarUpdateFinished(const QString &userId, bool success,
+		const QString &avatarUrl, const QString &error);
+	void onAccountDisplayNameUpdateFinished(const QString &userId, bool success,
+		const QString &displayName, const QString &error);
+
 
 signals:
 	void protocolPresenceChanged(const QString &AStreamId, int AShow, const QString &AStatus);
@@ -151,6 +165,8 @@ signals:
 		const QStringList &emoji, const QString &decimal);
 
 private:
+	friend class MatrixPresenceLifecycleTestAccess;
+
 	QUuid FUuid;
 	MatrixNetwork *FMatrixNetwork;
 	QThread *FNetworkThread = nullptr;
@@ -212,6 +228,12 @@ private:
 	QByteArray FSsssUserSigningSecret;
 	bool FNetworkLoggedIn = false;
 	bool FNetworkInitialSyncComplete = false;
+	bool FLoginRequested = false;
+	quint64 FLoginGeneration = 0;
+	int FPendingShow = 0;
+	QString FPendingStatus;
+	QString FLoginAccountId;
+	QString FLoginUserId;
 	QString FDeferredVerificationTransactionId;
 	QString FDeferredVerificationUserId;
 	QString FDeferredVerificationDeviceId;

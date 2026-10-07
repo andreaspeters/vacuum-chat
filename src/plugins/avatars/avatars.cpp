@@ -1,5 +1,7 @@
 #include "avatars.h"
+#include "protocolaccountavatarpolicy.h"
 #include <interfaces/iprotocolroster.h>
+#include <interfaces/protocolprofileactionpolicy.h>
 #include <utils/imageloadscheduler.h>
 #include <utils/roundedavatar.h>
 #include <functional>
@@ -11,14 +13,19 @@
 #include <QImageReader>
 #include <QCryptographicHash>
 #include <QPointer>
+#include <QVariant>
 
 #define DIR_AVATARS               "avatars"
 
 #define SHC_PRESENCE              "/presence"
 #define SHC_IQ_AVATAR             "/iq[@type='get']/query[@xmlns='" NS_JABBER_IQ_AVATAR "']"
 
-#define ADR_STREAM_JID            Action::DR_StreamJid
 #define ADR_CONTACT_JID           Action::DR_Parametr1
+#define ADR_ACCOUNT_ID            Action::DR_Parametr2
+#define ADR_PROFILE_ACCOUNT_ID    Action::DR_Parametr1
+#define ADR_PROFILE_TARGET_ID     Action::DR_Parametr2
+#define ADR_PROFILE_IS_EDIT       Action::DR_Parametr3
+#define ADR_PROFILE_BINDING       Action::DR_Parametr4
 
 #define AVATAR_IQ_TIMEOUT         30000
 
@@ -28,6 +35,7 @@
 Avatars::Avatars()
 {
 	FPluginManager = NULL;
+	FAccountManager = NULL;
 	FXmppStreams = NULL;
 	FStanzaProcessor = NULL;
 	FVCardPlugin = NULL;
@@ -62,7 +70,11 @@ bool Avatars::initConnections(IPluginManager *APluginManager, int &/*AInitOrder*
 {
 	FPluginManager = APluginManager;
 
-	IPlugin *plugin = APluginManager->pluginInterface("IXmppStreams").value(0,NULL);
+	IPlugin *plugin = APluginManager->pluginInterface("IAccountManager").value(0,NULL);
+	if (plugin)
+		FAccountManager = qobject_cast<IAccountManager *>(plugin->instance());
+
+	plugin = APluginManager->pluginInterface("IXmppStreams").value(0,NULL);
 	if (plugin)
 	{
 		FXmppStreams = qobject_cast<IXmppStreams *>(plugin->instance());
@@ -704,26 +716,111 @@ bool Avatars::updateIqAvatar(const Jid &AContactJid, const QString &AHash)
 	return true;
 }
 
+AccountId Avatars::accountIdForRoot(const IRosterIndex *AIndex) const
+{
+	if (!AIndex || AIndex->type() != RIT_STREAM_ROOT)
+		return AccountId();
+	const Jid streamJid = AIndex->data(RDR_STREAM_JID).toString();
+	if (streamJid.isValid() && FAccountManager) {
+		IAccount *account = FAccountManager->accountByStream(streamJid);
+		if (account)
+			return account->accountId().toString();
+	}
+
+	const QString protocolStreamId = AIndex->data(RDR_ACCOUNT_ID).toString();
+	if (protocolStreamId.isEmpty() || !FPluginManager)
+		return AccountId();
+	QList<ProtocolAccountAvatarPolicy::ProviderIdentity> providers;
+	for (IPlugin *plugin : FPluginManager->pluginInterface("IProtocolRoster")) {
+		IProtocolRoster *roster = plugin
+			? qobject_cast<IProtocolRoster *>(plugin->instance()) : NULL;
+		if (roster)
+			providers.append({roster->streamId(), roster->accountId()});
+	}
+	for (IPlugin *plugin : FPluginManager->pluginInterface("IProtocolPresence")) {
+		IProtocolPresence *presence = plugin
+			? qobject_cast<IProtocolPresence *>(plugin->instance()) : NULL;
+		if (presence)
+			providers.append({presence->streamId(), presence->accountId()});
+	}
+	return ProtocolAccountAvatarPolicy::accountIdForProtocolStream(protocolStreamId, providers);
+}
+
+IProtocolAccountAvatarActions *Avatars::accountAvatarActions(const AccountId &AAccountId) const
+{
+	if (!FPluginManager || AAccountId.isEmpty())
+		return NULL;
+	for (IPlugin *plugin : FPluginManager->pluginInterface("IProtocolCapabilities")) {
+		QObject *instance = plugin ? plugin->instance() : NULL;
+		IProtocolCapabilities *capabilities = instance
+			? qobject_cast<IProtocolCapabilities *>(instance) : NULL;
+		IProtocolAccountAvatarActions *actions = instance
+			? qobject_cast<IProtocolAccountAvatarActions *>(instance) : NULL;
+		if (ProtocolAccountAvatarPolicy::canOffer(capabilities, actions, AAccountId))
+			return actions;
+	}
+	return NULL;
+}
+
+bool Avatars::profileActionProviderForAccount(const AccountId &AAccountId, const QString &AProviderStreamId,
+	const UserId &AUserId, bool AEdit,
+	IProtocolCapabilities *&ACapabilities, IProtocolProfileActions *&AActions) const
+{
+	ACapabilities = NULL;
+	AActions = NULL;
+	if (!FPluginManager || AAccountId.isEmpty())
+		return false;
+	const auto supportsAction = [AAccountId, AUserId, AEdit](IProtocolCapabilities *capabilities,
+		IProtocolProfileActions *actions) {
+		return AEdit
+			? ProtocolProfileActionPolicy::canEditProfile(capabilities, actions, AAccountId)
+			: ProtocolProfileActionPolicy::canShowProfile(capabilities, actions, AAccountId, AUserId);
+	};
+
+	for (IPlugin *plugin : FPluginManager->pluginInterface("IProtocolCapabilities")) {
+		QObject *instance = plugin ? plugin->instance() : NULL;
+		IProtocolCapabilities *capabilities = instance
+			? qobject_cast<IProtocolCapabilities *>(instance) : NULL;
+		IProtocolProfileActions *actions = instance
+			? qobject_cast<IProtocolProfileActions *>(instance) : NULL;
+		if (!capabilities || !actions)
+			continue;
+		IProtocolRoster *roster = qobject_cast<IProtocolRoster *>(instance);
+		if (!ProtocolProfileActionPolicy::matchesProviderBinding(roster != NULL,
+			roster ? roster->accountId() : AccountId(), roster ? roster->streamId() : QString(),
+			AAccountId, AProviderStreamId))
+			continue;
+		if (supportsAction(capabilities, actions)) {
+			ACapabilities = capabilities;
+			AActions = actions;
+			return true;
+		}
+	}
+	return false;
+}
+
 bool Avatars::isSelectionAccepted(const QList<IRosterIndex *> &ASelected) const
 {
 	static const QList<int> acceptTypes = QList<int>() << RIT_STREAM_ROOT << RIT_CONTACT;
-	if (!ASelected.isEmpty())
-	{
-		int singleType = -1;
-		foreach(IRosterIndex *index, ASelected)
-		{
-			int indexType = index->type();
-			if (!acceptTypes.contains(indexType))
+	if (ASelected.isEmpty())
+		return false;
+	int singleType = -1;
+	foreach(IRosterIndex *index, ASelected) {
+		if (!index)
+			return false;
+		const int indexType = index->type();
+		if (!acceptTypes.contains(indexType) ||
+			(singleType != -1 && singleType != indexType))
+			return false;
+		if (indexType == RIT_STREAM_ROOT) {
+			if (!accountAvatarActions(accountIdForRoot(index)))
 				return false;
-			else if (singleType!=-1 && singleType!=indexType)
-				return false;
-			else if (!FStreamAvatars.contains(index->data(RDR_STREAM_JID).toString()))
-				return false;
-			singleType = indexType;
+		} else if (!FStreamAvatars.contains(index->data(RDR_STREAM_JID).toString())) {
+			return false;
 		}
-		return true;
+		singleType = indexType;
 	}
-	return false;
+	return true;
 }
 
 void Avatars::onStreamOpened(IXmppStream *AXmppStream)
@@ -795,9 +892,16 @@ void Avatars::onRosterIndexContextMenu(const QList<IRosterIndex *> &AIndexes, qu
 	if (ALabelId==AdvancedDelegateItem::DisplayId && isSelectionAccepted(AIndexes))
 	{
 		int indexType = AIndexes.first()->type();
-		QMap<int, QStringList> rolesMap = FRostersViewPlugin->rostersView()->indexesRolesMap(AIndexes,QList<int>()<<RDR_STREAM_JID<<RDR_PREP_BARE_JID);
+		QMap<int, QStringList> rolesMap = FRostersViewPlugin->rostersView()->indexesRolesMap(
+			AIndexes, QList<int>() << RDR_PREP_BARE_JID);
 		if (indexType == RIT_STREAM_ROOT)
 		{
+			QStringList accountIds;
+			foreach (IRosterIndex *index, AIndexes) {
+				const AccountId accountId = accountIdForRoot(index);
+				if (!accountIds.contains(accountId))
+					accountIds.append(accountId);
+			}
 			Menu *avatar = new Menu(AMenu);
 			avatar->setTitle(tr("Avatar"));
 			avatar->setIcon(RSR_STORAGE_MENUICONS,MNI_AVATAR_CHANGE);
@@ -805,14 +909,14 @@ void Avatars::onRosterIndexContextMenu(const QList<IRosterIndex *> &AIndexes, qu
 			Action *setup = new Action(avatar);
 			setup->setText(tr("Set avatar"));
 			setup->setIcon(RSR_STORAGE_MENUICONS,MNI_AVATAR_SET);
-			setup->setData(ADR_STREAM_JID,rolesMap.value(RDR_STREAM_JID));
+			setup->setData(ADR_ACCOUNT_ID, accountIds);
 			connect(setup,SIGNAL(triggered(bool)),SLOT(onSetAvatarByAction(bool)));
 			avatar->addAction(setup,AG_DEFAULT,false);
 
 			Action *clear = new Action(avatar);
 			clear->setText(tr("Clear avatar"));
 			clear->setIcon(RSR_STORAGE_MENUICONS,MNI_AVATAR_REMOVE);
-			clear->setData(ADR_STREAM_JID,rolesMap.value(RDR_STREAM_JID));
+			clear->setData(ADR_ACCOUNT_ID, accountIds);
 			connect(clear,SIGNAL(triggered(bool)),SLOT(onClearAvatarByAction(bool)));
 			avatar->addAction(clear,AG_DEFAULT,false);
 
@@ -839,6 +943,42 @@ void Avatars::onRosterIndexContextMenu(const QList<IRosterIndex *> &AIndexes, qu
 			picture->addAction(clear,AG_DEFAULT,false);
 
 			AMenu->addAction(picture->menuAction(),AG_RVCM_AVATARS,true);
+		}
+	}
+
+	if (ALabelId == AdvancedDelegateItem::DisplayId && AIndexes.count() == 1 && AIndexes.first())
+	{
+		IRosterIndex *index = AIndexes.first();
+		const bool edit = index->type() == RIT_STREAM_ROOT;
+		const bool show = index->type() == RIT_CONTACT || index->type() == RIT_AGENT;
+		IRosterIndex *streamRoot = index;
+		while (streamRoot && streamRoot->type() != RIT_STREAM_ROOT)
+			streamRoot = streamRoot->parentIndex();
+		const AccountId accountId = streamRoot ? accountIdForRoot(streamRoot) : AccountId();
+		const UserId userId = show ? index->data(RDR_IDENTIFIER_VALUE).toString() : UserId();
+		const QString providerStreamId = streamRoot ? streamRoot->data(RDR_ACCOUNT_ID).toString() : QString();
+		IProtocolCapabilities *capabilities = NULL;
+		IProtocolProfileActions *actions = NULL;
+		if ((edit || (show && !userId.isEmpty())) && !accountId.isEmpty() &&
+			profileActionProviderForAccount(accountId, providerStreamId, userId, edit,
+				capabilities, actions)) {
+			Menu *profile = new Menu(AMenu);
+			profile->setTitle(tr("Profile"));
+			profile->setIcon(RSR_STORAGE_MENUICONS, MNI_VCARD);
+
+			Action *profileAction = new Action(profile);
+			profileAction->setText(edit ? tr("Edit Profile") : tr("Show Profile"));
+			profileAction->setIcon(RSR_STORAGE_MENUICONS, MNI_VCARD);
+			profileAction->setData(ADR_PROFILE_ACCOUNT_ID, accountId);
+			profileAction->setData(ADR_PROFILE_TARGET_ID, userId);
+			profileAction->setData(ADR_PROFILE_IS_EDIT, edit);
+			QVariantMap binding;
+			binding.insert(QStringLiteral("providerStreamId"), providerStreamId);
+			profileAction->setData(ADR_PROFILE_BINDING, binding);
+			connect(profileAction, SIGNAL(triggered(bool)), SLOT(onProfileActionByAction(bool)));
+			profile->addAction(profileAction, AG_DEFAULT, false);
+
+			AMenu->addAction(profile->menuAction(), AG_RVCM_VCARD, true);
 		}
 	}
 }
@@ -873,12 +1013,13 @@ void Avatars::onSetAvatarByAction(bool)
 		if (!fileName.isEmpty())
 		{
 			QByteArray data = loadFromFile(fileName);
-			if (!action->data(ADR_STREAM_JID).isNull())
-			{
-				foreach(Jid streamJid, action->data(ADR_STREAM_JID).toStringList())
-					setAvatar(streamJid,data);
-			}
-			else if (!action->data(ADR_CONTACT_JID).isNull())
+			const QStringList accountIds = action->data(ADR_ACCOUNT_ID).toStringList();
+			if (!accountIds.isEmpty()) {
+				foreach (const AccountId &accountId, accountIds) {
+					if (IProtocolAccountAvatarActions *actions = accountAvatarActions(accountId))
+						actions->setAccountAvatar(accountId, data);
+				}
+			} else if (!action->data(ADR_CONTACT_JID).isNull())
 			{
 				foreach(Jid contactJid, action->data(ADR_CONTACT_JID).toStringList())
 					setCustomPictire(contactJid,data);
@@ -892,17 +1033,41 @@ void Avatars::onClearAvatarByAction(bool)
 	Action *action = qobject_cast<Action *>(sender());
 	if (action)
 	{
-		if (!action->data(ADR_STREAM_JID).isNull())
-		{
-			Jid streamJid = action->data(ADR_STREAM_JID).toString();
-			setAvatar(streamJid,QByteArray());
-		}
-		else if (!action->data(ADR_CONTACT_JID).isNull())
+		const QStringList accountIds = action->data(ADR_ACCOUNT_ID).toStringList();
+		if (!accountIds.isEmpty()) {
+			foreach (const AccountId &accountId, accountIds) {
+				if (IProtocolAccountAvatarActions *actions = accountAvatarActions(accountId))
+					actions->setAccountAvatar(accountId, QByteArray());
+			}
+		} else if (!action->data(ADR_CONTACT_JID).isNull())
 		{
 			Jid contactJid = action->data(ADR_CONTACT_JID).toString();
 			setCustomPictire(contactJid,QByteArray());
 		}
 	}
+}
+
+void Avatars::onProfileActionByAction(bool)
+{
+	Action *action = qobject_cast<Action *>(sender());
+	if (!action)
+		return;
+
+	const AccountId accountId = action->data(ADR_PROFILE_ACCOUNT_ID).toString();
+	const UserId userId = action->data(ADR_PROFILE_TARGET_ID).toString();
+	const bool edit = action->data(ADR_PROFILE_IS_EDIT).toBool();
+	const QVariantMap binding = action->data(ADR_PROFILE_BINDING).toMap();
+	IProtocolCapabilities *capabilities = NULL;
+	IProtocolProfileActions *profileActions = NULL;
+	if (!profileActionProviderForAccount(accountId,
+		binding.value(QStringLiteral("providerStreamId")).toString(),
+		userId, edit, capabilities, profileActions))
+		return;
+
+	if (edit)
+		ProtocolProfileActionPolicy::dispatchEditProfile(capabilities, profileActions, accountId);
+	else
+		ProtocolProfileActionPolicy::dispatchShowProfile(capabilities, profileActions, accountId, userId);
 }
 
 void Avatars::onIconStorageChanged()

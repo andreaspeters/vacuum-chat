@@ -143,6 +143,7 @@ protected slots:
 	void onRemoveGroupsContacts(bool);
 protected slots:
 	void onShowAddContactDialog(bool);
+	void onShowProtocolAddContactDialog(bool);
 	void onRosterItemReceived(IRoster *ARoster, const IRosterItem &AItem, const IRosterItem &ABefore);
 	void onRosterClosed(IRoster *ARoster);
 	void onShortcutActivated(const QString &AId, QWidget *AWidget);
@@ -153,6 +154,9 @@ protected slots:
 	void onNotificationRemoved(int ANotifyId);
 	void onSubscriptionDialogDestroyed();
 private:
+	QString protocolAccountIdForRoot(IRosterIndex *AIndex) const;
+	bool showProtocolAddContactDialog(const QString &AAccountId);
+
 	IPluginManager *FPluginManager;
 	IRosterPlugin *FRosterPlugin;
 	IRostersModel *FRostersModel;

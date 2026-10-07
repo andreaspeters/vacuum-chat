@@ -62,8 +62,6 @@ bool VCardPlugin::initConnections(IPluginManager *APluginManager, int &AInitOrde
 		if (FRostersViewPlugin)
 		{
 			FRostersView = FRostersViewPlugin->rostersView();
-			connect(FRostersView->instance(),SIGNAL(indexContextMenu(const QList<IRosterIndex *> &, quint32, Menu *)), 
-				SLOT(onRosterIndexContextMenu(const QList<IRosterIndex *> &, quint32, Menu *)));
 		}
 	}
 
@@ -239,16 +237,20 @@ bool VCardPlugin::publishVCard(IVCard *AVCard, const Jid &AStreamJid)
 
 void VCardPlugin::showVCardDialog(const Jid &AStreamJid, const Jid &AContactJid)
 {
-	if (FVCardDialogs.contains(AContactJid))
+	if (!AStreamJid.isValid() || !AContactJid.isValid())
+		return;
+	const VCardDialogBindingPolicy::DialogKey dialogKey =
+		VCardDialogBindingPolicy::makeDialogKey(AStreamJid.full(), AContactJid.full());
+	if (FVCardDialogs.contains(dialogKey))
 	{
-		VCardDialog *dialog = FVCardDialogs.value(AContactJid);
+		VCardDialog *dialog = FVCardDialogs.value(dialogKey);
 		WidgetManager::showActivateRaiseWindow(dialog);
 	}
-	else if (AStreamJid.isValid() && AContactJid.isValid())
+	else
 	{
 		VCardDialog *dialog = new VCardDialog(this,AStreamJid,AContactJid);
 		connect(dialog,SIGNAL(destroyed(QObject *)),SLOT(onVCardDialogDestroyed(QObject *)));
-		FVCardDialogs.insert(AContactJid,dialog);
+		FVCardDialogs.insert(dialogKey,dialog);
 		dialog->show();
 	}
 }
@@ -323,33 +325,6 @@ void VCardPlugin::onShortcutActivated(const QString &AId, QWidget *AWidget)
 	}
 }
 
-void VCardPlugin::onRosterIndexContextMenu(const QList<IRosterIndex *> &AIndexes, quint32 ALabelId, Menu *AMenu)
-{
-	if (ALabelId==AdvancedDelegateItem::DisplayId && AIndexes.count()==1)
-	{
-		IRosterIndex *index = AIndexes.first();
-		Jid streamJid = index->data(RDR_STREAM_JID).toString();
-		Jid contactJid = index->data(RDR_FULL_JID).toString();
-		IXmppStream *stream = FXmppStreams!=NULL ? FXmppStreams->xmppStream(streamJid) : NULL;
-
-		bool canShowDialog = hasVCard(contactJid);
-		canShowDialog = canShowDialog || (stream!=NULL && stream->isOpen() && (index->type()==RIT_STREAM_ROOT || index->type()==RIT_CONTACT || index->type()==RIT_AGENT));
-		canShowDialog = canShowDialog || (FDiscovery!=NULL && FDiscovery->discoInfo(streamJid,contactJid.bare()).features.contains(NS_VCARD_TEMP));
-
-		if (canShowDialog)
-		{
-			Action *action = new Action(AMenu);
-			action->setText(streamJid.pBare()==contactJid.pBare() ? tr("Edit Profile") : tr("Show Profile"));
-			action->setIcon(RSR_STORAGE_MENUICONS,MNI_VCARD);
-			action->setData(ADR_STREAM_JID,streamJid.full());
-			action->setData(ADR_CONTACT_JID,contactJid.bare());
-			action->setShortcutId(SCT_ROSTERVIEW_SHOWVCARD);
-			AMenu->addAction(action,AG_RVCM_VCARD,true);
-			connect(action,SIGNAL(triggered(bool)),SLOT(onShowVCardDialogByAction(bool)));
-		}
-	}
-}
-
 void VCardPlugin::onMultiUserContextMenu(IMultiUserChatWindow *AWindow, IMultiUser *AUser, Menu *AMenu)
 {
 	Q_UNUSED(AWindow);
@@ -403,8 +378,10 @@ void VCardPlugin::onVCardDialogDestroyed(QObject *ADialog)
 void VCardPlugin::onXmppStreamRemoved(IXmppStream *AXmppStream)
 {
 	foreach(VCardDialog *dialog, FVCardDialogs.values())
+	{
 		if (dialog->streamJid() == AXmppStream->streamJid())
 			delete dialog;
+	}
 }
 
 void VCardPlugin::onChatWindowCreated(IChatWindow *AWindow)

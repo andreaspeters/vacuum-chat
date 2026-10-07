@@ -4,6 +4,8 @@
 #include "protocolmessagehistory.h"
 #include "roomsidebarstate.h"
 #include <interfaces/iemoticons.h>
+#include <interfaces/iprotocolcapabilities.h>
+#include <interfaces/protocolhistoryactionpolicy.h>
 #include <utils/systemtimezonecache.h>
 #include <utils/imageloadscheduler.h>
 #include <utils/animatedtextbrowser.h>
@@ -1046,10 +1048,10 @@ void ChatMessageHandler::renderProtocolHistory(IChatWindow *AWindow, IProtocolMe
 	const QString historyKey = AMessaging->streamId() + QChar('\n') + AWindow->conversationId();
 	FProtocolHistoryLoading.insert(historyKey);
 	const QList<BasicMessage> history = AMessaging->conversationHistory(AWindow->conversationId());
+	ProtocolMessageHistory::finishHistoryLoad(FProtocolHistoryLoading, FProtocolHistoryLoaded,
+		historyKey, !history.isEmpty());
 	if (history.isEmpty())
 		return;
-	FProtocolHistoryLoading.remove(historyKey);
-	FProtocolHistoryLoaded.insert(historyKey);
 	FProtocolConversationMessages.insert(historyKey, history);
 	for (const BasicMessage &message : history)
 		renderProtocolMessage(AWindow, AMessaging, message);
@@ -2250,6 +2252,54 @@ void ChatMessageHandler::onArchiveRequestFailed(const QString &AId, const XmppEr
 	}
 }
 
+IProtocolMessaging *ChatMessageHandler::findLocalHistoryProvider(const QString &ARosterStreamId,
+	IProtocolRoster *&AProviderRoster, IProtocolCapabilities *&ACapabilities) const
+{
+	AProviderRoster = nullptr;
+	ACapabilities = nullptr;
+	if (!FPluginManager || ARosterStreamId.isEmpty())
+		return nullptr;
+
+	const QList<IPlugin *> providers = FPluginManager->pluginInterface("IProtocolMessaging");
+	for (IPlugin *plugin : providers)
+	{
+		QObject *instance = plugin ? plugin->instance() : nullptr;
+		IProtocolMessaging *messaging = qobject_cast<IProtocolMessaging *>(instance);
+		IProtocolRoster *roster = qobject_cast<IProtocolRoster *>(instance);
+		IProtocolCapabilities *capabilities = qobject_cast<IProtocolCapabilities *>(instance);
+		if (!messaging || !roster || !capabilities || roster->streamId() != ARosterStreamId ||
+			messaging->streamId() != roster->streamId())
+			continue;
+
+		AProviderRoster = roster;
+		ACapabilities = capabilities;
+		return messaging;
+	}
+	return nullptr;
+}
+
+void ChatMessageHandler::showLocalConversationHistory(const QString &ARosterStreamId,
+	const ConversationId &AConversationId)
+{
+	if (!FMessageWidgets)
+		return;
+
+	IProtocolRoster *roster = nullptr;
+	IProtocolCapabilities *capabilities = nullptr;
+	IProtocolMessaging *messaging = findLocalHistoryProvider(ARosterStreamId, roster, capabilities);
+	if (!messaging || !roster || !capabilities ||
+		!ProtocolHistoryActionPolicy::canViewLocalConversationHistory(capabilities,
+			roster->accountId(), messaging->streamId(), ARosterStreamId, AConversationId))
+		return;
+
+	IChatWindow *window = FMessageWidgets->getConversationWindow(messaging->streamId(), AConversationId);
+	if (!window)
+		return;
+	setupProtocolWindow(window, messaging);
+	renderProtocolHistory(window, messaging);
+	window->showTabPage();
+}
+
 void ChatMessageHandler::onRosterIndexContextMenu(const QList<IRosterIndex *> &AIndexes, quint32 ALabelId, Menu *AMenu)
 {
 	if (ALabelId==AdvancedDelegateItem::DisplayId && isSelectionAccepted(AIndexes))
@@ -2284,6 +2334,28 @@ void ChatMessageHandler::onRosterIndexContextMenu(const QList<IRosterIndex *> &A
 						setMessageNotificationMuted(streamId,targetId,AMuted);
 					});
 					AMenu->addAction(mute,AG_RVCM_CHATMESSAGEHANDLER,true);
+				}
+				const QString rosterStreamId = accountId;
+				if (!conversationId.isEmpty() && !rosterStreamId.isEmpty() && FMessageWidgets)
+				{
+					IProtocolRoster *providerRoster = nullptr;
+					IProtocolCapabilities *capabilities = nullptr;
+					IProtocolMessaging *messaging = findLocalHistoryProvider(
+						rosterStreamId, providerRoster, capabilities);
+					if (messaging && providerRoster && capabilities &&
+						ProtocolHistoryActionPolicy::canViewLocalConversationHistory(capabilities,
+							providerRoster->accountId(), messaging->streamId(), rosterStreamId,
+							conversationId))
+					{
+						Action *historyAction = new Action(AMenu);
+						historyAction->setText(tr("View local conversation history"));
+						historyAction->setIcon(RSR_STORAGE_MENUICONS,MNI_HISTORY);
+						connect(historyAction, &QAction::triggered, this,
+							[this, rosterStreamId, conversationId]() {
+								showLocalConversationHistory(rosterStreamId, conversationId);
+							});
+						AMenu->addAction(historyAction,AG_RVCM_CHATMESSAGEHANDLER,true);
+					}
 				}
 			}
 		}
