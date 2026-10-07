@@ -695,6 +695,7 @@ bool Matrix::initObjects()
 	FNetworkThread->start();
 	qRegisterMetaType<QList<MatrixCachedRoom>>();
 	qRegisterMetaType<QList<MatrixTimelineEvent>>();
+	qRegisterMetaType<MatrixHistoryPageResult>();
 	qRegisterMetaType<MatrixNotificationEvent>();
 	FDatabaseThread = new QThread();
 	FDatabaseThread->setObjectName(QStringLiteral("MatrixDatabaseThread"));
@@ -708,6 +709,8 @@ bool Matrix::initObjects()
 		this, &Matrix::onCachedHistoryLoaded, Qt::QueuedConnection);
 	connect(FDatabaseWorker, &MatrixDatabaseWorker::historyLoadFailed,
 		this, &Matrix::onCachedHistoryLoadFailed, Qt::QueuedConnection);
+	connect(FDatabaseWorker, &MatrixDatabaseWorker::historyPageLoaded,
+		this, &Matrix::onHistoryPageLoaded, Qt::QueuedConnection);
 	connect(FDatabaseWorker, &MatrixDatabaseWorker::completeCrossSigningKeysChecked,
 		this, &Matrix::onCompleteCrossSigningKeysChecked, Qt::QueuedConnection);
 	FDatabaseThread->start();
@@ -981,6 +984,44 @@ void Matrix::onCachedHistoryLoaded(const QString &roomId,
 		FCachedHistoryBatchScheduled = true;
 		QTimer::singleShot(0, this, &Matrix::emitCachedHistoryBatch);
 	}
+}
+
+void Matrix::onHistoryPageLoaded(const QString &roomId,
+	const MatrixHistoryPageResult &result)
+{
+	if (!FPendingHistoryPageRequests.contains(roomId))
+		return;
+	const PendingHistoryPageRequest pending = FPendingHistoryPageRequests.take(roomId);
+	ProtocolHistoryPage page;
+	page.success = result.success;
+	page.hasMore = result.hasMore;
+	if (result.success) {
+		for (const MatrixTimelineEvent &event : result.events) {
+			BasicMessage message(event.eventId, roomId, event.sender, QString(), event.content,
+				MatrixTimestamps::fromUnixMilliseconds(event.originTs), QStringLiteral("matrix"),
+				BasicMessage::Incoming);
+			QVariantMap metadata = event.metadata;
+			metadata.insert(QStringLiteral("historical"), true);
+			metadata.insert(QStringLiteral("sender_is_self"), FNetworkUserId == event.sender);
+			message.setMetadata(metadata);
+			page.messages.append(message);
+		}
+		if (FMatrixNetwork && !result.events.isEmpty()) {
+			MatrixNetwork *network = FMatrixNetwork;
+			const QList<MatrixTimelineEvent> events = result.events;
+			QMetaObject::invokeMethod(network, [network, roomId, events]() {
+				network->requestHistoricalImages(roomId, events);
+			}, Qt::QueuedConnection);
+		}
+	}
+	if (!pending.callbackContext || !pending.callback)
+		return;
+	const QPointer<QObject> context = pending.callbackContext;
+	const ProtocolHistoryPageCallback callback = pending.callback;
+	QMetaObject::invokeMethod(context.data(), [context, callback, page]() {
+		if (context)
+			callback(page);
+	}, Qt::QueuedConnection);
 }
 
 void Matrix::emitCachedHistoryBatch()
@@ -1303,6 +1344,46 @@ QList<BasicMessage> Matrix::conversationHistory(const QString &conversationId) c
 		}
 	}
 	return result;
+}
+
+bool Matrix::supportsOlderHistory(const ConversationId &conversationId) const
+{
+	return !conversationId.isEmpty() && FDatabaseWorker &&
+		!FDatabaseProfileDirectory.isEmpty() && !FDatabaseServerUrl.isEmpty() &&
+		!FDatabaseUserId.isEmpty();
+}
+
+bool Matrix::requestOlderHistoryPage(const ConversationId &conversationId,
+	const BasicMessage &beforeMessage, int limit, QObject *callbackContext,
+	ProtocolHistoryPageCallback callback)
+{
+	if (!supportsOlderHistory(conversationId) || beforeMessage.conversationId() != conversationId ||
+		!beforeMessage.timestamp().isValid() || beforeMessage.messageId().isEmpty() ||
+		limit <= 0 || !callbackContext || !callback ||
+		FPendingHistoryPageRequests.contains(conversationId))
+		return false;
+
+	PendingHistoryPageRequest pending;
+	pending.callbackContext = callbackContext;
+	pending.callback = callback;
+	FPendingHistoryPageRequests.insert(conversationId, pending);
+	MatrixDatabaseWorker *worker = FDatabaseWorker;
+	const QString profileDirectory = FDatabaseProfileDirectory;
+	const QString serverUrl = FDatabaseServerUrl;
+	const QString userId = FDatabaseUserId;
+	const QString roomId = conversationId;
+	const int pageLimit = qMin(limit, 30);
+	const qint64 beforeOriginTs = beforeMessage.timestamp().toMSecsSinceEpoch();
+	const QString beforeEventId = beforeMessage.messageId();
+	const bool queued = QMetaObject::invokeMethod(worker,
+		[worker, profileDirectory, serverUrl, userId, roomId, pageLimit,
+			beforeOriginTs, beforeEventId]() {
+			worker->loadHistoryPage(profileDirectory, serverUrl, userId, roomId,
+				pageLimit, beforeOriginTs, beforeEventId);
+		}, Qt::QueuedConnection);
+	if (!queued)
+		FPendingHistoryPageRequests.remove(conversationId);
+	return queued;
 }
 
 void Matrix::setActiveConversation(const QString &conversationId) const

@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QMap>
 #include <QSet>
+#include <QPointer>
 #include <QUuid>
 #include <QUrl>
 #include <interfaces/ipluginmanager.h>
@@ -86,6 +87,10 @@ public:
 	virtual bool supportsTyping(const ConversationId &conversationId) const;
 	virtual void setTyping(const ConversationId &conversationId, ProtocolTypingStatus status);
 	virtual QList<BasicMessage> conversationHistory(const QString &conversationId) const;
+	bool supportsOlderHistory(const ConversationId &conversationId) const override;
+	bool requestOlderHistoryPage(const ConversationId &conversationId,
+		const BasicMessage &beforeMessage, int limit, QObject *callbackContext,
+		ProtocolHistoryPageCallback callback) override;
 	virtual void setActiveConversation(const QString &conversationId) const override;
 	virtual void loadConversationAvatars(const QString &conversationId) const override;
 	virtual void loadUserAvatar(const QString &conversationId, const QString &userId) const override;
@@ -204,6 +209,7 @@ private:
 	void onCachedRoomsLoadFailed(const QString &error);
 	void onCachedHistoryLoaded(const QString &roomId, const QList<MatrixTimelineEvent> &events);
 	void onCachedHistoryLoadFailed(const QString &roomId, const QString &error);
+	void onHistoryPageLoaded(const QString &roomId, const MatrixHistoryPageResult &result);
 	void emitCachedHistoryBatch();
 	void queueOrEmitHistoryMessage(const BasicMessage &message);
 	void finishHistoryLoad(const QString &roomId);
@@ -253,6 +259,12 @@ private:
 	mutable QSet<QString> FHistoryLoadingRooms;
 	QSet<QString> FHistoryQueuedRooms;
 	mutable QMap<QString, QList<BasicMessage>> FPendingHistoryMessages;
+	struct PendingHistoryPageRequest
+	{
+		QPointer<QObject> callbackContext;
+		ProtocolHistoryPageCallback callback;
+	};
+	QMap<QString, PendingHistoryPageRequest> FPendingHistoryPageRequests;
 
 };
 
