@@ -2,6 +2,7 @@
 #define CHATMESSAGEHANDLER_H
 
 #include "protocolmessagehistory.h"
+#include "protocolmessagestatus.h"
 
 #define CHATMESSAGEHANDLER_UUID QUuid("{b60cc0e4-8006-4909-b926-fcb3cbc506f0}")
 
@@ -139,6 +140,8 @@ protected:
 		const QString &eventId);
 	void updateProtocolReactionDecoration(IChatWindow *AWindow, const QString &targetKey,
 		const QString &targetEventId);
+	void updateProtocolMessageStatusDecoration(IChatWindow *AWindow,
+		IProtocolMessaging *AMessaging, const BasicMessage &AMessage);
 	void removeNotifiedMessages(IChatWindow *AWindow);
 	void showHistory(IChatWindow *AWindow);
 	void setMessageStyle(IChatWindow *AWindow);
@@ -157,6 +160,10 @@ protected slots:
 		const QTextDocumentFragment &ASelection, Menu *AMenu);
 	void onProtocolRosterChanged();
 	void onProtocolAvatarUpdated(const QString &key);
+	void onProtocolMessageDeliveryChanged(const QString &conversationId,
+		const QString &transactionId, const QString &status, const QString &serverEventId);
+	void onProtocolMessageReadReceiptReceived(const QString &conversationId,
+		const QString &eventId, const QString &readerId, const QString &readerDisplayName);
 	void onProtocolUrlClicked(const QUrl &AUrl);
 	void onMessageReady();
 	void onWindowActivated();
@@ -182,6 +189,7 @@ private:
 	IMessageProcessor *FMessageProcessor;
 	IPluginManager *FPluginManager;
 	QList<IProtocolMessaging *> FProtocolMessaging;
+	ProtocolMessageStatus::StateStore FProtocolMessageStatus;
 	IProtocolRoster *FProtocolRoster;
 	IMessageStyles *FMessageStyles;
 	IPresencePlugin *FPresencePlugin;
@@ -203,6 +211,7 @@ private:
 	QSet<QString> FProtocolRenderedMessages;
 	QMap<QString, ProtocolReactionSource> FProtocolReactionEvents;
 	QMap<QString, QMap<QString, QMap<QString, QSet<QString>>>> FProtocolReactionSenders;
+	QSet<QString> FProtocolReadyAvatarKeys;
 	QMap<QString, QString> FProtocolEventMessageIds;
 	QMap<QString, bool> FProtocolMessageDirections;
 	QMap<QString, QString> FProtocolMessageRelationTypes;

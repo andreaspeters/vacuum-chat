@@ -54,6 +54,8 @@ public:
     { (void)conversationId; return false; }
     virtual bool providesAvatarUpdateSignals() const { return false; }
     virtual bool providesHistoryLoadedSignals() const { return false; }
+    virtual bool providesMessageDeliverySignals() const { return false; }
+    virtual bool providesReadReceiptSignals() const { return false; }
     virtual bool supportsConversationMedia() const { return false; }
     virtual bool supportsFileTransfer() const { return false; }
     virtual bool isEventIdLike(const QString &eventId) const

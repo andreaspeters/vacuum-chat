@@ -423,6 +423,12 @@ bool ChatMessageHandler::startPlugin()
 				if (messaging->providesHistoryLoadedSignals())
 					connect(plugin->instance(), SIGNAL(protocolHistoryLoaded(QString)),
 						this, SLOT(onProtocolHistoryLoaded(QString)), Qt::UniqueConnection);
+				if (messaging->providesMessageDeliverySignals())
+					connect(plugin->instance(), SIGNAL(protocolMessageDeliveryChanged(QString,QString,QString,QString)),
+						this, SLOT(onProtocolMessageDeliveryChanged(QString,QString,QString,QString)), Qt::UniqueConnection);
+				if (messaging->providesReadReceiptSignals())
+					connect(plugin->instance(), SIGNAL(protocolMessageReadReceiptReceived(QString,QString,QString,QString)),
+						this, SLOT(onProtocolMessageReadReceiptReceived(QString,QString,QString,QString)), Qt::UniqueConnection);
 			}
 		}
 	}
@@ -556,6 +562,9 @@ void ChatMessageHandler::onProtocolRosterChanged()
 
 void ChatMessageHandler::onProtocolAvatarUpdated(const QString &key)
 {
+	IProtocolMessaging *updatedProvider = qobject_cast<IProtocolMessaging *>(sender());
+	if (updatedProvider && !key.isEmpty())
+		FProtocolReadyAvatarKeys.insert(updatedProvider->streamId() + QChar('\n') + key);
 	for (QWidget *widget : QApplication::allWidgets()) {
 		QLabel *avatar = qobject_cast<QLabel *>(widget);
 		if (!avatar || avatar->property("avatarKey").toString() != key)
@@ -579,6 +588,23 @@ void ChatMessageHandler::onProtocolAvatarUpdated(const QString &key)
 					window->infoWidget()->setField(IInfoWidget::ContactAvatar, avatarPath);
 				break;
 			}
+	}
+	if (!updatedProvider || key.isEmpty())
+		return;
+	for (IChatWindow *window : FWindows) {
+		if (!window || window->accountId() != updatedProvider->streamId() ||
+			window->conversationId().isEmpty())
+			continue;
+		const QString historyKey = updatedProvider->streamId() + QChar('\n') + window->conversationId();
+		for (const BasicMessage &message : FProtocolConversationMessages.value(historyKey)) {
+			const ProtocolMessageStatus::MessageState state = FProtocolMessageStatus.stateFor(
+				updatedProvider->streamId(), window->conversationId(), message.messageId());
+			for (const ProtocolMessageStatus::Reader &reader : state.readers)
+				if (updatedProvider->userAvatarKey(window->conversationId(), reader.userId) == key) {
+					updateProtocolMessageStatusDecoration(window, updatedProvider, message);
+					break;
+				}
+		}
 	}
 }
 
@@ -692,6 +718,48 @@ void ChatMessageHandler::onProtocolMessageReceived(const BasicMessage &AMessage)
 			renderProtocolMessage(window, messaging, AMessage);
 		return;
 	}
+}
+
+void ChatMessageHandler::onProtocolMessageDeliveryChanged(const QString &conversationId,
+	const QString &transactionId, const QString &status, const QString &serverEventId)
+{
+	IProtocolMessaging *messaging = qobject_cast<IProtocolMessaging *>(sender());
+	if (!messaging || !FMessageWidgets || conversationId.isEmpty())
+		return;
+	FProtocolMessageStatus.updateDelivery(messaging->streamId(), conversationId,
+		transactionId, status, serverEventId);
+	const QString prefix = messaging->streamId() + QChar('\n') + conversationId + QChar('\n');
+	if (!serverEventId.isEmpty() && !transactionId.isEmpty()) {
+		FProtocolEventMessageIds.insert(prefix + serverEventId, transactionId);
+		FProtocolMessageDirections.insert(prefix + serverEventId, true);
+	}
+	IChatWindow *window = FMessageWidgets->findConversationWindow(messaging->streamId(), conversationId);
+	if (!window)
+		return;
+	const QString historyKey = messaging->streamId() + QChar('\n') + conversationId;
+	for (const BasicMessage &message : FProtocolConversationMessages.value(historyKey))
+		if ((!transactionId.isEmpty() && message.messageId() == transactionId) ||
+			(!serverEventId.isEmpty() && message.messageId() == serverEventId))
+			updateProtocolMessageStatusDecoration(window, messaging, message);
+}
+
+void ChatMessageHandler::onProtocolMessageReadReceiptReceived(const QString &conversationId,
+	const QString &eventId, const QString &readerId, const QString &readerDisplayName)
+{
+	IProtocolMessaging *messaging = qobject_cast<IProtocolMessaging *>(sender());
+	if (!messaging || !FMessageWidgets || conversationId.isEmpty() || eventId.isEmpty())
+		return;
+	FProtocolMessageStatus.updateReadReceipt(messaging->streamId(), conversationId,
+		eventId, readerId, readerDisplayName);
+	IChatWindow *window = FMessageWidgets->findConversationWindow(messaging->streamId(), conversationId);
+	if (!window)
+		return;
+	const QString historyKey = messaging->streamId() + QChar('\n') + conversationId;
+	const QString eventKey = historyKey + QChar('\n') + eventId;
+	const QString displayMessageId = FProtocolEventMessageIds.value(eventKey, eventId);
+	for (const BasicMessage &message : FProtocolConversationMessages.value(historyKey))
+		if (message.messageId() == eventId || message.messageId() == displayMessageId)
+			updateProtocolMessageStatusDecoration(window, messaging, message);
 }
 
 void ChatMessageHandler::onProtocolHistoryLoaded(const QString &ARoomId)
@@ -1138,6 +1206,7 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 	FProtocolMessageRelationTypes.insert(eventKey,
 		AMessage.metadata().value(QStringLiteral("relation_type")).toString());
 	updateProtocolReactionDecoration(AWindow, eventKey, AMessage.messageId());
+	updateProtocolMessageStatusDecoration(AWindow, AMessaging, AMessage);
 }
 
 static QString buildProtocolReplyPreviewHtml(const QList<BasicMessage> &history,
@@ -1346,6 +1415,41 @@ void ChatMessageHandler::removeProtocolReaction(IChatWindow *AWindow, const QStr
 	}
 	const QString targetEventId = source.targetKey.mid(eventPrefix.size());
 	updateProtocolReactionDecoration(AWindow, source.targetKey, targetEventId);
+}
+
+void ChatMessageHandler::updateProtocolMessageStatusDecoration(IChatWindow *AWindow,
+	IProtocolMessaging *AMessaging, const BasicMessage &AMessage)
+{
+	if (!AWindow || !AMessaging || AMessage.messageId().isEmpty())
+		return;
+	const QString conversationId = AMessage.conversationId();
+	const QString prefix = AMessaging->streamId() + QChar('\n') + conversationId + QChar('\n');
+	const QString eventKey = prefix + AMessage.messageId();
+	const QString displayMessageId = FProtocolEventMessageIds.value(eventKey, AMessage.messageId());
+	const ProtocolMessageStatus::MessageState state = FProtocolMessageStatus.stateFor(
+		AMessaging->streamId(), conversationId, AMessage.messageId());
+	const bool outgoing = FProtocolMessageDirections.value(eventKey, false);
+	QList<QString> readerNames;
+	QList<QString> avatarUrls;
+	QTextEdit *view = qobject_cast<QTextEdit *>(AWindow->viewWidget()->styleWidget());
+	if (outgoing) {
+		for (const ProtocolMessageStatus::Reader &reader : state.readers) {
+			const QString name = reader.displayName.trimmed().isEmpty() ? reader.userId : reader.displayName;
+			readerNames.append(name);
+			const QString avatarKey = AMessaging->userAvatarKey(conversationId, reader.userId);
+			const QString avatarPath = AMessaging->userAvatarPath(conversationId, reader.userId);
+			QString avatarUrl;
+			AMessaging->loadUserAvatar(conversationId, reader.userId);
+			if (view && !avatarPath.isEmpty() &&
+				FProtocolReadyAvatarKeys.contains(AMessaging->streamId() + QChar('\n') + avatarKey))
+				avatarUrl = cacheReplyAvatarResource(view, avatarPath, this);
+			avatarUrls.append(avatarUrl);
+		}
+	}
+	const QString html = ProtocolMessageStatus::buildReadReceiptFooter(
+		outgoing && state.sentSuccessfully, readerNames, avatarUrls);
+	AWindow->viewWidget()->setMessageDecoration(displayMessageId,
+		QStringLiteral("protocol-message-status"), html);
 }
 
 void ChatMessageHandler::updateProtocolReactionDecoration(IChatWindow *AWindow,

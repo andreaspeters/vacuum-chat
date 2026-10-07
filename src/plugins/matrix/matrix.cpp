@@ -840,6 +840,8 @@ void Matrix::onAccountShown(IAccount *AAccount)
 		&Matrix::onSsssRecoveryFinished, Qt::UniqueConnection);
 	connect(FMatrixNetwork, SIGNAL(messageDeliveryChanged(QString,QString,QString,QString)),
 		this, SIGNAL(protocolMessageDeliveryChanged(QString,QString,QString,QString)), Qt::UniqueConnection);
+	connect(FMatrixNetwork, &MatrixNetwork::receiptReceived, this,
+		&Matrix::onNetworkReceiptReceived, Qt::UniqueConnection);
 
 	// SQLite cache is available offline; loading it must not depend on login or /sync.
 	loadRoomsFromDatabase();
@@ -1689,6 +1691,24 @@ void Matrix::onNetworkTypingChanged(const ProtocolTypingUpdate &update)
 	ProtocolTypingUpdate translated = update;
 	translated.accountId = FStreamId;
 	emit protocolTypingChanged(translated);
+}
+
+void Matrix::onNetworkReceiptReceived(const MatrixReceipt &receipt)
+{
+	if (receipt.receiptType != QStringLiteral("m.read") || receipt.roomId.isEmpty() ||
+		receipt.eventId.isEmpty() || receipt.userId.isEmpty() || receipt.userId == FNetworkUserId)
+		return;
+
+	QString readerDisplayName = receipt.userId;
+	const ProtocolRoom currentRoom = room(receipt.roomId);
+	for (const ProtocolRosterEntry &member : currentRoom.members)
+		if (member.id == receipt.userId) {
+			if (!member.name.trimmed().isEmpty())
+				readerDisplayName = member.name;
+			break;
+		}
+	emit protocolMessageReadReceiptReceived(receipt.roomId, receipt.eventId,
+		receipt.userId, readerDisplayName);
 }
 
 void Matrix::onNetworkNotificationEvent(const MatrixNotificationEvent &event)

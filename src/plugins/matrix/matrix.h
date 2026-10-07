@@ -74,6 +74,8 @@ public:
 	{ return supportsReactions(conversationId); }
 	virtual bool providesAvatarUpdateSignals() const override { return true; }
 	virtual bool providesHistoryLoadedSignals() const override { return true; }
+	virtual bool providesMessageDeliverySignals() const override { return true; }
+	virtual bool providesReadReceiptSignals() const override { return true; }
 	virtual bool supportsConversationMedia() const override { return true; }
 	virtual bool supportsFileTransfer() const override { return true; }
 	virtual bool sendReaction(const ConversationId &conversationId, const MessageId &eventId,
@@ -147,6 +149,7 @@ private slots:
 	void onDisplayNameReceived(const QString &userId, const QString &displayName);
 	void onRoomNameReceived(const QString &roomId, const QString &roomName);
 	void onNetworkTypingChanged(const ProtocolTypingUpdate &update);
+	void onNetworkReceiptReceived(const MatrixReceipt &receipt);
 	void onNetworkNotificationEvent(const MatrixNotificationEvent &event);
 	void onAccountAvatarUpdateFinished(const QString &userId, bool success,
 		const QString &avatarUrl, const QString &error);
@@ -164,6 +167,8 @@ signals:
 	void protocolTypingChanged(const ProtocolTypingUpdate &update);
 	void protocolMessageDeliveryChanged(const QString &conversationId, const QString &transactionId,
 		const QString &status, const QString &serverEventId);
+	void protocolMessageReadReceiptReceived(const QString &conversationId, const QString &eventId,
+		const QString &readerId, const QString &readerDisplayName);
 	void protocolNotificationsChanged();
 	void protocolVerificationStateChanged(const QString &transactionId, const QString &state);
 	void protocolVerificationSasAvailable(const QString &transactionId,

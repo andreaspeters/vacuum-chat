@@ -9,6 +9,12 @@ include("chatmessagehandler.cmake")
 include("${CMAKE_SOURCE_DIR}/src/plugins/plugins.cmake")
 
 if (BUILD_TESTING)
+	add_executable(chatmessagehandler_message_status_tests EXCLUDE_FROM_ALL
+		protocolmessagestatus.cpp protocolmessagestatus_test.cpp)
+	target_include_directories(chatmessagehandler_message_status_tests PRIVATE
+		"${CMAKE_CURRENT_SOURCE_DIR}")
+	target_compile_features(chatmessagehandler_message_status_tests PRIVATE cxx_std_11)
+	target_link_libraries(chatmessagehandler_message_status_tests PRIVATE Qt6::Core)
 	add_executable(chatmessagehandler_matrix_reply_tests EXCLUDE_FROM_ALL
 		matrixreply_test.cpp)
 	target_compile_features(chatmessagehandler_matrix_reply_tests PRIVATE cxx_std_11)
