@@ -229,6 +229,7 @@ private slots:
 	void onSyncFinished(QNetworkReply *reply);
 	void onSendFinished(QNetworkReply *reply);
 	void onReplyError(QNetworkReply *reply);
+	void onRoomEncryptionStateFinished(QNetworkReply *reply);
 
 private:
 	friend class MatrixNetworkTestAccess;
@@ -276,6 +277,7 @@ private:
 	bool validateRecoveredMasterSecret();
 	bool isOwnDeviceCrossSigningVerified(const QString &deviceId) const;
 	void changeRoomMembership(const QString &roomId, const QString &action);
+	void requestRoomEncryptionState(const QString &roomId);
 	void queryDeviceKeysForRoom(const QString &roomId);
 
 	QString FServerUrl;
@@ -295,6 +297,9 @@ private:
 	QSet<QString> FDirectRoomIds;
 	QSet<QString> FDisplayNameRequests;
 	QSet<QString> FRoomNameRequests;
+	QMap<QString, quint64> FRoomEncryptionStateRequests;
+	quint64 FRoomEncryptionStateQueryCounter = 0;
+	QMap<QString, QJsonArray> FPendingRoomEncryptionSends;
 	QSet<QString> FPendingOlmRecoveryDevices;
 	QMap<QString, QPair<QString, QJsonObject>> FPendingForcedOlmEvents;
 	QSet<QString> FJoinedMembersRequests;

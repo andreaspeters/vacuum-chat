@@ -7,6 +7,9 @@
 
 #include <QTimer>
 #include <QSet>
+#include <QPointer>
+#include <functional>
+#include "protocolmessagehistory.h"
 #include <definitions/messagehandlerorders.h>
 #include <definitions/rosterindextyperole.h>
 #include <definitions/rosterclickhookerorders.h>
@@ -122,7 +125,13 @@ protected:
 	void rebuildProtocolConversation(IChatWindow *AWindow, IProtocolMessaging *AMessaging,
 		const QString &AHistoryKey);
 	void scheduleProtocolConversationRebuild(IChatWindow *AWindow, IProtocolMessaging *AMessaging,
+		const QString &AHistoryKey, QObject *AProtocolObject,
+		std::function<void()> AAfterRebuild = std::function<void()>(),
+		std::function<void()> ABeforeRebuild = std::function<void()>());
+	void bindProtocolHistoryPaging(IChatWindow *AWindow, IProtocolMessaging *AMessaging,
 		const QString &AHistoryKey, QObject *AProtocolObject);
+	void queueOlderProtocolHistoryPage(QObject *AScrollBarObject);
+	void requestOlderProtocolHistoryPage(const QString &AHistoryKey, QObject *AProtocolObject);
 	void sortProtocolMessagesChronologically(QList<BasicMessage> &AMessages) const;
 	void addProtocolReaction(IChatWindow *AWindow, IProtocolMessaging *AMessaging,
 		const BasicMessage &AMessage);
@@ -202,6 +211,12 @@ private:
 	QSet<QString> FProtocolHistoryLoaded;
 	QMap<QString, QList<BasicMessage>> FPendingProtocolHistoryMessages;
 	QMap<QString, QList<BasicMessage>> FProtocolConversationMessages;
+	QMap<QString, QPointer<QObject>> FProtocolHistoryScrollBars;
+	QMap<QString, QPointer<QObject>> FProtocolHistoryProviders;
+	QMap<QString, ProtocolMessageHistory::OlderHistoryPageState> FProtocolHistoryPageStates;
+	QSet<QObject *> FProtocolHistorySignalBars;
+	QMap<QString, QList<std::function<void()>>> FProtocolRebuildBeforeCallbacks;
+	QMap<QString, QList<std::function<void()>>> FProtocolRebuildAfterCallbacks;
 	ProtocolMessageHistory::ConversationRebuildScheduler FProtocolRebuildScheduler;
 private:
 	QMap<QString, IChatWindow *> FHistoryRequests;

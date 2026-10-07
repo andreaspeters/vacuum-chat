@@ -280,6 +280,38 @@ inline QList<BasicMessage> mergeOlderPage(const QList<BasicMessage> &AVisibleHis
 	});
 	return merged;
 }
+
+class OlderHistoryPageState
+{
+public:
+	bool beginRequest()
+	{
+		if (FInFlight || FExhausted)
+			return false;
+		FInFlight = true;
+		return true;
+	}
+
+	void finishRequest(bool ASuccess, bool AHasMore, bool AMadeProgress)
+	{
+		FInFlight = false;
+		if (ASuccess && (!AHasMore || !AMadeProgress))
+			FExhausted = true;
+	}
+
+	bool isInFlight() const { return FInFlight; }
+	bool isExhausted() const { return FExhausted; }
+
+private:
+	bool FInFlight = false;
+	bool FExhausted = false;
+};
+
+inline int preservedScrollPosition(int AOldValue, int AOldMaximum, int ANewMaximum)
+{
+	const int newMaximum = qMax(0, ANewMaximum);
+	return qBound(0, AOldValue + newMaximum - AOldMaximum, newMaximum);
+}
 }
 
 #endif // PROTOCOLMESSAGEHISTORY_H

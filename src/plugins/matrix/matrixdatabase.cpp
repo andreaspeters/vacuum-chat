@@ -197,22 +197,31 @@ void MatrixDatabase::createTables()
         "name TEXT, topic TEXT, avatar_url TEXT, membership TEXT,"
         "is_direct INTEGER NOT NULL DEFAULT 0,"
         "is_encrypted INTEGER NOT NULL DEFAULT 0,"
+        "encryption_state_known INTEGER NOT NULL DEFAULT 0,"
         "replacement_room_id TEXT, prev_batch TEXT, limited INTEGER NOT NULL DEFAULT 0"
         ")")) {
         qWarning() << "Failed to create rooms table:" << query.lastError();
     }
     bool hasLimitedColumn = false;
+    bool hasEncryptionStateKnownColumn = false;
     if (query.exec(QStringLiteral("PRAGMA table_info(rooms)"))) {
         while (query.next()) {
-            if (query.value(1).toString() == QStringLiteral("limited")) {
+            const QString columnName = query.value(1).toString();
+            if (columnName == QStringLiteral("limited"))
                 hasLimitedColumn = true;
-                break;
-            }
+            else if (columnName == QStringLiteral("encryption_state_known"))
+                hasEncryptionStateKnownColumn = true;
         }
     }
     if (!hasLimitedColumn && !query.exec(QStringLiteral(
         "ALTER TABLE rooms ADD COLUMN limited INTEGER NOT NULL DEFAULT 0")))
         qWarning() << "Failed to migrate rooms limited column:" << query.lastError();
+    if (!hasEncryptionStateKnownColumn && !query.exec(QStringLiteral(
+        "ALTER TABLE rooms ADD COLUMN encryption_state_known INTEGER NOT NULL DEFAULT 0")))
+        qWarning() << "Failed to migrate rooms encryption-state-known column:" << query.lastError();
+    if (!query.exec(QStringLiteral(
+        "UPDATE rooms SET encryption_state_known = 1 WHERE is_encrypted = 1")))
+        qWarning() << "Failed to restore known encrypted room states:" << query.lastError();
     if (!query.exec(
         "CREATE TABLE IF NOT EXISTS contacts ("
         "user_id TEXT PRIMARY KEY,"
@@ -650,6 +659,36 @@ bool MatrixDatabase::appendTimelineEvents(const QString &roomId,
     return success;
 }
 
+bool MatrixDatabase::persistHistoryBackfillPage(const QString &roomId,
+                                                const QList<MatrixTimelineEvent> &events,
+                                                const QString &nextPrevBatch, bool limited)
+{
+    if (!FisOpen || !FDatabase.isOpen() || roomId.isEmpty())
+        return false;
+    for (const MatrixTimelineEvent &event : events)
+        if (!event.isValid() || event.roomId != roomId)
+            return false;
+    if (!FDatabase.transaction())
+        return false;
+
+    bool success = true;
+    for (const MatrixTimelineEvent &event : events) {
+        if (hasEvent(roomId, event.eventId))
+            continue;
+        if (!insertEvent(event)) {
+            success = false;
+            break;
+        }
+    }
+    if (success)
+        success = saveRoomTimelineBoundary(roomId, nextPrevBatch, limited);
+    if (success)
+        success = FDatabase.commit();
+    if (!success)
+        FDatabase.rollback();
+    return success;
+}
+
 bool MatrixDatabase::persistSyncBatch(const QList<MatrixTimelineEvent> &events,
                                       const QString &nextBatch)
 {
@@ -1049,7 +1088,8 @@ QList<MatrixStoredRoom> MatrixDatabase::roomStates() const
     QList<MatrixStoredRoom> result;
     QSqlQuery query(FDatabase);
     if (!query.exec(QStringLiteral(
-            "SELECT room_id, name, topic, avatar_url, membership, is_direct, is_encrypted, room_type "
+            "SELECT room_id, name, topic, avatar_url, membership, is_direct, is_encrypted, "
+            "encryption_state_known, room_type "
             "FROM rooms ORDER BY name, room_id")))
         return result;
     while (query.next()) {
@@ -1061,7 +1101,8 @@ QList<MatrixStoredRoom> MatrixDatabase::roomStates() const
         room.membership = query.value(4).toString();
         room.isDirect = query.value(5).toBool();
         room.isEncrypted = query.value(6).toBool();
-        room.roomType = query.value(7).toString();
+        room.encryptionStateKnown = query.value(7).toBool();
+        room.roomType = query.value(8).toString();
         if (!room.roomId.isEmpty())
             result.append(room);
     }
@@ -1177,20 +1218,25 @@ bool MatrixDatabase::removeSyncFilter()
 bool MatrixDatabase::saveRoomState(const QString &roomId, const QString &name,
                                    const QString &topic, const QString &avatarUrl,
                                    const QString &membership, bool isDirect,
-                                   bool isEncrypted, const QString &replacementRoomId,
+                                   bool isEncrypted, bool encryptionStateKnown,
+                                   const QString &replacementRoomId,
                                    const QString &prevBatch)
 {
     QSqlQuery query(FDatabase);
     query.prepare(QStringLiteral(
         "INSERT INTO rooms "
         "(room_id, name, topic, avatar_url, membership, is_direct, is_encrypted, "
+        "encryption_state_known, "
         "replacement_room_id, prev_batch) VALUES "
         "(:room_id, :name, :topic, :avatar_url, :membership, :is_direct, :is_encrypted, "
+        ":encryption_state_known, "
         ":replacement_room_id, :prev_batch) "
         "ON CONFLICT(room_id) DO UPDATE SET "
         "name=excluded.name, topic=excluded.topic, avatar_url=excluded.avatar_url, "
         "membership=excluded.membership, is_direct=excluded.is_direct, "
-        "is_encrypted=excluded.is_encrypted, replacement_room_id=excluded.replacement_room_id, "
+        "is_encrypted=excluded.is_encrypted, "
+        "encryption_state_known=excluded.encryption_state_known, "
+        "replacement_room_id=excluded.replacement_room_id, "
         "prev_batch=excluded.prev_batch"));
     query.bindValue(QStringLiteral(":room_id"), roomId);
     query.bindValue(QStringLiteral(":name"), name);
@@ -1199,8 +1245,27 @@ bool MatrixDatabase::saveRoomState(const QString &roomId, const QString &name,
     query.bindValue(QStringLiteral(":membership"), membership);
     query.bindValue(QStringLiteral(":is_direct"), isDirect ? 1 : 0);
     query.bindValue(QStringLiteral(":is_encrypted"), isEncrypted ? 1 : 0);
+    query.bindValue(QStringLiteral(":encryption_state_known"), encryptionStateKnown ? 1 : 0);
     query.bindValue(QStringLiteral(":replacement_room_id"), replacementRoomId);
     query.bindValue(QStringLiteral(":prev_batch"), prevBatch);
+    return query.exec();
+}
+
+bool MatrixDatabase::saveRoomEncryptionState(const QString &roomId, bool isEncrypted,
+                                             bool encryptionStateKnown)
+{
+    if (roomId.isEmpty())
+        return false;
+    QSqlQuery query(FDatabase);
+    query.prepare(QStringLiteral(
+        "INSERT INTO rooms (room_id, is_encrypted, encryption_state_known) "
+        "VALUES (:room_id, :is_encrypted, :encryption_state_known) "
+        "ON CONFLICT(room_id) DO UPDATE SET "
+        "is_encrypted=excluded.is_encrypted, "
+        "encryption_state_known=excluded.encryption_state_known"));
+    query.bindValue(QStringLiteral(":room_id"), roomId);
+    query.bindValue(QStringLiteral(":is_encrypted"), isEncrypted ? 1 : 0);
+    query.bindValue(QStringLiteral(":encryption_state_known"), encryptionStateKnown ? 1 : 0);
     return query.exec();
 }
 

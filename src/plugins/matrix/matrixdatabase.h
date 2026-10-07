@@ -42,6 +42,7 @@ struct MatrixStoredRoom
     QString membership;
     bool isDirect = false;
     bool isEncrypted = false;
+    bool encryptionStateKnown = false;
 };
 
 struct MatrixStoredMember
@@ -100,6 +101,9 @@ public:
                                             const QString &beforeEventId = QString()) const;
     bool saveTimeline(const QString &roomId, const QList<MatrixTimelineEvent> &events);
     bool appendTimelineEvents(const QString &roomId, const QList<MatrixTimelineEvent> &events);
+    bool persistHistoryBackfillPage(const QString &roomId,
+                                    const QList<MatrixTimelineEvent> &events,
+                                    const QString &nextPrevBatch, bool limited);
     bool persistSyncBatch(const QList<MatrixTimelineEvent> &events, const QString &nextBatch);
     bool beginSyncMetadataBatch();
     bool commitSyncMetadataBatch();
@@ -126,8 +130,11 @@ public:
     bool removeSyncFilter();
     bool saveRoomState(const QString &roomId, const QString &name, const QString &topic,
                        const QString &avatarUrl, const QString &membership, bool isDirect,
-                       bool isEncrypted, const QString &replacementRoomId,
+                       bool isEncrypted, bool encryptionStateKnown,
+                       const QString &replacementRoomId,
                        const QString &prevBatch);
+    bool saveRoomEncryptionState(const QString &roomId, bool isEncrypted,
+                                 bool encryptionStateKnown);
     bool saveRoomType(const QString &roomId, const QString &roomType,
                       const QString &roomVersion);
     bool saveRoomTimelineBoundary(const QString &roomId, const QString &prevBatch,

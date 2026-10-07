@@ -34,6 +34,7 @@ struct ProtocolRoom
 	bool isDirect = false;
 	bool isAvailable = false;
 	bool isEncrypted = false;
+	bool encryptionStateKnown = false;
 	int notificationCount = 0;
 	int highlightCount = 0;
 	QString avatarUrl;

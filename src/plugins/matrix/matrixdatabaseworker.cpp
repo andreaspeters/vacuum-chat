@@ -126,10 +126,11 @@ bool MatrixDatabaseWorker::saveRoomAccountData(const QString &roomId, const QStr
 bool MatrixDatabaseWorker::saveRoomState(const QString &roomId, const QString &name,
                                          const QString &topic, const QString &avatarUrl,
                                          const QString &membership, bool isDirect, bool isEncrypted,
+                                         bool encryptionStateKnown,
                                          const QString &replacementRoomId, const QString &prevBatch)
 {
     return FDatabase.saveRoomState(roomId, name, topic, avatarUrl, membership, isDirect,
-                                   isEncrypted, replacementRoomId, prevBatch);
+                                   isEncrypted, encryptionStateKnown, replacementRoomId, prevBatch);
 }
 bool MatrixDatabaseWorker::checkAndSaveMegolmMessageIndex(const QString &sessionId,
                                                           quint32 messageIndex,

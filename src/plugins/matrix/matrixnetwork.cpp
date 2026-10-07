@@ -845,6 +845,8 @@ void MatrixNetwork::logout()
 	FAvatarRequestsInFlight.clear();
 	FAvatarUnavailable.clear();
 	FRoomNameRequests.clear();
+	FRoomEncryptionStateRequests.clear();
+	FPendingRoomEncryptionSends.clear();
 	FJoinedMembersRequests.clear();
 	FJoinedMembersLoaded.clear();
 	FDeviceKeyQueries.clear();
@@ -1538,6 +1540,94 @@ void MatrixNetwork::requestRoomName(const QString &roomId)
 		});
 }
 
+void MatrixNetwork::requestRoomEncryptionState(const QString &roomId)
+{
+	if (roomId.isEmpty() || FAccesToken.isEmpty() || FRoomEncryptionStateRequests.contains(roomId) ||
+		!FRooms.contains(roomId))
+		return;
+	const quint64 requestId = ++FRoomEncryptionStateQueryCounter;
+	FRoomEncryptionStateRequests.insert(roomId, requestId);
+	const QString encodedRoomId = QString::fromUtf8(QUrl::toPercentEncoding(roomId));
+	const QString path = QStringLiteral("/_matrix/client/v3/rooms/%1/state/m.room.encryption/")
+		.arg(encodedRoomId);
+	QNetworkRequest request(QUrl(constructUrl(path)));
+	request.setAttribute(QNetworkRequest::Http2AllowedAttribute, FUseHttp2);
+	request.setRawHeader("Authorization", QByteArray("Bearer ") + FAccesToken.toUtf8());
+	QNetworkReply *reply = FNetworkAccessManager->get(request);
+	reply->setProperty("requestType", QStringLiteral("room_encryption_state"));
+	reply->setProperty("roomId", roomId);
+	reply->setProperty("requestId", QVariant::fromValue(requestId));
+	reply->setProperty("userId", FUserId);
+	reply->setProperty("serverUrl", FNormalizedServerUrl);
+	reply->setProperty("loginGeneration", QVariant::fromValue(FActiveLoginGeneration));
+}
+
+void MatrixNetwork::onRoomEncryptionStateFinished(QNetworkReply *reply)
+{
+	if (!reply)
+		return;
+	const QString roomId = reply->property("roomId").toString();
+	const quint64 requestId = reply->property("requestId").toULongLong();
+	if (FRoomEncryptionStateRequests.value(roomId) != requestId) {
+		reply->deleteLater();
+		return;
+	}
+	FRoomEncryptionStateRequests.remove(roomId);
+	const auto failPendingSends = [this, &roomId](const QString &error) {
+		const QJsonArray pending = FPendingRoomEncryptionSends.take(roomId);
+		for (int i = 0; i < pending.size(); ++i)
+			emit sendError(error);
+	};
+	if (reply->property("loginGeneration").toULongLong() != FActiveLoginGeneration ||
+		reply->property("userId").toString() != FUserId ||
+		reply->property("serverUrl").toString() != FNormalizedServerUrl ||
+		!FRooms.contains(roomId) || !FRooms.value(roomId).isJoined) {
+		failPendingSends(QStringLiteral("Matrix room state request expired; message not sent"));
+		reply->deleteLater();
+		return;
+	}
+
+	bool stateKnown = false;
+	bool encrypted = false;
+	const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+	if (statusCode == 404) {
+		const QJsonObject error = QJsonDocument::fromJson(reply->readAll()).object();
+		stateKnown = error.value(QStringLiteral("errcode")).toString() == QStringLiteral("M_NOT_FOUND");
+	} else if (statusCode == 200 && reply->error() == QNetworkReply::NoError) {
+		// The Matrix state-event endpoint returns the event content directly, not
+		// the full event envelope. The URL already identifies type and state key.
+		const QJsonObject content = QJsonDocument::fromJson(reply->readAll()).object();
+		if (!content.value(QStringLiteral("algorithm")).toString().isEmpty()) {
+			stateKnown = true;
+			encrypted = true;
+		}
+	}
+
+	if (stateKnown) {
+		ProtocolRoom &room = FRooms[roomId];
+		room.isEncrypted = encrypted;
+		room.encryptionStateKnown = true;
+		if (auto *worker = qobject_cast<MatrixDatabaseWorker *>(FDatabaseWorker)) {
+			QMetaObject::invokeMethod(worker, [worker, roomId, encrypted]() {
+				worker->execute([&roomId, encrypted](MatrixDatabase &database) {
+					database.saveRoomEncryptionState(roomId, encrypted, true);
+				});
+			}, Qt::QueuedConnection);
+		}
+		emitRosterSnapshot();
+		const QJsonArray pending = FPendingRoomEncryptionSends.take(roomId);
+		for (const QJsonValue &value : pending) {
+			const QJsonObject item = value.toObject();
+			sendRoomEvent(roomId, QStringLiteral("m.room.message"),
+				item.value(QStringLiteral("content")).toObject(),
+				item.value(QStringLiteral("transaction_id")).toString());
+		}
+	} else {
+		failPendingSends(QStringLiteral("Matrix room encryption state could not be verified; message not sent"));
+	}
+	reply->deleteLater();
+}
+
 void MatrixNetwork::requestJoinedMembers(const QString &roomId)
 {
 	if (roomId.isEmpty() || FAccesToken.isEmpty() || FJoinedMembersRequests.contains(roomId) ||
@@ -1750,6 +1840,21 @@ void MatrixNetwork::sendRoomEvent(const QString &roomId, const QString &eventTyp
 		(eventType != QStringLiteral("m.room.message") && eventType != QStringLiteral("m.reaction"))) {
 		emit sendError(QStringLiteral("Cannot send Matrix message without a joined room and access token"));
 		return;
+	}
+	if (eventType == QStringLiteral("m.room.message")) {
+		const auto roomIt = FRooms.constFind(roomId);
+		if (roomIt == FRooms.constEnd() || !roomIt->isJoined) {
+			emit sendError(QStringLiteral("Cannot send Matrix message without a joined room and access token"));
+			return;
+		}
+		if (!roomIt->encryptionStateKnown) {
+			const QString txId = txnId.isEmpty() ? generateTransactionId() : txnId;
+			FPendingRoomEncryptionSends[roomId].append(QJsonObject{
+				{QStringLiteral("content"), content},
+				{QStringLiteral("transaction_id"), txId}});
+			requestRoomEncryptionState(roomId);
+			return;
+		}
 	}
 	QString txId = txnId.isEmpty() ? generateTransactionId() : txnId;
 	QJsonObject wireContent = content;
@@ -2229,6 +2334,8 @@ void MatrixNetwork::onReplyFinished(QNetworkReply *reply)
 		onSyncFinished(reply);
 	} else if (type == "send") {
 		onSendFinished(reply);
+	} else if (type == "room_encryption_state") {
+		onRoomEncryptionStateFinished(reply);
 	} else if (type == "filter_create") {
 		const bool roomsOnly = reply->property("roomsOnly").toBool();
 		if (reply->error() == QNetworkReply::NoError) {
@@ -2263,6 +2370,7 @@ void MatrixNetwork::onReplyFinished(QNetworkReply *reply)
 			runDatabase([&](MatrixDatabase &database) {
 				roomSaved = database.saveRoomState(roomId, room.name, room.subject,
 					room.avatarUrl, action, room.isDirect, room.isEncrypted,
+				room.encryptionStateKnown,
 					QString(), FRoomPrevBatch.value(roomId));
 			});
 			if (!roomSaved)
@@ -3095,6 +3203,8 @@ void MatrixNetwork::onLoginFinished(QNetworkReply *reply)
 	FAvatarUnavailable.clear();
 	FRoomNameRequests.clear();
 	FJoinedMembersRequests.clear();
+	FRoomEncryptionStateRequests.clear();
+	FPendingRoomEncryptionSends.clear();
 	FJoinedMembersLoaded.clear();
 	FDeviceKeyQueries.clear();
 	FPendingEncryptedMessages.clear();
@@ -3446,6 +3556,7 @@ void MatrixNetwork::onSyncFinished(QNetworkReply *reply)
 		runDatabase([&](MatrixDatabase &database) {
 			inviteSaved = database.saveRoomState(roomId, room.name, room.subject,
 				room.avatarUrl, QStringLiteral("invite"), room.isDirect, room.isEncrypted,
+				room.encryptionStateKnown,
 				QString(), QString());
 		});
 		if (!inviteSaved)
@@ -3495,6 +3606,7 @@ void MatrixNetwork::onSyncFinished(QNetworkReply *reply)
 		runDatabase([&](MatrixDatabase &database) {
 			roomSaved = database.saveRoomState(roomId, room.name, room.subject,
 				room.avatarUrl, QStringLiteral("leave"), room.isDirect, room.isEncrypted,
+				room.encryptionStateKnown,
 				QString(), FRoomPrevBatch.value(roomId));
 		});
 		if (!roomSaved)
@@ -4487,6 +4599,10 @@ void MatrixNetwork::onSyncFinished(QNetworkReply *reply)
 		const QJsonObject roomUnread = roomData.value(QStringLiteral("unread_notifications")).toObject();
 		room.notificationCount = roomUnread.value(QStringLiteral("notification_count")).toInt();
 		room.highlightCount = roomUnread.value(QStringLiteral("highlight_count")).toInt();
+		if (FSyncToken.isEmpty()) {
+			room.isEncrypted = false;
+			room.encryptionStateKnown = true;
+		}
 		QJsonArray stateEvents = roomData.value("state").toObject().value("events").toArray();
 		const QJsonArray stateAfterEvents = roomData.value(QStringLiteral("state_after"))
 			.toObject().value(QStringLiteral("events")).toArray();
@@ -4516,7 +4632,7 @@ void MatrixNetwork::onSyncFinished(QNetworkReply *reply)
 			else if (stateType == QStringLiteral("m.room.avatar"))
 				room.avatarUrl = content.value("url").toString();
 			else if (stateType == QStringLiteral("m.room.encryption"))
-				room.isEncrypted = true;
+				room.isEncrypted = room.encryptionStateKnown = true;
 			else if (stateType == QStringLiteral("m.room.create")) {
 				const QString roomType = content.value(QStringLiteral("type")).toString();
 				room.roomType = roomType;
@@ -4642,6 +4758,7 @@ void MatrixNetwork::onSyncFinished(QNetworkReply *reply)
 		const bool roomStateSaved = databaseBool([&](MatrixDatabase &database) {
 			return database.saveRoomState(roomId, room.name, room.subject, room.avatarUrl,
 				room.membership, FDirectRoomIds.contains(roomId), room.isEncrypted,
+				room.encryptionStateKnown,
 				replacementRoom, boundaryToken);
 		});
 		if (!roomStateSaved)
@@ -4728,7 +4845,15 @@ void MatrixNetwork::onSyncFinished(QNetworkReply *reply)
 				}
 			}
 			if (eventType == QStringLiteral("m.room.encryption")) {
-				room.isEncrypted = true;
+				room.isEncrypted = room.encryptionStateKnown = true;
+				const bool encryptionStateSaved = databaseBool([&](MatrixDatabase &database) {
+					return database.saveRoomState(roomId, room.name, room.subject, room.avatarUrl,
+						room.membership, FDirectRoomIds.contains(roomId), room.isEncrypted,
+						room.encryptionStateKnown,
+						replacementRoom, boundaryToken);
+				});
+				if (!encryptionStateSaved)
+					emit syncError(QStringLiteral("Failed to persist Matrix room encryption state"));
 				continue;
 			}
 			if (eventType == QStringLiteral("m.room.name")) {
@@ -5363,6 +5488,7 @@ void MatrixNetwork::restorePersistedRooms()
 		room.isJoined = stored.membership == QStringLiteral("join");
 		room.isDirect = stored.isDirect;
 		room.isEncrypted = stored.isEncrypted;
+		room.encryptionStateKnown = stored.encryptionStateKnown;
 		room.isAvailable = true;
 		if (!cached.previousBatch.isEmpty()) {
 			FRoomPrevBatch.insert(stored.roomId, cached.previousBatch);

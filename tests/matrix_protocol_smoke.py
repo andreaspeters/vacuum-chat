@@ -1040,6 +1040,7 @@ def test_matrix_live_event_waits_for_cached_history_before_chat_render():
     matrix = (root / "src/plugins/matrix/matrix.cpp").read_text()
     handler = (root / "src/plugins/chatmessagehandler/chatmessagehandler.cpp").read_text()
     matrix_header = (root / "src/plugins/matrix/matrix.h").read_text()
+    history_helper = (root / "src/plugins/chatmessagehandler/protocolmessagehistory.h").read_text()
     on_network = matrix.split("void Matrix::onNetworkMessageReceived(", 1)[1].split(
         "void Matrix::onAvatarDataReceived(", 1)[0]
     finish = matrix.split("void Matrix::finishHistoryLoad(", 1)[1].split(
@@ -1065,8 +1066,8 @@ def test_matrix_live_event_waits_for_cached_history_before_chat_render():
     assert "FProtocolHistoryLoading" in received and "FPendingProtocolHistoryMessages" in received
     assert "FProtocolHistoryLoading" in history_render, \
         "opening a conversation must mark it loading before requesting asynchronous history"
-    assert "sortProtocolMessagesChronologically" in history_loaded and \
-        "std::stable_sort" in handler and "timestamp()" in handler, \
+    assert "ProtocolMessageHistory::mergeOlderPage(previousHistory, history)" in history_loaded and \
+        "std::stable_sort" in history_helper and "left.timestamp()" in history_helper, \
         "cached and live messages must be sorted together before the first render"
     assert "protocolHistoryLoaded" in handler, \
         "the async history completion must release buffered messages"

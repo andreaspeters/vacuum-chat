@@ -80,6 +80,12 @@ if (BUILD_TESTING)
 	target_include_directories(matrix_history_retry_tests PRIVATE "${CMAKE_SOURCE_DIR}/src")
 	target_link_libraries(matrix_history_retry_tests PRIVATE
 		${VACUUM_UTILS_NAME} Qt6::Core Qt6::Gui Qt6::Network Qt6::Sql ${ADD_LIBS})
+	add_executable(matrix_room_encryption_tests EXCLUDE_FROM_ALL
+		matrix_room_encryption_test.cpp matrixnetwork.cpp matrixnetworkinvite.cpp matrixroominvite.cpp matrixdatabase.cpp matrixdatabaseworker.cpp
+		matrixolm.cpp matrixssss.cpp matrixdirectroom.cpp matrixpublicrooms.cpp)
+	target_include_directories(matrix_room_encryption_tests PRIVATE "${CMAKE_SOURCE_DIR}/src")
+	target_link_libraries(matrix_room_encryption_tests PRIVATE
+		${VACUUM_UTILS_NAME} Qt6::Core Qt6::Gui Qt6::Network Qt6::Sql ${ADD_LIBS})
 	add_executable(matrix_network_login_tests EXCLUDE_FROM_ALL
 		matrix_network_login_tests.cpp matrixnetwork.cpp matrixnetworkinvite.cpp matrixroominvite.cpp matrixdatabase.cpp matrixdatabaseworker.cpp
 		matrixolm.cpp matrixssss.cpp matrixdirectroom.cpp matrixpublicrooms.cpp)
@@ -129,6 +135,12 @@ if (BUILD_TESTING)
 	target_include_directories(matrix_history_pagination_tests PRIVATE "${CMAKE_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}")
 	target_compile_features(matrix_history_pagination_tests PRIVATE cxx_std_11)
 	target_link_libraries(matrix_history_pagination_tests PRIVATE Qt6::Core Qt6::Sql)
+
+	add_executable(matrix_history_backfill_tests EXCLUDE_FROM_ALL
+		matrix_history_backfill_test.cpp matrixdatabase.cpp)
+	target_include_directories(matrix_history_backfill_tests PRIVATE "${CMAKE_SOURCE_DIR}/src")
+	target_compile_features(matrix_history_backfill_tests PRIVATE cxx_std_17)
+	target_link_libraries(matrix_history_backfill_tests PRIVATE Qt6::Core Qt6::Sql)
 endif()
 
 if(TARGET matrix)

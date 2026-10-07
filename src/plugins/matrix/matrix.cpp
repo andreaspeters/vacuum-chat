@@ -911,6 +911,7 @@ void Matrix::onCachedRoomsLoaded(const QList<MatrixCachedRoom> &rooms)
 		room.isJoined = stored.membership == QStringLiteral("join");
 		room.isDirect = stored.isDirect;
 		room.isEncrypted = stored.isEncrypted;
+		room.encryptionStateKnown = stored.encryptionStateKnown;
 		room.isAvailable = true;
 		room.avatarUrl = stored.avatarUrl;
 		room.avatarKey = accountId() + QStringLiteral("\nroom\n") + room.id;
@@ -1000,7 +1001,9 @@ void Matrix::onHistoryPageLoaded(const QString &roomId,
 			BasicMessage message(event.eventId, roomId, event.sender, QString(), event.content,
 				MatrixTimestamps::fromUnixMilliseconds(event.originTs), QStringLiteral("matrix"),
 				BasicMessage::Incoming);
-			QVariantMap metadata = event.metadata;
+			QVariantMap metadata;
+			for (auto it = event.metadata.constBegin(); it != event.metadata.constEnd(); ++it)
+				metadata.insert(it.key(), it.value());
 			metadata.insert(QStringLiteral("historical"), true);
 			metadata.insert(QStringLiteral("sender_is_self"), FNetworkUserId == event.sender);
 			message.setMetadata(metadata);

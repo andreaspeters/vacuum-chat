@@ -25,10 +25,13 @@
 #include <QLineEdit>
 #include <algorithm>
 #include <utility>
+#include <memory>
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QScrollArea>
+#include <QAbstractScrollArea>
+#include <QAbstractSlider>
 #include <QLabel>
 #include <QPixmap>
 #include <QColor>
@@ -709,6 +712,7 @@ void ChatMessageHandler::onProtocolHistoryLoaded(const QString &ARoomId)
 	IChatWindow *window = FMessageWidgets->findConversationWindow(messaging->streamId(), ARoomId);
 	if (!window)
 		return;
+	bindProtocolHistoryPaging(window, messaging, historyKey, sender());
 	bool hasOutOfOrderNewMessage = false;
 	if (hadHistory && !previousHistory.isEmpty()) {
 		QSet<QString> previousIds;
@@ -728,6 +732,179 @@ void ChatMessageHandler::onProtocolHistoryLoaded(const QString &ARoomId)
 	}
 	for (const BasicMessage &message : uniqueMessages)
 		renderProtocolMessage(window, messaging, message);
+}
+
+void ChatMessageHandler::bindProtocolHistoryPaging(IChatWindow *AWindow,
+	IProtocolMessaging *AMessaging, const QString &AHistoryKey, QObject *AProtocolObject)
+{
+	if (!AWindow || !AMessaging || !AProtocolObject || AHistoryKey.isEmpty() ||
+		!AMessaging->supportsOlderHistory(AWindow->conversationId()))
+		return;
+
+	IViewWidget *view = AWindow->viewWidget();
+	QWidget *styleWidget = view ? view->styleWidget() : nullptr;
+	QAbstractScrollArea *scrollArea = qobject_cast<QAbstractScrollArea *>(styleWidget);
+	QScrollBar *scrollBar = scrollArea ? scrollArea->verticalScrollBar() : nullptr;
+	if (!scrollArea || !scrollBar)
+		return;
+
+	FProtocolHistoryScrollBars.insert(AHistoryKey, scrollBar);
+	FProtocolHistoryProviders.insert(AHistoryKey, AProtocolObject);
+	const QString historyKeyProperty = QStringLiteral("protocolHistoryPagingKey");
+	styleWidget->setProperty(historyKeyProperty.toLatin1().constData(), AHistoryKey);
+	scrollArea->viewport()->setProperty(historyKeyProperty.toLatin1().constData(), AHistoryKey);
+	scrollBar->setProperty(historyKeyProperty.toLatin1().constData(), AHistoryKey);
+	styleWidget->installEventFilter(this);
+	scrollArea->viewport()->installEventFilter(this);
+	scrollBar->installEventFilter(this);
+
+	if (FProtocolHistorySignalBars.contains(scrollBar))
+		return;
+	FProtocolHistorySignalBars.insert(scrollBar);
+	connect(scrollBar, &QAbstractSlider::sliderMoved, this,
+		[this, scrollBar](int APosition) {
+			const int threshold = qMax(8, scrollBar->singleStep() * 2);
+			if (APosition <= threshold)
+				queueOlderProtocolHistoryPage(scrollBar);
+		});
+	connect(scrollBar, &QAbstractSlider::actionTriggered, this,
+		[this, scrollBar](int) { queueOlderProtocolHistoryPage(scrollBar); });
+	connect(scrollBar, &QObject::destroyed, this, [this, scrollBar]() {
+		FProtocolHistorySignalBars.remove(scrollBar);
+		for (auto it = FProtocolHistoryScrollBars.begin(); it != FProtocolHistoryScrollBars.end();) {
+			if (it.value().isNull()) {
+				FProtocolHistoryProviders.remove(it.key());
+				it = FProtocolHistoryScrollBars.erase(it);
+			} else {
+				++it;
+			}
+		}
+	});
+}
+
+void ChatMessageHandler::queueOlderProtocolHistoryPage(QObject *AScrollBarObject)
+{
+	QPointer<QObject> scrollBarObject(AScrollBarObject);
+	if (!scrollBarObject)
+		return;
+	QTimer::singleShot(0, this, [this, scrollBarObject]() {
+		QScrollBar *scrollBar = qobject_cast<QScrollBar *>(scrollBarObject.data());
+		if (!scrollBar)
+			return;
+		const int threshold = qMax(8, scrollBar->singleStep() * 2);
+		if (scrollBar->value() > threshold)
+			return;
+		const QString historyKey = scrollBar->property("protocolHistoryPagingKey").toString();
+		QObject *protocolObject = FProtocolHistoryProviders.value(historyKey).data();
+		if (protocolObject)
+			requestOlderProtocolHistoryPage(historyKey, protocolObject);
+	});
+}
+
+void ChatMessageHandler::requestOlderProtocolHistoryPage(const QString &AHistoryKey,
+	QObject *AProtocolObject)
+{
+	const int separator = AHistoryKey.indexOf(QChar('\n'));
+	if (separator <= 0 || separator == AHistoryKey.size() - 1 || !AProtocolObject)
+		return;
+	const QString streamId = AHistoryKey.left(separator);
+	const ConversationId conversationId = AHistoryKey.mid(separator + 1);
+	IProtocolMessaging *messaging = qobject_cast<IProtocolMessaging *>(AProtocolObject);
+	if (!messaging || messaging->streamId() != streamId ||
+		!messaging->supportsOlderHistory(conversationId))
+		return;
+
+	const QList<BasicMessage> visibleHistory = FProtocolConversationMessages.value(AHistoryKey);
+	if (visibleHistory.isEmpty())
+		return;
+	ProtocolMessageHistory::OlderHistoryPageState &pageState = FProtocolHistoryPageStates[AHistoryKey];
+	if (!pageState.beginRequest())
+		return;
+
+	const QPointer<QObject> guardedProtocolObject(AProtocolObject);
+	QMetaObject::Connection providerDestroyed = connect(AProtocolObject, &QObject::destroyed,
+		this, [this, AHistoryKey]() {
+			auto state = FProtocolHistoryPageStates.find(AHistoryKey);
+			if (state != FProtocolHistoryPageStates.end() && state.value().isInFlight() &&
+				FProtocolHistoryProviders.value(AHistoryKey).isNull())
+				state.value().finishRequest(false, false, false);
+		});
+
+	const bool accepted = messaging->requestOlderHistoryPage(conversationId,
+		visibleHistory.first(), 30, this,
+		[this, AHistoryKey, guardedProtocolObject, providerDestroyed](ProtocolHistoryPage page) {
+			QObject::disconnect(providerDestroyed);
+			auto state = FProtocolHistoryPageStates.find(AHistoryKey);
+			if (state == FProtocolHistoryPageStates.end())
+				return;
+			if (!page.success) {
+				state.value().finishRequest(false, false, false);
+				return;
+			}
+
+			const QList<BasicMessage> currentHistory = FProtocolConversationMessages.value(AHistoryKey);
+			const QList<BasicMessage> merged =
+				ProtocolMessageHistory::mergeOlderPage(currentHistory, page.messages);
+			const bool madeProgress = merged.size() > currentHistory.size();
+			state.value().finishRequest(true, page.hasMore, madeProgress);
+			if (!madeProgress)
+				return;
+			FProtocolConversationMessages.insert(AHistoryKey, merged);
+
+			if (!guardedProtocolObject)
+				return;
+			IProtocolMessaging *pageMessaging =
+				qobject_cast<IProtocolMessaging *>(guardedProtocolObject.data());
+			const int separator = AHistoryKey.indexOf(QChar('\n'));
+			if (!pageMessaging || separator <= 0 || separator == AHistoryKey.size() - 1)
+				return;
+			const QString streamId = AHistoryKey.left(separator);
+			const ConversationId conversationId = AHistoryKey.mid(separator + 1);
+			IChatWindow *window = FMessageWidgets->findConversationWindow(streamId, conversationId);
+			if (!window || window->conversationId() != conversationId)
+				return;
+
+			QScrollBar *scrollBar = nullptr;
+			IViewWidget *view = window->viewWidget();
+			QAbstractScrollArea *scrollArea = view
+				? qobject_cast<QAbstractScrollArea *>(view->styleWidget()) : nullptr;
+			if (scrollArea)
+				scrollBar = scrollArea->verticalScrollBar();
+			const QPointer<QObject> guardedWindow(window->instance());
+			const auto scrollSnapshot = std::make_shared<QPair<int, int>>(0, 0);
+			std::function<void()> captureScroll;
+			std::function<void()> restoreScroll;
+			if (guardedWindow && scrollBar) {
+				captureScroll = [guardedWindow, scrollSnapshot]() {
+					IChatWindow *currentWindow = qobject_cast<IChatWindow *>(guardedWindow.data());
+					IViewWidget *currentView = currentWindow ? currentWindow->viewWidget() : nullptr;
+					QAbstractScrollArea *currentArea = currentView
+						? qobject_cast<QAbstractScrollArea *>(currentView->styleWidget()) : nullptr;
+					QScrollBar *currentScrollBar = currentArea ? currentArea->verticalScrollBar() : nullptr;
+					if (currentScrollBar)
+						*scrollSnapshot = qMakePair(currentScrollBar->value(), currentScrollBar->maximum());
+				};
+				restoreScroll = [this, guardedWindow, scrollSnapshot]() {
+					QTimer::singleShot(0, this, [guardedWindow, scrollSnapshot]() {
+						IChatWindow *currentWindow = qobject_cast<IChatWindow *>(guardedWindow.data());
+						IViewWidget *currentView = currentWindow ? currentWindow->viewWidget() : nullptr;
+						QAbstractScrollArea *currentArea = currentView
+							? qobject_cast<QAbstractScrollArea *>(currentView->styleWidget()) : nullptr;
+						QScrollBar *currentScrollBar = currentArea ? currentArea->verticalScrollBar() : nullptr;
+						if (currentScrollBar)
+							currentScrollBar->setValue(ProtocolMessageHistory::preservedScrollPosition(
+								scrollSnapshot->first, scrollSnapshot->second,
+								currentScrollBar->maximum()));
+					});
+				};
+			}
+			scheduleProtocolConversationRebuild(window, pageMessaging, AHistoryKey,
+				guardedProtocolObject.data(), restoreScroll, captureScroll);
+		});
+	if (!accepted) {
+		QObject::disconnect(providerDestroyed);
+		pageState.finishRequest(false, false, false);
+	}
 }
 
 void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMessaging *AMessaging,
@@ -1030,6 +1207,8 @@ void ChatMessageHandler::renderProtocolHistory(IChatWindow *AWindow, IProtocolMe
 	if (history.isEmpty())
 		return;
 	FProtocolConversationMessages.insert(historyKey, history);
+	if (QObject *protocolObject = dynamic_cast<QObject *>(AMessaging))
+		bindProtocolHistoryPaging(AWindow, AMessaging, historyKey, protocolObject);
 	for (const BasicMessage &message : history)
 		renderProtocolMessage(AWindow, AMessaging, message);
 }
@@ -1076,7 +1255,8 @@ void ChatMessageHandler::rebuildProtocolConversation(IChatWindow *AWindow,
 }
 
 void ChatMessageHandler::scheduleProtocolConversationRebuild(IChatWindow *AWindow,
-	IProtocolMessaging *AMessaging, const QString &AHistoryKey, QObject *AProtocolObject)
+	IProtocolMessaging *AMessaging, const QString &AHistoryKey, QObject *AProtocolObject,
+	std::function<void()> AAfterRebuild, std::function<void()> ABeforeRebuild)
 {
 	if (!AWindow || !AMessaging || AHistoryKey.isEmpty() || !AProtocolObject)
 		return;
@@ -1085,13 +1265,32 @@ void ChatMessageHandler::scheduleProtocolConversationRebuild(IChatWindow *AWindo
 	const QPointer<QObject> protocolObject(AProtocolObject);
 	if (!windowObject || !protocolObject)
 		return;
+	if (ABeforeRebuild)
+		FProtocolRebuildBeforeCallbacks[AHistoryKey].append(std::move(ABeforeRebuild));
+	if (AAfterRebuild)
+		FProtocolRebuildAfterCallbacks[AHistoryKey].append(std::move(AAfterRebuild));
 
 	FProtocolRebuildScheduler.request(AHistoryKey,
 		[this, windowObject, protocolObject, AHistoryKey]() {
 			IChatWindow *window = qobject_cast<IChatWindow *>(windowObject.data());
 			IProtocolMessaging *messaging = qobject_cast<IProtocolMessaging *>(protocolObject.data());
-			if (window && messaging)
+			if (window && messaging) {
+				const QList<std::function<void()>> beforeCallbacks =
+					FProtocolRebuildBeforeCallbacks.take(AHistoryKey);
+				for (const std::function<void()> &callback : beforeCallbacks)
+					if (callback)
+						callback();
 				rebuildProtocolConversation(window, messaging, AHistoryKey);
+				bindProtocolHistoryPaging(window, messaging, AHistoryKey, protocolObject.data());
+				const QList<std::function<void()>> callbacks =
+					FProtocolRebuildAfterCallbacks.take(AHistoryKey);
+				for (const std::function<void()> &callback : callbacks)
+					if (callback)
+						callback();
+			} else {
+				FProtocolRebuildBeforeCallbacks.remove(AHistoryKey);
+				FProtocolRebuildAfterCallbacks.remove(AHistoryKey);
+			}
 		});
 }
 
@@ -1540,14 +1739,15 @@ void ChatMessageHandler::setupRoomSidebar(IChatWindow *AWindow, IProtocolMessagi
 	title->setWordWrap(true);
 	title->setStyleSheet(QStringLiteral("font-size:16px; font-weight:600;"));
 	layout->addWidget(title);
-	const QString encryptionText = currentRoom.isEncrypted
-		? tr("End-to-end encrypted") : tr("Not end-to-end encrypted");
+	const QString encryptionText = !currentRoom.encryptionStateKnown
+		? tr("Encryption status unknown")
+		: currentRoom.isEncrypted ? tr("End-to-end encrypted") : tr("Not end-to-end encrypted");
 	QWidget *encryptionRow = new QWidget(sidebar);
 	QHBoxLayout *encryptionLayout = new QHBoxLayout(encryptionRow);
 	encryptionLayout->setContentsMargins(0, 0, 0, 0);
 	encryptionLayout->setSpacing(6);
 	QLabel *encryptionIcon = new QLabel(encryptionRow);
-	if (currentRoom.isEncrypted) {
+	if (currentRoom.encryptionStateKnown && currentRoom.isEncrypted) {
 		encryptionIcon->setPixmap(IconStorage::staticStorage(RSR_STORAGE_MENUICONS)
 			->getIcon(MNI_CONNECTION_ENCRYPTED).pixmap(16, 16));
 	} else {
@@ -2367,6 +2567,12 @@ void ChatMessageHandler::onStyleOptionsChanged(const IMessageStyleOptions &AOpti
 
 bool ChatMessageHandler::eventFilter(QObject *AWatched, QEvent *AEvent)
 {
+	if (AEvent->type() == QEvent::Wheel) {
+		const QString historyKey = AWatched->property("protocolHistoryPagingKey").toString();
+		QObject *scrollBar = FProtocolHistoryScrollBars.value(historyKey).data();
+		if (scrollBar)
+			queueOlderProtocolHistoryPage(scrollBar);
+	}
 	if (AEvent->type() == QEvent::KeyPress) {
 		QKeyEvent *keyEvent = static_cast<QKeyEvent *>(AEvent);
 		if (keyEvent->key() == Qt::Key_Escape) {

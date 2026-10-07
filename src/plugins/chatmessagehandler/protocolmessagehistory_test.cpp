@@ -233,5 +233,30 @@ int main(int argc, char **argv)
 	passed &= check(otherConversationRebuilds == 1,
 		"rebuilds for distinct conversations are both preserved");
 
+	ProtocolMessageHistory::OlderHistoryPageState pageState;
+	passed &= check(pageState.beginRequest(), "first older-history request starts");
+	passed &= check(!pageState.beginRequest(), "a duplicate in-flight page request is rejected");
+	pageState.finishRequest(false, false, false);
+	passed &= check(!pageState.isInFlight() && !pageState.isExhausted() && pageState.beginRequest(),
+		"a failed page request clears in-flight state and remains retryable");
+	pageState.finishRequest(true, true, true);
+	passed &= check(!pageState.isExhausted() && pageState.beginRequest(),
+		"hasMore allows another older-history page");
+	pageState.finishRequest(true, false, true);
+	passed &= check(pageState.isExhausted() && !pageState.beginRequest(),
+		"a successful exhausted page stops future requests");
+	ProtocolMessageHistory::OlderHistoryPageState noProgressState;
+	passed &= check(noProgressState.beginRequest(), "no-progress test request starts");
+	noProgressState.finishRequest(true, true, false);
+	passed &= check(noProgressState.isExhausted(),
+		"a successful page without new messages cannot trigger an infinite retry loop");
+
+	passed &= check(ProtocolMessageHistory::preservedScrollPosition(40, 100, 160) == 100,
+		"prepended content preserves the visible scroll offset");
+	passed &= check(ProtocolMessageHistory::preservedScrollPosition(0, 100, 160) == 60,
+		"a top-of-history view remains anchored after prepending");
+	passed &= check(ProtocolMessageHistory::preservedScrollPosition(20, 100, 50) == 0,
+		"scroll restoration clamps when the new range is smaller");
+
 	return passed ? 0 : 1;
 }

@@ -62,6 +62,7 @@ public slots:
     bool saveRoomState(const QString &roomId, const QString &name,
                        const QString &topic, const QString &avatarUrl,
                        const QString &membership, bool isDirect, bool isEncrypted,
+                       bool encryptionStateKnown,
                        const QString &replacementRoomId, const QString &prevBatch);
     bool checkAndSaveMegolmMessageIndex(const QString &sessionId, quint32 messageIndex,
                                         const QString &eventId, bool &replayDetected);
