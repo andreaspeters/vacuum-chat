@@ -139,6 +139,20 @@ int main(int argc, char **argv)
 		QStringLiteral("@other:test"), QString(), QStringLiteral("later"),
 		QDateTime::fromMSecsSinceEpoch(1500, QTimeZone::utc()),
 		QStringLiteral("matrix"), BasicMessage::Incoming);
+	QList<BasicMessage> visibleHistory{serverEcho, laterMessage};
+	BasicMessage staleOverlap = serverEcho;
+	staleOverlap.setBody(QStringLiteral("stale overlap"));
+	const QList<BasicMessage> olderPage{olderMessage, staleOverlap};
+	const QList<BasicMessage> mergedOlderPage =
+		ProtocolMessageHistory::mergeOlderPage(visibleHistory, olderPage);
+	passed &= check(mergedOlderPage.size() == 3 &&
+		mergedOlderPage.at(0).messageId() == olderMessage.messageId() &&
+		mergedOlderPage.at(1).messageId() == serverEcho.messageId() &&
+		mergedOlderPage.at(2).messageId() == laterMessage.messageId(),
+		"older page merges before visible messages in chronological order without duplicates");
+	passed &= check(mergedOlderPage.at(1).body() == serverEcho.body(),
+		"an overlapping page cannot overwrite the already-visible version of a message");
+
 	QList<BasicMessage> outOfOrderHistory;
 	outOfOrderHistory.append(laterMessage);
 	outOfOrderHistory.append(localEcho);

@@ -3,12 +3,24 @@
 
 #include <QString>
 #include <QList>
+#include <QObject>
+#include <functional>
 
 #include <QtPlugin>
 #include <interfaces/imessage.h>
 #include <interfaces/iprotocolpresence.h>
 #include <interfaces/identity.h>
 #include <utils/jid.h>
+
+struct ProtocolHistoryPage
+{
+    QList<BasicMessage> messages;
+    bool success = false;
+    bool hasMore = false;
+    QString error;
+};
+
+using ProtocolHistoryPageCallback = std::function<void(ProtocolHistoryPage)>;
 
 class IProtocolMessaging
 {
@@ -66,6 +78,18 @@ public:
     { (void)conversationId; (void)status; }
     virtual QList<BasicMessage> conversationHistory(const ConversationId &conversationId) const
     { (void)conversationId; return QList<BasicMessage>(); }
+    virtual bool supportsOlderHistory(const ConversationId &conversationId) const
+    { (void)conversationId; return false; }
+    // beforeMessage is an exclusive cursor boundary. Accepted requests return one
+    // chronologically ordered page through callbackContext, unless it is destroyed.
+    virtual bool requestOlderHistoryPage(const ConversationId &conversationId,
+        const BasicMessage &beforeMessage, int limit, QObject *callbackContext,
+        ProtocolHistoryPageCallback callback)
+    {
+        (void)conversationId; (void)beforeMessage; (void)limit;
+        (void)callbackContext; (void)callback;
+        return false;
+    }
     virtual void setActiveConversation(const ConversationId &conversationId) const
     { (void)conversationId; }
     virtual void loadConversationAvatars(const ConversationId &conversationId) const

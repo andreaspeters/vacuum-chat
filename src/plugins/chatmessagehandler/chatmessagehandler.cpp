@@ -703,31 +703,8 @@ void ChatMessageHandler::onProtocolHistoryLoaded(const QString &ARoomId)
 	const QList<BasicMessage> previousHistory = FProtocolConversationMessages.value(historyKey);
 	FProtocolHistoryLoaded.insert(historyKey);
 	QList<BasicMessage> history = FPendingProtocolHistoryMessages.take(historyKey);
-	sortProtocolMessagesChronologically(history);
-	QHash<QString, int> messageIndexes;
-	QList<BasicMessage> uniqueMessages;
-	for (const BasicMessage &message : history) {
-		const ProtocolMessageHistory::TransactionEchoMergeResult transactionMerge =
-			ProtocolMessageHistory::mergeTransactionEcho(uniqueMessages, message);
-		if (transactionMerge != ProtocolMessageHistory::TransactionEchoMergeResult::NoMatch) {
-			if (transactionMerge == ProtocolMessageHistory::TransactionEchoMergeResult::ReplacedLocalEcho ||
-				transactionMerge == ProtocolMessageHistory::TransactionEchoMergeResult::RestoredLocalEcho) {
-				messageIndexes.clear();
-				for (int index = 0; index < uniqueMessages.size(); ++index)
-					if (!uniqueMessages.at(index).messageId().isEmpty())
-						messageIndexes.insert(uniqueMessages.at(index).messageId(), index);
-			}
-			continue;
-		}
-		if (message.messageId().isEmpty() || !messageIndexes.contains(message.messageId())) {
-			if (!message.messageId().isEmpty())
-				messageIndexes.insert(message.messageId(), uniqueMessages.size());
-			uniqueMessages.append(message);
-		} else {
-			uniqueMessages[messageIndexes.value(message.messageId())] = message;
-		}
-	}
-	sortProtocolMessagesChronologically(uniqueMessages);
+	const QList<BasicMessage> uniqueMessages =
+		ProtocolMessageHistory::mergeOlderPage(previousHistory, history);
 	FProtocolConversationMessages.insert(historyKey, uniqueMessages);
 	IChatWindow *window = FMessageWidgets->findConversationWindow(messaging->streamId(), ARoomId);
 	if (!window)

@@ -181,7 +181,13 @@ void MatrixDatabaseWorker::loadHistory(const QString &profileDirectory,
             QStringLiteral("Matrix SQLite database could not be opened for history"));
         return;
     }
-    emit historyLoaded(roomId, FDatabase.getEvents(roomId));
+    const MatrixHistoryPageResult page = FDatabase.loadHistoryPage(roomId, 30);
+    if (!page.success) {
+        emit historyLoadFailed(roomId,
+            QStringLiteral("Matrix SQLite database could not load history page"));
+        return;
+    }
+    emit historyLoaded(roomId, page.events);
 }
 
 void MatrixDatabaseWorker::loadHistoryPage(const QString &profileDirectory,

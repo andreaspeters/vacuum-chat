@@ -1,8 +1,0 @@
-connectionmanager.obj
-connectionoptionswidget.obj
-editproxydialog.obj
-proxysettingswidget.obj
-moc_connectionmanager.obj
-moc_connectionoptionswidget.obj
-moc_editproxydialog.obj
-moc_proxysettingswidget.obj

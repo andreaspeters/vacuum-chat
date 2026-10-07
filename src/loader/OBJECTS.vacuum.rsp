@@ -1,7 +1,0 @@
-main.obj
-pluginmanager.obj
-setuppluginsdialog.obj
-aboutbox.obj
-moc_pluginmanager.obj
-moc_setuppluginsdialog.obj
-moc_aboutbox.obj

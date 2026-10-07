@@ -235,6 +235,51 @@ inline TransactionEchoMergeResult mergeTransactionEcho(QList<BasicMessage> &AHis
 
 	return TransactionEchoMergeResult::NoMatch;
 }
+
+inline QList<BasicMessage> mergeOlderPage(const QList<BasicMessage> &AVisibleHistory,
+	const QList<BasicMessage> &AOlderPage)
+{
+	QList<BasicMessage> merged;
+	QHash<QString, int> messageIndexes;
+	auto rebuildMessageIndexes = [&merged, &messageIndexes]() {
+		messageIndexes.clear();
+		for (int index = 0; index < merged.size(); ++index)
+			if (!merged.at(index).messageId().isEmpty())
+				messageIndexes.insert(merged.at(index).messageId(), index);
+	};
+	auto addMessage = [&merged, &messageIndexes, &rebuildMessageIndexes](
+		const BasicMessage &message, bool visibleMessage) {
+		const TransactionEchoMergeResult transactionMerge = mergeTransactionEcho(merged, message);
+		if (transactionMerge != TransactionEchoMergeResult::NoMatch) {
+			rebuildMessageIndexes();
+			return;
+		}
+		const QString messageId = message.messageId();
+		if (messageId.isEmpty()) {
+			merged.append(message);
+		} else if (!messageIndexes.contains(messageId)) {
+			messageIndexes.insert(messageId, merged.size());
+			merged.append(message);
+		} else if (visibleMessage) {
+			merged[messageIndexes.value(messageId)] = message;
+		}
+	};
+	for (const BasicMessage &message : AOlderPage)
+		addMessage(message, false);
+	for (const BasicMessage &message : AVisibleHistory)
+		addMessage(message, true);
+	std::stable_sort(merged.begin(), merged.end(), [](const BasicMessage &left,
+		const BasicMessage &right) {
+		const QDateTime leftTime = left.timestamp();
+		const QDateTime rightTime = right.timestamp();
+		if (leftTime.isValid() != rightTime.isValid())
+			return leftTime.isValid();
+		if (!leftTime.isValid())
+			return false;
+		return leftTime < rightTime;
+	});
+	return merged;
+}
 }
 
 #endif // PROTOCOLMESSAGEHISTORY_H

@@ -57,6 +57,15 @@ int main()
         "file transfer capability defaults to disabled");
     passed &= check(!messaging.sendReaction(conversationId, QStringLiteral("message-id"),
         QStringLiteral("👍")), "unsupported reactions fail safely");
+    BasicMessage historyCursor;
+    bool historyPageCallbackCalled = false;
+    passed &= check(!messaging.supportsOlderHistory(conversationId),
+        "older-history paging defaults to unsupported");
+    passed &= check(!messaging.requestOlderHistoryPage(conversationId, historyCursor, 30, nullptr,
+        [&historyPageCallbackCalled](ProtocolHistoryPage) { historyPageCallbackCalled = true; }),
+        "unsupported older-history request is rejected safely");
+    passed &= check(!historyPageCallbackCalled,
+        "unsupported older-history request does not invoke its callback");
 
     IProtocolCapabilities unsupported;
     passed &= check(!unsupported.hasCapabilities(QStringLiteral("account-1"),
