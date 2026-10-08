@@ -18,7 +18,7 @@ revpkg="1"
 CLIENT_NAME="vacuum-im"
 CLIENT_VERSION=""
 CLIENT_VERSION_SUFIX=""
-CLIENT_SVN_VER=""
+
 
 # Go to root
 cd ../../../../
@@ -42,12 +42,6 @@ instldir="$srcdir"/instldir
 CLIENT_VERSION="$(grep -m 1 "CLIENT_VERSION" ./src/definitions/version.h | awk -F '"' '{print $2}' | awk -F '"' '{print $1}')"
 CLIENT_VERSION_SUFIX="$(grep "CLIENT_VERSION_SUFIX" ./src/definitions/version.h | awk -F '"' '{print $2}' | awk -F '"' '{print $1}')"
 
-if [ -d "$srcdir"/.svn ]
-then
-	echo "This is a svn version"
-	# Get svn version
-	CLIENT_SVN_VER="$(sed -n -e '/^dir$/{n;p;q;}' .svn/entries)"
-fi
 
 # Check dir for cmake
 if [ ! -d "$instldir" ]
@@ -128,9 +122,9 @@ then
 fi
 
 # Create package for Slackware Linux
-if makepkg -l y -p -c y "$pkgdir"/"$CLIENT_NAME"-"$CLIENT_VERSION""$CLIENT_VERSION_SUFIX""$CLIENT_SVN_VER"-"$arche"-"$revpkg"."$pkgtype" > /dev/null 2>&1
+if makepkg -l y -p -c y "$pkgdir"/"$CLIENT_NAME"-"$CLIENT_VERSION""$CLIENT_VERSION_SUFIX"-"$arche"-"$revpkg"."$pkgtype" > /dev/null 2>&1
 then
-	echo "Package created - "$pkgdir"/"$CLIENT_NAME"-"$CLIENT_VERSION""$CLIENT_VERSION_SUFIX""$CLIENT_SVN_VER"-"$arche"-"$revpkg"."$pkgtype""
+	echo "Package created - "$pkgdir"/"$CLIENT_NAME"-"$CLIENT_VERSION""$CLIENT_VERSION_SUFIX"-"$arche"-"$revpkg"."$pkgtype""
 else
 	echo "Package create FAIL"
 	exit 1

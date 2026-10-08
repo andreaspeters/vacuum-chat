@@ -1,7 +1,7 @@
 {
     "name": "MeshCore Protocol Plugin",
     "description": "Implements the MeshCore protocol for Vacuum Chat",
-    "version": "1.0",
-    "author": "Vacuum Development Team",
-    "homepage": "https://github.com/meshcore-dev/MeshCore"
+    "version": "0.1.0",
+    "author": "Andreas Peter",
+    "homepage": "https://github.com/andreaspeters/vacuum-chat"
 }

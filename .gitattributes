@@ -1,5 +1,5 @@
 # Preserve CRLF-formatted legacy files while still checking normal whitespace.
-CHANGELOG whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+CHANGELOG.md whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 src/definitions/version.h whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 src/loader/aboutbox.cpp whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 src/loader/ui_aboutbox.h whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

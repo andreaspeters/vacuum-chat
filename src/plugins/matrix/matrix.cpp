@@ -552,8 +552,8 @@ void Matrix::pluginInfo(IPluginInfo *APluginInfo)
 	APluginInfo->name = "Matrix Client-Server";
 	APluginInfo->description = "Matrix protocol support with C-S API";
 	APluginInfo->version = "0.1.0";
-	APluginInfo->author = "Hermes Agent";
-	APluginInfo->homePage = QUrl();
+	APluginInfo->author = "Andreas Peters";
+	APluginInfo->homePage = QUrl("https://github.com/andreaspeters/vacuum-chat");
 }
 
 bool Matrix::initConnections(IPluginManager *APluginManager, int &AInitOrder)

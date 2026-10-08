@@ -1,5 +1,3 @@
-#undef SVNINFO
-
 #include "pluginmanager.h"
 
 #include <QtDebug>
@@ -24,12 +22,6 @@
 #define SVN_DATA_PATH               "DataPath"
 #define SVN_LOCALE_NAME             "Locale"
 
-#ifdef SVNINFO
-#  define SVN_DATE                  ""
-#else
-#  define SVN_DATE                  ""
-#  define SVN_REVISION              "0"
-#endif
 
 #if defined(Q_OS_WIN)
 #  define ENV_APP_DATA              "APPDATA"
@@ -87,13 +79,12 @@ QString PluginManager::version() const
 
 QString PluginManager::revision() const
 {
-	static const QString rev = QString(SVN_REVISION).contains(':') ? QString(SVN_REVISION).split(':').value(1) : QString(SVN_REVISION);
-	return rev;
+	return QStringLiteral("0");
 }
 
 QDateTime PluginManager::revisionDate() const
 {
-	return QDateTime::fromString(SVN_DATE,"yyyy/MM/dd hh:mm:ss");
+	return QDateTime();
 }
 
 bool PluginManager::isShutingDown() const

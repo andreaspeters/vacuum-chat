@@ -10,21 +10,6 @@ project(loader CXX)
 
 include_directories("${CMAKE_BINARY_DIR}/src/loader" "${CMAKE_SOURCE_DIR}/src")
 
-set(VER_STRING "" CACHE STRING "This string will be appended to program version (defaults to SVN revision number)")
-
-if (VER_STRING STREQUAL "")
-execute_process(COMMAND svnversion -n -c "${CMAKE_SOURCE_DIR}"
-	OUTPUT_VARIABLE SVN_REVISION)
-else (VER_STRING STREQUAL "")
-	set(SVN_REVISION "0:${VER_STRING}") # see PluginManager::revision()
-endif (VER_STRING STREQUAL "")
-
-if (NOT (SVN_REVISION STREQUAL "" OR SVN_REVISION STREQUAL "exported"))
-	file(REMOVE "svninfo.h")
-	file(WRITE "svninfo.h" "#define SVN_REVISION \"${SVN_REVISION}\"\n")
-	add_definitions(-DSVNINFO)
-endif (NOT (SVN_REVISION STREQUAL "" OR SVN_REVISION STREQUAL "exported"))
-
 if (WIN32)
 	if (MINGW)
 		add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/loader.rc.obj"

@@ -1,7 +1,7 @@
 <project>
     <shortName>vacuum</shortName>
     <fullName>Vacuum Chat</fullName>
-        <version>2.0.0</version>
+        <version>2.1.0</version>
     <installerFilename>${product_shortname}_${product_version}_${platform_name}-installer.${platform_exec_suffix}</installerFilename>
     <readmeFile>../../../README.md</readmeFile>
     <licenseFile>../../../COPYING</licenseFile>
@@ -138,7 +138,7 @@
                             <origin>../../../AUTHORS</origin>
                         </distributionFile>
                         <distributionFile>
-                            <origin>../../../CHANGELOG</origin>
+                            <origin>../../../CHANGELOG.md</origin>
                         </distributionFile>
                         <distributionFile>
                             <origin>../../../COPYING</origin>

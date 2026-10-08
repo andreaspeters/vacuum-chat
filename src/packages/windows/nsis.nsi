@@ -4,7 +4,7 @@
 ;--------------------------------
 
 ; Program Version
-!define PROGRAM_VERSION     "2.0.0"
+!define PROGRAM_VERSION     "2.1.0"
 
 ; Install Folder
 !define PROGRAM_FOLDER      "Vacuum-IM"
@@ -63,7 +63,7 @@ Section "Vacuum Chat (required)"
   ; Info files
   File "${PROGRAM_BIN_FOLDER}\AUTHORS"
   File "${PROGRAM_BIN_FOLDER}\README.md"
-  File "${PROGRAM_BIN_FOLDER}\CHANGELOG"
+  File "${PROGRAM_BIN_FOLDER}\CHANGELOG.md"
   File "${PROGRAM_BIN_FOLDER}\COPYING"
 	
   ; Binaries

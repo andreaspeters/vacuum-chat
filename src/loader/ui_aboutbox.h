@@ -89,7 +89,7 @@ public:
 
         lblVersion = new QLabel(AboutBoxClass);
         lblVersion->setObjectName(QString::fromUtf8("lblVersion"));
-        lblVersion->setText(QString::fromUtf8("Version: 2.0.0"));
+        lblVersion->setText(QString::fromUtf8("Version: 2.1.0"));
         lblVersion->setTextFormat(Qt::PlainText);
 
         verticalLayout->addWidget(lblVersion);

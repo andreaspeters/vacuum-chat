@@ -18,7 +18,7 @@ MAKEFILE      = Makefile
 
 CC            = gcc
 CXX           = g++
-DEFINES       = -DPLUGINS_DIR=\"././plugins\" -DRESOURCES_DIR=\"././resources\" -DTRANSLATIONS_DIR=\"././translations\" -DSVNINFO -DQT_NO_DEBUG -DQT_XML_LIB -DQT_GUI_LIB -DQT_CORE_LIB -DQT_HAVE_MMX -DQT_HAVE_3DNOW -DQT_HAVE_SSE -DQT_HAVE_MMXEXT -DQT_HAVE_SSE2
+DEFINES       = -DPLUGINS_DIR=\"././plugins\" -DRESOURCES_DIR=\"././resources\" -DTRANSLATIONS_DIR=\"././translations\"  -DQT_NO_DEBUG -DQT_XML_LIB -DQT_GUI_LIB -DQT_CORE_LIB -DQT_HAVE_MMX -DQT_HAVE_3DNOW -DQT_HAVE_SSE -DQT_HAVE_MMXEXT -DQT_HAVE_SSE2
 CFLAGS        = -Zomf -march=i486 -mtune=generic -s -O2 -Wall $(DEFINES)
 CXXFLAGS      = -Zomf -march=i486 -mtune=generic -s -O2 -Wall $(DEFINES)
 INCPATH       = -I..\..\..\..\usr\include\QtCore -I..\..\..\..\usr\include\QtGui -I..\..\..\..\usr\include\QtXml -I..\..\..\..\usr\include -I.. -I. -I. -I$(QMAKESPECDIR)
@@ -169,7 +169,7 @@ clean: compiler_clean
 	-$(DEL_FILE) $(basename $(DESTDIR_TARGET)).sym >nul 2>&1
 
 distclean: clean
-	-$(DEL_FILE) svninfo.h u:\Projekte\vacuum\src\translations\ru\vacuum.qm u:\Projekte\vacuum\src\translations\pl\vacuum.qm u:\Projekte\vacuum\src\translations\de\vacuum.qm u:\Projekte\vacuum\src\translations\uk\vacuum.qm $(OBJECTS_RSP) $(CFLAGS_RSP) $(CXXFLAGS_RSP) $(DEFINES_RSP) $(INCPATH_RSP) >nul 2>&1
+	-$(DEL_FILE) u:\Projekte\vacuum\src\translations\ru\vacuum.qm u:\Projekte\vacuum\src\translations\pl\vacuum.qm u:\Projekte\vacuum\src\translations\de\vacuum.qm u:\Projekte\vacuum\src\translations\uk\vacuum.qm $(OBJECTS_RSP) $(CFLAGS_RSP) $(CXXFLAGS_RSP) $(DEFINES_RSP) $(INCPATH_RSP) >nul 2>&1
 	-$(DEL_FILE) $(DESTDIR_TARGET) >nul 2>&1
 	-$(DEL_FILE) Makefile >nul 2>&1
 
@@ -388,7 +388,7 @@ uninstall_resources:  FORCE
 install_documents: first FORCE
 	@$(CHK_DIR_EXISTS) $(if $(INSTALL_ROOT),$(INSTALL_ROOT),u:)\Projekte\vacuum\src\loader\.\vacuum $(MKDIR) $(if $(INSTALL_ROOT),$(INSTALL_ROOT),u:)\Projekte\vacuum\src\loader\.\vacuum 
 	$(INSTALL_FILE) u:\Projekte\vacuum\AUTHORS $(if $(INSTALL_ROOT),$(INSTALL_ROOT),u:)\Projekte\vacuum\src\loader\vacuum
-	$(INSTALL_FILE) u:\Projekte\vacuum\CHANGELOG $(if $(INSTALL_ROOT),$(INSTALL_ROOT),u:)\Projekte\vacuum\src\loader\vacuum
+	$(INSTALL_FILE) u:\Projekte\vacuum\CHANGELOG.md $(if $(INSTALL_ROOT),$(INSTALL_ROOT),u:)\Projekte\vacuum\src\loader\vacuum
 	$(INSTALL_FILE) u:\Projekte\vacuum\README.md $(if $(INSTALL_ROOT),$(INSTALL_ROOT),u:)\Projekte\vacuum\src\loader\vacuum
 	$(INSTALL_FILE) u:\Projekte\vacuum\COPYING $(if $(INSTALL_ROOT),$(INSTALL_ROOT),u:)\Projekte\vacuum\src\loader\vacuum
 	$(INSTALL_FILE) u:\Projekte\vacuum\TRANSLATORS $(if $(INSTALL_ROOT),$(INSTALL_ROOT),u:)\Projekte\vacuum\src\loader\vacuum
@@ -396,7 +396,7 @@ install_documents: first FORCE
 
 uninstall_documents:  FORCE
 	-$(DEL_FILE) $(if $(INSTALL_ROOT),$(INSTALL_ROOT),u:)\Projekte\vacuum\src\loader\vacuum\AUTHORS >nul 2>&1 
-	 -$(DEL_FILE) $(if $(INSTALL_ROOT),$(INSTALL_ROOT),u:)\Projekte\vacuum\src\loader\vacuum\CHANGELOG >nul 2>&1 
+	-$(DEL_FILE) $(if $(INSTALL_ROOT),$(INSTALL_ROOT),u:)\Projekte\vacuum\src\loader\vacuum\CHANGELOG.md >nul 2>&1
 	 -$(DEL_FILE) $(if $(INSTALL_ROOT),$(INSTALL_ROOT),u:)\Projekte\vacuum\src\loader\vacuum\README.md >nul 2>&1
 	 -$(DEL_FILE) $(if $(INSTALL_ROOT),$(INSTALL_ROOT),u:)\Projekte\vacuum\src\loader\vacuum\COPYING >nul 2>&1 
 	 -$(DEL_FILE) $(if $(INSTALL_ROOT),$(INSTALL_ROOT),u:)\Projekte\vacuum\src\loader\vacuum\TRANSLATORS >nul 2>&1
