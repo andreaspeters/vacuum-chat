@@ -494,7 +494,8 @@ QList<quint32> RecentContacts::rosterLabels(int AOrder, const IRosterIndex *AInd
 		(AIndex->type() == RIT_RECENT_ITEM && FFavorites.contains(recentItemForIndex(AIndex)));
 	const bool hasNotification = FRostersView && !FRostersView->notifyQueue(
 		const_cast<IRosterIndex *>(AIndex)).isEmpty();
-	if (!RecentContactsProtocolIcon::favoriteBulbVisible(favorite, hasNotification))
+	if (!RecentContactsProtocolIcon::favoriteBulbVisible(favorite, hasNotification,
+		favoriteRootItem))
 		return QList<quint32>();
 	return QList<quint32>() << RLID_RECENT_FAVORITE;
 }

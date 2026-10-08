@@ -44,8 +44,8 @@ int main(int argc, char **argv)
 
     passed &= check(AvatarVisualPolicy::shouldShowRosterAvatar(false),
         "avatars remain visible on ordinary roster rows");
-    passed &= check(!AvatarVisualPolicy::shouldShowRosterAvatar(true),
-        "avatars are hidden on favorite copies");
+    passed &= check(AvatarVisualPolicy::shouldShowRosterAvatar(true),
+		"avatars remain visible on favorite copies, including room rows");
 
     return passed ? 0 : 1;
 }

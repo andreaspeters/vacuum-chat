@@ -6,9 +6,10 @@
 
 namespace AvatarVisualPolicy
 {
-inline bool shouldShowRosterAvatar(bool isRecentFavorite)
+inline bool shouldShowRosterAvatar(bool)
 {
-    return !isRecentFavorite;
+	// Favorite entries mirror roster rows; keep their avatar label visible too.
+	return true;
 }
 
 inline bool shouldGray(int show, bool showGrayAvatars)

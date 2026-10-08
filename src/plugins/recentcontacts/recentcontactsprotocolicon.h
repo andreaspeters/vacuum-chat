@@ -16,7 +16,8 @@ QString accountIdForRosterStream(const QString &ARosterId, const QString &AStrea
 	const QString &AAccountId);
 QList<quint32> favoriteLabelIds();
 quint32 protocolLabelId();
-bool favoriteBulbVisible(bool AFavorite, bool AHasNotification);
+bool favoriteBulbVisible(bool AFavorite, bool AHasNotification,
+	bool AFavoriteRosterRow = false);
 }
 
 #endif // RECENTCONTACTSPROTOCOLICON_H

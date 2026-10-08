@@ -47,7 +47,8 @@ QList<quint32> RecentContactsProtocolIcon::favoriteLabelIds()
     return QList<quint32>() << protocolLabelId();
 }
 
-bool RecentContactsProtocolIcon::favoriteBulbVisible(bool AFavorite, bool AHasNotification)
+bool RecentContactsProtocolIcon::favoriteBulbVisible(bool AFavorite, bool AHasNotification,
+	bool AFavoriteRosterRow)
 {
-    return AFavorite && !AHasNotification;
+	return AFavorite && !AHasNotification && !AFavoriteRosterRow;
 }

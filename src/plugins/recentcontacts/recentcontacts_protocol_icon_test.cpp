@@ -90,6 +90,10 @@ int main(int argc, char *argv[])
         std::cerr << "favorite bulb: visible only for favorites without pending notifications\n";
         ++failures;
     }
+    if (RecentContactsProtocolIcon::favoriteBulbVisible(true, false, true)) {
+        std::cerr << "favorite pin: not shown on favorite roster rows\n";
+        ++failures;
+    }
     if (AdvancedDelegateItem::getPosition(AdvancedDelegateItem::DecorationId) != AdvancedDelegateItem::MiddleLeft) {
         std::cerr << "RecentContacts protocol icon: status lamp must stay in the default left decoration slot" << std::endl;
         ++failures;

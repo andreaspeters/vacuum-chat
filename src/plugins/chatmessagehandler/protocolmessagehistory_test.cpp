@@ -164,11 +164,13 @@ int main(int argc, char **argv)
 	passed &= check(outOfOrderIndex == 1 &&
 		ProtocolMessageHistory::requiresChronologicalSort(outOfOrderHistory, replacementIndex),
 		"out-of-order echo replacement requires sorting before rebuild");
-	passed &= check(ProtocolMessageHistory::requiresTimelineRebuild(1, 0, 2, true),
-		"a transaction echo that moves earlier still requires timeline reordering");
-	passed &= check(ProtocolMessageHistory::requiresTimelineRebuild(-1, 1, 3, false) &&
+	passed &= check(!ProtocolMessageHistory::requiresTimelineRebuild(1, 0, 2, true),
+		"a reordered transaction echo keeps the existing visible bubble without rebuilding the timeline");
+	passed &= check(!ProtocolMessageHistory::requiresTimelineRebuild(-1, 1, 3, false) &&
 		!ProtocolMessageHistory::requiresTimelineRebuild(-1, 2, 3, false),
-		"an unrendered item rebuilds only when it belongs before the visible tail");
+		"new live messages do not rebuild the timeline regardless of chronological insertion position");
+	passed &= check(ProtocolMessageHistory::requiresTimelineRebuild(2, -1, 3, true),
+		"a previously rendered message missing from canonical history triggers a recovery rebuild");
 
 	BasicMessage imagePlaceholder(QStringLiteral("$old-image"), QStringLiteral("!room:test"),
 		QStringLiteral("@other:test"), QString(), QStringLiteral("photo.png"),
