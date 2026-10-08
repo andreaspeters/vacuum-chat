@@ -67,8 +67,6 @@ RecentContacts::RecentContacts()
 	FRostersViewPlugin = NULL;
 
 	FRootIndex = NULL;
-	FShowFavariteLabelId = 0;
-
 	FMaxVisibleItems = 20;
 	FHideLaterContacts = true;
 	FAllwaysShowOffline = true;
@@ -182,11 +180,6 @@ bool RecentContacts::initObjects()
 
 	if (FRostersView)
 	{
-		AdvancedDelegateItem showFavorite(RLID_RECENT_FAVORITE);
-		showFavorite.d->kind = AdvancedDelegateItem::CustomData;
-		showFavorite.d->data = IconStorage::staticStorage(RSR_STORAGE_MENUICONS)->getIcon(MNI_RECENT_FAVORITE);
-		FShowFavariteLabelId = FRostersView->registerLabel(showFavorite);
-
 		FRostersView->insertDragDropHandler(this);
 		FRostersView->insertLabelHolder(RLHO_RECENT_FILTER,this);
 		FRostersView->insertClickHooker(RCHO_RECENTCONTACTS,this);
@@ -492,19 +485,33 @@ bool RecentContacts::rosterDropAction(const QDropEvent *AEvent, IRosterIndex *AI
 
 QList<quint32> RecentContacts::rosterLabels(int AOrder, const IRosterIndex *AIndex) const
 {
-	if (AOrder == RLHO_RECENT_FILTER && AIndex != NULL && FFavoritesRootIndex != NULL &&
-		AIndex->parentIndex() == FFavoritesRootIndex)
-	{
-		return RecentContactsProtocolIcon::favoriteLabelIds();
-	}
-	return QList<quint32>();
+	if (AOrder != RLHO_RECENT_FILTER || !AIndex)
+		return QList<quint32>();
+
+	const bool favoriteRootItem = FFavoritesRootIndex && AIndex->parentIndex() == FFavoritesRootIndex;
+	const bool favorite = favoriteRootItem ||
+		(AIndex->type() == RIT_RECENT_ITEM && FFavorites.contains(recentItemForIndex(AIndex)));
+	const bool hasNotification = FRostersView && !FRostersView->notifyQueue(
+		const_cast<IRosterIndex *>(AIndex)).isEmpty();
+	if (!RecentContactsProtocolIcon::favoriteBulbVisible(favorite, hasNotification))
+		return QList<quint32>();
+	return QList<quint32>() << RLID_RECENT_FAVORITE;
 }
 
 AdvancedDelegateItem RecentContacts::rosterLabel(int AOrder, quint32 ALabelId, const IRosterIndex *AIndex) const
 {
 	AdvancedDelegateItem null;
-	if (AOrder != RLHO_RECENT_FILTER || AIndex == NULL || FFavoritesRootIndex == NULL ||
-		AIndex->parentIndex() != FFavoritesRootIndex)
+	if (AOrder != RLHO_RECENT_FILTER || !AIndex)
+		return null;
+
+	if (ALabelId == RLID_RECENT_FAVORITE)
+	{
+		AdvancedDelegateItem bulb(ALabelId);
+		bulb.d->kind = AdvancedDelegateItem::CustomData;
+		bulb.d->data = IconStorage::staticStorage(RSR_STORAGE_MENUICONS)->getIcon(MNI_RECENT_FAVORITE);
+		return bulb;
+	}
+	if (FFavoritesRootIndex == NULL || AIndex->parentIndex() != FFavoritesRootIndex)
 		return null;
 
 	QIcon icon;
@@ -992,10 +999,7 @@ void RecentContacts::updateItemIndex(const IRecentItem &AItem)
 
 		if (FRostersView)
 		{
-			if (favorite)
-				FRostersView->insertLabel(FShowFavariteLabelId,index);
-			else
-				FRostersView->removeLabel(FShowFavariteLabelId,index);
+			emit rosterLabelChanged(RLID_RECENT_FAVORITE, index);
 		}
 	}
 }

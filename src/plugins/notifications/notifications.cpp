@@ -1,4 +1,5 @@
 #include "notifications.h"
+#include "protocolnotificationrosterstreamid.h"
 
 #include <utils/messagenotificationmute.h>
 
@@ -20,6 +21,7 @@ static bool sameProtocolNotification(const ProtocolNotification &left,
 	const ProtocolNotification &right)
 {
 	return left.id == right.id && left.accountId == right.accountId &&
+		left.streamId == right.streamId &&
 		left.conversationId == right.conversationId && left.title == right.title &&
 		left.body == right.body && left.protocol == right.protocol &&
 		left.timestamp == right.timestamp && left.kind == right.kind;
@@ -277,6 +279,7 @@ void Notifications::synchronizeProtocolNotifications()
 			bridged.typeId = NNT_PROTOCOL_NOTIFICATION;
 			bridged.kinds = enabledTypeNotificationKinds(bridged.typeId);
 			bridged.data.insert(NDR_ACCOUNT_ID,notification.accountId);
+			bridged.data.insert(NDR_PROTOCOL_STREAM_ID,notification.streamId);
 			bridged.data.insert(NDR_USER_ID,notification.title);
 			bridged.data.insert(NDR_CONVERSATION_ID,notification.conversationId);
 			bridged.data.insert(NDR_POPUP_CAPTION,notification.protocol.isEmpty()
@@ -286,10 +289,9 @@ void Notifications::synchronizeProtocolNotifications()
 			bridged.data.insert(NDR_TOOLTIP,notification.title.isEmpty()
 				? notification.body : notification.title + QStringLiteral(": ") + notification.body);
 			bridged.data.insert(NDR_ICON,contactIconById(notification.accountId,notification.title));
+			bridged.data.insert(NDR_ROSTER_ICON,
+				IconStorage::staticStorage(RSR_STORAGE_MENUICONS)->getIcon(MNI_CHAT_MHANDLER_MESSAGE));
 			bridged.data.insert(NDR_ROSTER_CREATE_INDEX,false);
-			if (notification.kind == ProtocolNotification::Message ||
-				notification.kind == ProtocolNotification::Mention)
-				bridged.data.insert(NDR_ROSTER_FLAGS, IRostersNotify::BlinkStatusIcon);
 			const int notifyId = appendNotification(bridged);
 			FProtocolNotificationIds.insert(key,notifyId);
 			FProtocolNotificationKeys.insert(notifyId,key);
@@ -405,7 +407,11 @@ int Notifications::appendNotification(const INotification &ANotification)
 			{
 				QMultiMap<int, QVariant> findData;
 				findData.insert(RDR_CONVERSATION_ID, conversationId);
-				IRosterIndex *root = FRostersModel->protocolStreamRoot(accountId);
+				ProtocolNotification target;
+				target.accountId = accountId;
+				target.streamId = record.notification.data.value(NDR_PROTOCOL_STREAM_ID).toString();
+				IRosterIndex *root = FRostersModel->protocolStreamRoot(
+					protocolNotificationRosterStreamId(target));
 				if (root)
 				{
 					indexes = root->findChilds(findData, true);
@@ -441,7 +447,9 @@ int Notifications::appendNotification(const INotification &ANotification)
 				IRostersNotify rnotify;
 				rnotify.order = record.notification.data.value(NDR_ROSTER_ORDER).toInt();
 				rnotify.flags = record.notification.data.value(NDR_ROSTER_FLAGS).toInt();
-				rnotify.icon = (rnotify.flags & IRostersNotify::BlinkStatusIcon) > 0 ? QIcon() : icon;
+				rnotify.icon = record.notification.data.contains(NDR_ROSTER_ICON)
+				? qvariant_cast<QIcon>(record.notification.data.value(NDR_ROSTER_ICON))
+				: ((rnotify.flags & IRostersNotify::BlinkStatusIcon) > 0 ? QIcon() : icon);
 				if (Options::node(OPV_NOTIFICATIONS_EXPANDGROUP).value().toBool())
 					rnotify.flags |= IRostersNotify::ExpandParents;
 				rnotify.timeout = record.notification.data.value(NDR_ROSTER_TIMEOUT).toInt();

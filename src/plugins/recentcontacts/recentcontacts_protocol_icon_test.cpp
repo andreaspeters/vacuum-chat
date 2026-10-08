@@ -80,7 +80,14 @@ int main(int argc, char *argv[])
         ++failures;
     }
     if (favoriteLabels.size() != 1 || favoriteLabels.first() != protocolLabel) {
-        std::cerr << "RecentContacts protocol icon: only the protocol logo should be an additional label\n";
+        std::cerr << "RecentContacts protocol icon: only the protocol logo should be an additional label\\n";
+        ++failures;
+    }
+    if (!RecentContactsProtocolIcon::favoriteBulbVisible(true, false) ||
+        RecentContactsProtocolIcon::favoriteBulbVisible(true, true) ||
+        RecentContactsProtocolIcon::favoriteBulbVisible(false, true) ||
+        RecentContactsProtocolIcon::favoriteBulbVisible(false, false)) {
+        std::cerr << "favorite bulb: visible only for favorites without pending notifications\n";
         ++failures;
     }
     if (AdvancedDelegateItem::getPosition(AdvancedDelegateItem::DecorationId) != AdvancedDelegateItem::MiddleLeft) {

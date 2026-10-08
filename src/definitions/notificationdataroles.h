@@ -33,7 +33,9 @@ enum NotificationDataRoles {
 	// Generic protocol identities (append-only to preserve legacy role values)
 	NDR_ACCOUNT_ID,
 	NDR_USER_ID,
-	NDR_CONVERSATION_ID
+	NDR_CONVERSATION_ID,
+	NDR_PROTOCOL_STREAM_ID,
+	NDR_ROSTER_ICON
 };
 
 #endif // DEF_NOTIFICATIONDATAROLES_H

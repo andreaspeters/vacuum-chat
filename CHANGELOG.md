@@ -1,3 +1,8 @@
+## master
+
+- CHANGE: [ui] sync with chat events to reduce load.
+- ADD:    [ui] notification notice in the.
+
 ## v2.1.0
 
 - ADD: protocol-neutral messaging capabilities for message status, reactions,

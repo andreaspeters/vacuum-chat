@@ -17,6 +17,16 @@ message display.
 build time
 - MeshCore account
 
+
+| Chat Protocol | Status | Comment
+|---------------|--------|-----------------------------------------------
+| Matrix        | ✔️     | Integrated with rooms, messages, reactions, e2ee, etc.
+| XMPP          | ✔️     | Classic protocol supporting PubSub, MUC, and offline messages.
+| Meshcore      | ✔️     | Custom distributed architecture for decentralized communication.
+| Discord       | ❌     | Planned for future release, no release date yet.
+| IRC           | ❌     | Planned for future release, no release date yet.
+
+
 ## Requirements
 
 - CMake 3.16 or newer

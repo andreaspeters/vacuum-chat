@@ -169,8 +169,6 @@ private:
 	IStatusIcons *FStatusIcons;
 	IMessageProcessor *FMessageProcessor;
 private:
-	quint32 FShowFavariteLabelId;
-private:
 	quint8 FMaxVisibleItems;
 	QMap<Jid, QList<IRecentItem> > FStreamItems;
 	QMap<IRecentItem, IRosterIndex *> FVisibleItems;

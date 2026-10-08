@@ -202,8 +202,9 @@ AdvancedDelegateItem RostersView::rosterLabel(int AOrder, quint32 ALabelId, cons
 	{
 		label.d->id = AdvancedDelegateItem::DecorationId;
 		label.d->kind = AdvancedDelegateItem::Decoration;
-		label.d->flags = AdvancedDelegateItem::Blink;
 		const IRostersNotify &notify = FNotifyItems.value(FActiveNotifies.value(index));
+		if (notify.flags & IRostersNotify::Blink)
+			label.d->flags |= AdvancedDelegateItem::Blink;
 		label.d->data = (notify.flags & IRostersNotify::BlinkStatusIcon) > 0
 			? AIndex->data(Qt::DecorationRole) : notify.icon;
 	}
