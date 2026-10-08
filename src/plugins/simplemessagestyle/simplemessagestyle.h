@@ -92,6 +92,8 @@ public:
 	virtual QTextDocumentFragment textUnderPosition(const QPoint &APosition, QWidget *AWidget) const;
 	virtual bool changeOptions(QWidget *AWidget, const IMessageStyleOptions &AOptions, bool AClean = true);
 	virtual bool appendContent(QWidget *AWidget, const QString &AHtml, const IMessageContentOptions &AOptions);
+	virtual bool setMessageDecoration(QWidget *AWidget, const QString &AMessageId,
+		const QString &ADecorationId, const QString &AHtml);
 	//ISimpleMessageStyle
 	virtual QMap<QString, QVariant> infoValues() const;
 	virtual QList<QString> variants() const;

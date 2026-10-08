@@ -16,6 +16,17 @@ inline bool canViewLocalConversationHistory(const IProtocolCapabilities *capabil
             IProtocolCapabilities::CapabilityViewHistory, conversationId);
 }
 
+inline bool canViewLocalConversationHistoryForWindow(const IProtocolCapabilities *capabilities,
+    const AccountId &windowAccountId, const ConversationId &windowConversationId,
+    const AccountId &providerAccountId, const QString &providerStreamId,
+    const QString &rosterStreamId)
+{
+    return !windowAccountId.isEmpty() && !windowConversationId.isEmpty() &&
+        windowAccountId == providerAccountId &&
+        canViewLocalConversationHistory(capabilities, providerAccountId,
+            providerStreamId, rosterStreamId, windowConversationId);
+}
+
 inline bool canManageRemoteArchive(const IProtocolCapabilities *capabilities,
     const AccountId &accountId)
 {

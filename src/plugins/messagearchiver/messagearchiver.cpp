@@ -2452,7 +2452,7 @@ void MessageArchiver::onStanzaSessionTerminated(const IStanzaSession &ASession)
 
 void MessageArchiver::onToolBarWidgetCreated(IToolBarWidget *AWidget)
 {
-	if (AWidget->editWidget() != NULL)
+	if (AWidget && AWidget->editWidget() != NULL && AWidget->editWidget()->streamJid().isValid())
 	{
 		Action *action = new Action(AWidget->toolBarChanger()->toolBar());
 		action->setText(tr("View History"));

@@ -26,6 +26,10 @@ if (BUILD_TESTING)
 		avatar_cache_test.cpp avatarpathcache.h)
 	target_compile_features(simplemessagestyle_avatar_cache_tests PRIVATE cxx_std_11)
 	target_link_libraries(simplemessagestyle_avatar_cache_tests PRIVATE Qt6::Core)
+	add_executable(simplemessagestyle_message_decoration_tests EXCLUDE_FROM_ALL
+		message_decoration_test.cpp decorationhelper.cpp decorationhelper.h)
+	target_compile_features(simplemessagestyle_message_decoration_tests PRIVATE cxx_std_11)
+	target_link_libraries(simplemessagestyle_message_decoration_tests PRIVATE Qt6::Core Qt6::Gui)
 endif()
 
 if (IS_ENABLED)

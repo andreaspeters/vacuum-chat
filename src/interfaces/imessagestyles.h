@@ -95,6 +95,13 @@ public:
 	virtual QTextDocumentFragment textUnderPosition(const QPoint &APosition, QWidget *AWidget) const =0;
 	virtual bool changeOptions(QWidget *AWidget, const IMessageStyleOptions &AOptions, bool AClean = true) =0;
 	virtual bool appendContent(QWidget *AWidget, const QString &AHtml, const IMessageContentOptions &AOptions) =0;
+	// Return true when the style widget owns rendering; callers must not also insert into the base document.
+	virtual bool setMessageDecoration(QWidget *AWidget, const QString &AMessageId,
+		const QString &ADecorationId, const QString &AHtml)
+	{
+		(void)AWidget; (void)AMessageId; (void)ADecorationId; (void)AHtml;
+		return false;
+	}
 protected:
 	virtual void widgetAdded(QWidget *AWidget) const =0;
 	virtual void widgetRemoved(QWidget *AWidget) const =0;

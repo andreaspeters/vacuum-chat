@@ -1,13 +1,16 @@
 #include "simplemessagestyle.h"
 #include "roundedimage.h"
+#include "decorationhelper.h"
 
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QRegularExpression>
 #include <QScrollBar>
+#include <QTextCharFormat>
 #include <QTextFrame>
 #include <QTextCursor>
+#include <QTextTable>
 #include <QDomDocument>
 #include <QCoreApplication>
 #include <QTextDocumentFragment>
@@ -249,9 +252,7 @@ bool SimpleMessageStyle::appendContent(QWidget *AWidget, const QString &AHtml, c
 		{
 			static quint64 markerSequence = 0;
 			bubbleMarker = QStringLiteral("QFrameMessageMarker-%1").arg(++markerSequence);
-			const QString markerHtml = QStringLiteral(
-				"<span style=\"font-size:0px; line-height:0px; color:transparent;\">%1</span>")
-				.arg(bubbleMarker);
+			const QString markerHtml = DecorationHelper::bubbleMarkerHtml(bubbleMarker);
 			html.replace("%message%", markerHtml + preparedMessage);
 		}
 		else
@@ -276,11 +277,23 @@ bool SimpleMessageStyle::appendContent(QWidget *AWidget, const QString &AHtml, c
 			{
 				QTextTable *bubbleTable = markerCursor.currentTable();
 				markerCursor.removeSelectedText();
+				if (bubbleTable)
+				{
+					const QTextTableCell messageCell = bubbleTable->cellAt(markerCursor);
+					if (messageCell.isValid())
+					{
+						QTextCursor sourceTextCursor = messageCell.firstCursorPosition();
+						sourceTextCursor.setPosition(messageCell.lastCursorPosition().position(),
+							QTextCursor::KeepAnchor);
+						DecorationHelper::hideSourceMessageText(sourceTextCursor);
+					}
+				}
 				QColor fill(AOptions.textBGColor);
 				if (!fill.isValid())
 					fill = AOptions.direction == IMessageContentOptions::DirectionOut
 						? QColor(QStringLiteral("#e8f1ff")) : QColor(QStringLiteral("#f1f2f4"));
-				view->addMessageBubble(bubbleTable, preparedMessage, fill);
+				view->addMessageBubble(bubbleTable, AOptions.messageId, preparedMessage, fill,
+					AOptions.direction == IMessageContentOptions::DirectionOut);
 			}
 		}
 
@@ -303,6 +316,15 @@ bool SimpleMessageStyle::appendContent(QWidget *AWidget, const QString &AHtml, c
 		return true;
 	}
 	return false;
+}
+
+bool SimpleMessageStyle::setMessageDecoration(QWidget *AWidget, const QString &AMessageId,
+	const QString &ADecorationId, const QString &AHtml)
+{
+	if (!FWidgetStatus.contains(AWidget))
+		return false;
+	StyleViewer *view = qobject_cast<StyleViewer *>(AWidget);
+	return view && view->setMessageDecoration(AMessageId, ADecorationId, AHtml);
 }
 
 QMap<QString, QVariant> SimpleMessageStyle::infoValues() const

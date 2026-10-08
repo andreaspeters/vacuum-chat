@@ -154,6 +154,7 @@ protected:
 	virtual bool eventFilter(QObject *AWatched, QEvent *AEvent) override;
 protected slots:
 	void onReplyEscFilterDestroyed();
+	void onProtocolChatWindowCreated(IChatWindow *AWindow);
 	void onProtocolMessageReceived(const BasicMessage &AMessage);
 	void onProtocolHistoryLoaded(const QString &ARoomId);
 	void onProtocolViewContextMenu(const QPoint &APosition,
@@ -183,6 +184,9 @@ protected slots:
 private:
 	IProtocolMessaging *findLocalHistoryProvider(const QString &ARosterStreamId,
 		IProtocolRoster *&AProviderRoster, IProtocolCapabilities *&ACapabilities) const;
+	IProtocolMessaging *findLocalHistoryProviderForAccount(const AccountId &AAccountId,
+		IProtocolRoster *&AProviderRoster, IProtocolCapabilities *&ACapabilities) const;
+	void setupLocalHistoryAction(IChatWindow *AWindow);
 	void showLocalConversationHistory(const QString &ARosterStreamId,
 		const ConversationId &AConversationId);
 	IMessageWidgets *FMessageWidgets;

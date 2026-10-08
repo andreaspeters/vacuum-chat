@@ -172,6 +172,13 @@ bool ChatMessageHandler::initConnections(IPluginManager *APluginManager, int &AI
 	IPlugin *plugin = APluginManager->pluginInterface("IMessageWidgets").value(0,NULL);
 	if (plugin)
 		FMessageWidgets = qobject_cast<IMessageWidgets *>(plugin->instance());
+	if (FMessageWidgets)
+	{
+		connect(FMessageWidgets->instance(), SIGNAL(chatWindowCreated(IChatWindow *)),
+			this, SLOT(onProtocolChatWindowCreated(IChatWindow *)), Qt::UniqueConnection);
+		foreach (IChatWindow *window, FMessageWidgets->chatWindows())
+			setupLocalHistoryAction(window);
+	}
 	plugin = APluginManager->pluginInterface("IFileTransfer").value(0,NULL);
 	if (plugin)
 		FFileTransfer = qobject_cast<IFileTransfer *>(plugin->instance());
@@ -2559,6 +2566,74 @@ IProtocolMessaging *ChatMessageHandler::findLocalHistoryProvider(const QString &
 	return nullptr;
 }
 
+IProtocolMessaging *ChatMessageHandler::findLocalHistoryProviderForAccount(const AccountId &AAccountId,
+	IProtocolRoster *&AProviderRoster, IProtocolCapabilities *&ACapabilities) const
+{
+	AProviderRoster = nullptr;
+	ACapabilities = nullptr;
+	if (!FPluginManager || AAccountId.isEmpty())
+		return nullptr;
+
+	const QList<IPlugin *> providers = FPluginManager->pluginInterface("IProtocolMessaging");
+	for (IPlugin *plugin : providers)
+	{
+		QObject *instance = plugin ? plugin->instance() : nullptr;
+		IProtocolMessaging *messaging = qobject_cast<IProtocolMessaging *>(instance);
+		IProtocolRoster *roster = qobject_cast<IProtocolRoster *>(instance);
+		IProtocolCapabilities *capabilities = qobject_cast<IProtocolCapabilities *>(instance);
+		if (!messaging || !roster || !capabilities || roster->accountId() != AAccountId ||
+			messaging->streamId() != roster->streamId())
+			continue;
+
+		AProviderRoster = roster;
+		ACapabilities = capabilities;
+		return messaging;
+	}
+	return nullptr;
+}
+
+void ChatMessageHandler::onProtocolChatWindowCreated(IChatWindow *AWindow)
+{
+	setupLocalHistoryAction(AWindow);
+}
+
+void ChatMessageHandler::setupLocalHistoryAction(IChatWindow *AWindow)
+{
+	if (!AWindow || !FMessageWidgets || AWindow->accountId().isEmpty() ||
+		AWindow->conversationId().isEmpty() || !AWindow->toolBarWidget())
+		return;
+
+	IToolBarWidget *toolbarWidget = AWindow->toolBarWidget();
+	ToolBarChanger *changer = toolbarWidget->toolBarChanger();
+	if (!changer || !changer->toolBar())
+		return;
+	QToolBar *toolBar = changer->toolBar();
+	if (toolBar->property("vacuum.localHistoryActionAdded").toBool())
+		return;
+
+	IProtocolRoster *roster = nullptr;
+	IProtocolCapabilities *capabilities = nullptr;
+	IProtocolMessaging *messaging = findLocalHistoryProviderForAccount(
+		AWindow->accountId(), roster, capabilities);
+	if (!messaging || !roster || !capabilities ||
+		!ProtocolHistoryActionPolicy::canViewLocalConversationHistoryForWindow(
+			capabilities, AWindow->accountId(), AWindow->conversationId(), roster->accountId(),
+			messaging->streamId(), roster->streamId()))
+		return;
+
+	const QString providerStreamId = messaging->streamId();
+	const ConversationId conversationId = AWindow->conversationId();
+	Action *action = new Action(toolBar);
+	action->setText(tr("View History"));
+	action->setIcon(RSR_STORAGE_MENUICONS, MNI_HISTORY);
+	action->setShortcutId(SCT_MESSAGEWINDOWS_SHOWHISTORY);
+	connect(action, &QAction::triggered, this, [this, providerStreamId, conversationId]() {
+		showLocalConversationHistory(providerStreamId, conversationId);
+	});
+	changer->insertAction(action, TBG_MWTBW_ARCHIVE_VIEW);
+	toolBar->setProperty("vacuum.localHistoryActionAdded", true);
+}
+
 void ChatMessageHandler::showLocalConversationHistory(const QString &ARosterStreamId,
 	const ConversationId &AConversationId)
 {
@@ -2573,7 +2648,7 @@ void ChatMessageHandler::showLocalConversationHistory(const QString &ARosterStre
 			roster->accountId(), messaging->streamId(), ARosterStreamId, AConversationId))
 		return;
 
-	IChatWindow *window = FMessageWidgets->getConversationWindow(messaging->streamId(), AConversationId);
+	IChatWindow *window = FMessageWidgets->getConversationWindow(roster->accountId(), AConversationId);
 	if (!window)
 		return;
 	setupProtocolWindow(window, messaging);

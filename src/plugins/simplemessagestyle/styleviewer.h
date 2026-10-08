@@ -11,6 +11,8 @@
 #include <QUrl>
 #include <QTextDocumentFragment>
 #include <QTextTable>
+#include <QMap>
+#include "decorationhelper.h"
 #include <utils/animatedtextbrowser.h>
 
 class QKeyEvent;
@@ -25,6 +27,10 @@ public:
 	~StyleViewer();
 	QString cacheImageResource(const QString &APath, bool ARoundCorners = false);
 	void addMessageBubble(QTextTable *ATable, const QString &AHtml, const QColor &AFill);
+	void addMessageBubble(QTextTable *ATable, const QString &AMessageId,
+		const QString &AHtml, const QColor &AFill, bool AOutgoing = false);
+	bool setMessageDecoration(const QString &AMessageId, const QString &ADecorationId,
+		const QString &AHtml);
 	void clearMessageBubbles();
 	QTextDocumentFragment bubbleSelection() const;
 	QTextDocumentFragment bubbleTextUnderPosition(const QPoint &APosition) const;
@@ -40,6 +46,12 @@ private:
 		QPointer<QTextTable> table;
 		QPointer<QFrame> frame;
 		QPointer<QTextBrowser> content;
+		QPointer<QTextBrowser> sideContent;
+		QString messageId;
+		QString html;
+		bool outgoing = false;
+		DecorationHelper::BubbleGeometrySnapshot geometry;
+		QMap<QString, DecorationHelper::Decoration> decorations;
 		QSet<QUrl> imageResources;
 	};
 	void notifyUserScrollPositionChanged();

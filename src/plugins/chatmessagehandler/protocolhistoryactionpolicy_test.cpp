@@ -66,6 +66,13 @@ int main()
     passed &= check(!ProtocolHistoryActionPolicy::canViewLocalConversationHistory(
         &localOnly, accountId, providerStreamId, QStringLiteral("other-provider-stream"),
         conversationId), "local history is not routed to a different provider stream");
+    passed &= check(ProtocolHistoryActionPolicy::canViewLocalConversationHistoryForWindow(
+        &localOnly, accountId, conversationId, accountId, providerStreamId, providerStreamId),
+        "toolbar history is allowed for the matching account and conversation despite distinct stream ID");
+    passed &= check(!ProtocolHistoryActionPolicy::canViewLocalConversationHistoryForWindow(
+        &localOnly, QStringLiteral("another-persistent-account"), conversationId,
+        accountId, providerStreamId, providerStreamId),
+        "toolbar history rejects a window bound to another persistent account");
     passed &= check(!ProtocolHistoryActionPolicy::canManageRemoteArchive(
         &remoteOnly, QStringLiteral("another-account")), "remote archive capability is account-scoped");
     return passed ? 0 : 1;

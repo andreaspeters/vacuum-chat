@@ -1,5 +1,6 @@
 #include "viewwidget.h"
 
+#include <interfaces/messagedecorationpolicy.h>
 #include <QTextFrame>
 #include <QTextTable>
 #include <QScrollBar>
@@ -185,6 +186,18 @@ bool ViewWidget::setMessageDecoration(const QString &AMessageId, const QString &
 		if (decorations.isEmpty())
 			FMessageDecorations.remove(AMessageId);
 	}
+	const bool styleHandled = FMessageStyle &&
+		FMessageStyle->setMessageDecoration(FStyleWidget, AMessageId, ADecorationId, AHtml);
+	if (MessageDecorationPolicy::routeForStyleResult(styleHandled) ==
+		MessageDecorationPolicy::StyleWidgetHandled)
+	{
+		if (!AHtml.isEmpty())
+		{
+			const int anchor = FMessageRanges.value(AMessageId).second;
+			FMessageDecorations[AMessageId].insert(ADecorationId, qMakePair(anchor, anchor));
+		}
+		return true;
+	}
 	if (AHtml.isEmpty())
 		return true;
 
@@ -195,7 +208,11 @@ bool ViewWidget::setMessageDecoration(const QString &AMessageId, const QString &
 	const int end = cursor.position();
 	const int delta = end - start;
 	if (delta <= 0)
+	{
+		if (FMessageStyle)
+			FMessageStyle->setMessageDecoration(FStyleWidget, AMessageId, ADecorationId, QString());
 		return false;
+	}
 	for (auto it = FMessageRanges.begin(); it != FMessageRanges.end(); ++it)
 		if (it.value().first >= start)
 			it.value() = qMakePair(it.value().first + delta, it.value().second + delta);
