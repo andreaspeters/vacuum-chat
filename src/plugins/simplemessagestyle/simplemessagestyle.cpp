@@ -13,6 +13,7 @@
 #include <QTextTable>
 #include <QDomDocument>
 #include <QCoreApplication>
+#include <QAbstractTextDocumentLayout>
 #include <QTextDocumentFragment>
 #include <QUrl>
 #include <definitions/menuicons.h>
@@ -277,15 +278,17 @@ bool SimpleMessageStyle::appendContent(QWidget *AWidget, const QString &AHtml, c
 			{
 				QTextTable *bubbleTable = markerCursor.currentTable();
 				markerCursor.removeSelectedText();
+				QRectF sourceAnchorRect;
+				QTextCursor sourceSpacerCursor;
 				if (bubbleTable)
 				{
 					const QTextTableCell messageCell = bubbleTable->cellAt(markerCursor);
 					if (messageCell.isValid())
 					{
-						QTextCursor sourceTextCursor = messageCell.firstCursorPosition();
-						sourceTextCursor.setPosition(messageCell.lastCursorPosition().position(),
-							QTextCursor::KeepAnchor);
-						DecorationHelper::hideSourceMessageText(sourceTextCursor);
+						view->document()->documentLayout()->documentSize();
+						sourceAnchorRect = view->document()->documentLayout()->frameBoundingRect(bubbleTable);
+						sourceSpacerCursor = DecorationHelper::replaceSourceMessageWithSpacer(
+							messageCell, sourceAnchorRect.height());
 					}
 				}
 				QColor fill(AOptions.textBGColor);
@@ -293,7 +296,8 @@ bool SimpleMessageStyle::appendContent(QWidget *AWidget, const QString &AHtml, c
 					fill = AOptions.direction == IMessageContentOptions::DirectionOut
 						? QColor(QStringLiteral("#e8f1ff")) : QColor(QStringLiteral("#f1f2f4"));
 				view->addMessageBubble(bubbleTable, AOptions.messageId, preparedMessage, fill,
-					AOptions.direction == IMessageContentOptions::DirectionOut);
+					AOptions.direction == IMessageContentOptions::DirectionOut,
+					sourceAnchorRect, sourceSpacerCursor);
 			}
 		}
 

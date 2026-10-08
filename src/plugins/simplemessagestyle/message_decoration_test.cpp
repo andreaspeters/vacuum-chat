@@ -2,8 +2,11 @@
 #include "../../interfaces/messagedecorationpolicy.h"
 
 #include <QCoreApplication>
+#include <QTextBlockFormat>
 #include <QTextCursor>
 #include <QTextDocument>
+#include <QTextImageFormat>
+#include <QTextTable>
 #include <cstdio>
 
 namespace
@@ -27,17 +30,6 @@ int main(int argc, char *argv[])
         QStringLiteral("<p>message</p><div>sent</div>"),
         "visible bubble HTML includes a newly added decoration");
 
-    QTextDocument sourceDocument;
-    sourceDocument.setPlainText(QStringLiteral("source message"));
-    QTextCursor sourceCursor(&sourceDocument);
-    sourceCursor.select(QTextCursor::Document);
-    DecorationHelper::hideSourceMessageText(sourceCursor);
-    QTextCursor sourceProbe(&sourceDocument);
-    sourceProbe.setPosition(0);
-    passed &= check(sourceDocument.toPlainText() == QStringLiteral("source message"),
-        "hiding source message text preserves its document content and layout text");
-    passed &= check(sourceProbe.charFormat().foreground().color().alpha() == 0,
-        "source message glyphs are made transparent so only the bubble copy is visible");
 
     DecorationHelper::createOrUpdateDecoration(decorations, QStringLiteral("status"),
         QStringLiteral("<div>read</div>"), 0, 0);
@@ -95,12 +87,14 @@ int main(int argc, char *argv[])
     DecorationHelper::createOrUpdateDecoration(positionedDecorations,
         QStringLiteral("protocol-message-status"), statusHtml, 0, 0);
     DecorationHelper::createOrUpdateDecoration(positionedDecorations,
-        QStringLiteral("matrix-reactions"), reactionsHtml, 0, 0);
+        QStringLiteral("protocol-message-reactions"), reactionsHtml, 0, 0);
     passed &= check(DecorationHelper::renderBubbleHtml(QStringLiteral("<p>message</p>"),
-        positionedDecorations) == QStringLiteral("<p>message</p>") + reactionsHtml,
-        "successful-send status is excluded from bubble content while reactions remain there");
+        positionedDecorations) == QStringLiteral("<p>message</p>"),
+        "status and reactions are excluded from bubble content");
     passed &= check(DecorationHelper::renderAdjacentHtml(positionedDecorations) == statusHtml,
         "successful-send status is rendered as an adjacent decoration");
+    passed &= check(DecorationHelper::renderReactionHtml(positionedDecorations) == reactionsHtml,
+        "reaction chips are rendered separately from bubble and status content");
 
     const QRect outgoingBubble(150, 100, 80, 40);
     const QRect outgoingStatus = DecorationHelper::adjacentDecorationRect(outgoingBubble,
@@ -109,6 +103,39 @@ int main(int argc, char *argv[])
         outgoingStatus.bottom() == outgoingBubble.bottom() &&
         outgoingStatus.left() > outgoingBubble.right(),
         "outgoing status stays outside the bubble, on its right, and aligns with its bottom edge");
+
+    const QRect incomingReactions = DecorationHelper::reactionDecorationRect(outgoingBubble,
+        QSize(30, 12), QSize(400, 300), false);
+    const QRect outgoingReactions = DecorationHelper::reactionDecorationRect(outgoingBubble,
+        QSize(30, 12), QSize(400, 300), true);
+    passed &= check(!incomingReactions.intersects(outgoingBubble) &&
+        incomingReactions.left() == outgoingBubble.left() &&
+        incomingReactions.top() > outgoingBubble.bottom(),
+        "incoming reactions start below the bubble's left corner");
+    passed &= check(!outgoingReactions.intersects(outgoingBubble) &&
+        outgoingReactions.right() == outgoingBubble.right() &&
+        outgoingReactions.top() > outgoingBubble.bottom(),
+        "outgoing reactions align below the bubble's lower-right corner");
+
+    QTextDocument sourceWithDuplicates;
+    QTextCursor tableCursor(&sourceWithDuplicates);
+    QTextTable *sourceTable = tableCursor.insertTable(1, 1);
+    QTextTableCell sourceCell = sourceTable->cellAt(0, 0);
+    QTextCursor sourceContent = sourceCell.firstCursorPosition();
+    sourceContent.insertText(QStringLiteral("duplicate source text"));
+    QTextImageFormat sourceImage;
+    sourceImage.setName(QStringLiteral("duplicate-source-image.png"));
+    sourceContent.insertImage(sourceImage);
+    QTextCursor sourceSpacer = DecorationHelper::replaceSourceMessageWithSpacer(sourceCell, 32.0);
+    passed &= check(!sourceWithDuplicates.toPlainText().contains(QStringLiteral("duplicate source text")) &&
+        !sourceWithDuplicates.toHtml().contains(QStringLiteral("duplicate-source-image.png")),
+        "source message cleanup removes duplicate text and inline images");
+    passed &= check(sourceSpacer.blockFormat().lineHeightType() == QTextBlockFormat::FixedHeight &&
+        sourceSpacer.blockFormat().lineHeight() == 32.0,
+        "source cleanup retains only a fixed-height empty flow spacer");
+    DecorationHelper::setSourceSpacerHeight(sourceSpacer, 48.0);
+    passed &= check(sourceSpacer.blockFormat().lineHeight() == 48.0,
+        "external reactions can reserve extra source-document flow height");
 
     return passed ? 0 : 1;
 }

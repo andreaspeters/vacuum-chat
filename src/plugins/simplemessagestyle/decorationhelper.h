@@ -2,8 +2,8 @@
 #define DECORATIONHELPER_H
 
 #include <QtCore>
-
-class QTextCursor;
+#include <QTextCursor>
+#include <QTextTable>
 
 class DecorationHelper
 {
@@ -26,14 +26,18 @@ public:
     static QString renderBubbleHtml(const QString &messageHtml,
         const QMap<QString, Decoration> &decorationMap);
     static QString renderAdjacentHtml(const QMap<QString, Decoration> &decorationMap);
+    static QString renderReactionHtml(const QMap<QString, Decoration> &decorationMap);
     static QRect adjacentDecorationRect(const QRect &bubbleRect, const QSize &decorationSize,
         const QSize &viewportSize, bool outgoing);
+    static QRect reactionDecorationRect(const QRect &bubbleRect, const QSize &reactionSize,
+        const QSize &viewportSize, bool outgoing);
+    static QTextCursor replaceSourceMessageWithSpacer(QTextTableCell cell, qreal height);
+    static void setSourceSpacerHeight(QTextCursor &cursor, qreal height);
     static QString bubbleMarkerHtml(const QString &marker);
     static QSet<QUrl> imageResourcesFromHtml(const QString &html);
     static qreal overlayHeightForContent(qreal contentHeight, qreal verticalInsets);
     static bool initializeBubbleGeometry(BubbleGeometrySnapshot &snapshot,
         const QRectF &tableRect, qreal contentHeight, qreal verticalInsets);
-    static void hideSourceMessageText(QTextCursor &cursor);
 
 private:
     DecorationHelper() = default;

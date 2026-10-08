@@ -1,18 +1,7 @@
 #include "decorationhelper.h"
 
-#include <QBrush>
-#include <QTextCharFormat>
+#include <QTextBlockFormat>
 #include <QTextCursor>
-
-void DecorationHelper::hideSourceMessageText(QTextCursor &cursor)
-{
-    if (!cursor.hasSelection())
-        return;
-
-    QTextCharFormat hiddenTextFormat;
-    hiddenTextFormat.setForeground(QBrush(Qt::transparent));
-    cursor.mergeCharFormat(hiddenTextFormat);
-}
 
 void DecorationHelper::createOrUpdateDecoration(QMap<QString, Decoration> &decorationMap, const QString &id, const QString &html, int start, int end)
 {
@@ -36,7 +25,8 @@ QString DecorationHelper::renderBubbleHtml(const QString &messageHtml,
     QString rendered = messageHtml;
     for (auto it = decorationMap.constBegin(); it != decorationMap.constEnd(); ++it)
     {
-        if (it.key() != QStringLiteral("protocol-message-status"))
+        if (it.key() != QStringLiteral("protocol-message-status") &&
+            it.key() != QStringLiteral("protocol-message-reactions"))
             rendered += it.value().html;
     }
     return rendered;
@@ -45,6 +35,11 @@ QString DecorationHelper::renderBubbleHtml(const QString &messageHtml,
 QString DecorationHelper::renderAdjacentHtml(const QMap<QString, Decoration> &decorationMap)
 {
     return decorationMap.value(QStringLiteral("protocol-message-status")).html;
+}
+
+QString DecorationHelper::renderReactionHtml(const QMap<QString, Decoration> &decorationMap)
+{
+    return decorationMap.value(QStringLiteral("protocol-message-reactions")).html;
 }
 
 QRect DecorationHelper::adjacentDecorationRect(const QRect &bubbleRect,
@@ -66,6 +61,53 @@ QRect DecorationHelper::adjacentDecorationRect(const QRect &bubbleRect,
     	: (leftFits ? left : right);
     const int y = qMax(0, bubbleRect.bottom() - decorationSize.height() + 1);
     return QRect(x, y, decorationSize.width(), decorationSize.height());
+}
+
+QRect DecorationHelper::reactionDecorationRect(const QRect &bubbleRect, const QSize &reactionSize,
+    const QSize &viewportSize, bool outgoing)
+{
+    if (!bubbleRect.isValid() || reactionSize.width() <= 0 || reactionSize.height() <= 0 ||
+        viewportSize.width() <= 0)
+        return QRect();
+
+    const int requestedX = outgoing
+        ? bubbleRect.right() - reactionSize.width() + 1
+        : bubbleRect.left();
+    const int x = qBound(0, requestedX, qMax(0, viewportSize.width() - reactionSize.width()));
+    const int y = bubbleRect.bottom() + 3;
+    return QRect(x, y, reactionSize.width(), reactionSize.height());
+}
+
+QTextCursor DecorationHelper::replaceSourceMessageWithSpacer(QTextTableCell cell, qreal height)
+{
+    if (!cell.isValid())
+        return QTextCursor();
+
+    QTextCursor contentCursor = cell.firstCursorPosition();
+    contentCursor.setPosition(cell.lastCursorPosition().position(), QTextCursor::KeepAnchor);
+    contentCursor.removeSelectedText();
+
+    QTextTableCellFormat cellFormat = cell.format().toTableCellFormat();
+    cellFormat.setPadding(0.0);
+    cell.setFormat(cellFormat);
+
+    QTextCursor spacerCursor = cell.firstCursorPosition();
+    setSourceSpacerHeight(spacerCursor, height);
+    return spacerCursor;
+}
+
+void DecorationHelper::setSourceSpacerHeight(QTextCursor &cursor, qreal height)
+{
+    if (cursor.isNull())
+        return;
+
+    QTextBlockFormat blockFormat = cursor.blockFormat();
+    blockFormat.setTopMargin(0.0);
+    blockFormat.setBottomMargin(0.0);
+    blockFormat.setLeftMargin(0.0);
+    blockFormat.setRightMargin(0.0);
+    blockFormat.setLineHeight(qMax(1, qRound(height)), QTextBlockFormat::FixedHeight);
+    cursor.setBlockFormat(blockFormat);
 }
 
 QString DecorationHelper::bubbleMarkerHtml(const QString &marker)

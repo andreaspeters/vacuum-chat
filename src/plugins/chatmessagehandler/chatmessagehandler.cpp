@@ -1003,7 +1003,7 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 					FProtocolReactionEvents.remove(sourceKey);
 		const QString displayMessageId = FProtocolEventMessageIds.value(targetKey, redactedEventId);
 		AWindow->viewWidget()->setMessageDecoration(displayMessageId,
-			QStringLiteral("matrix-reactions"), QString());
+			QStringLiteral("protocol-message-reactions"), QString());
 		const QString historyKey = AMessaging->streamId() + QChar('\n') +
 			AMessage.conversationId();
 		auto historyIt = FProtocolConversationMessages.find(historyKey);
@@ -1478,19 +1478,10 @@ void ChatMessageHandler::updateProtocolReactionDecoration(IChatWindow *AWindow,
 	}
 	QString html;
 	if (!chips.isEmpty()) {
-		const bool alignRight = FProtocolMessageDirections.value(targetKey, false);
-		const QString reactionChips = chips.join(QStringLiteral("&nbsp;&nbsp;"));
-		if (alignRight)
-			html = QStringLiteral("<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\"><tr>"
-				"<td width=\"25%\"></td><td align=\"right\">%1</td><td width=\"5%\"></td></tr></table>")
-				.arg(reactionChips);
-		else
-			html = QStringLiteral("<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\"><tr>"
-				"<td width=\"36\"></td><td align=\"left\">%1</td><td width=\"20%\"></td></tr></table>")
-				.arg(reactionChips);
+		html = chips.join(QStringLiteral("&nbsp;&nbsp;"));
 	}
 	AWindow->viewWidget()->setMessageDecoration(displayMessageId,
-		QStringLiteral("matrix-reactions"), html);
+		QStringLiteral("protocol-message-reactions"), html);
 }
 
 bool ChatMessageHandler::messageCheck(int AOrder, const Message &AMessage, int ADirection)

@@ -112,7 +112,8 @@ void StyleViewer::addMessageBubble(QTextTable *ATable, const QString &AHtml, con
 }
 
 void StyleViewer::addMessageBubble(QTextTable *ATable, const QString &AMessageId,
-	const QString &AHtml, const QColor &AFill, bool AOutgoing)
+	const QString &AHtml, const QColor &AFill, bool AOutgoing,
+	const QRectF &ASourceAnchorRect, const QTextCursor &ASourceSpacerCursor)
 {
 	if (!ATable)
 		return;
@@ -182,6 +183,9 @@ void StyleViewer::addMessageBubble(QTextTable *ATable, const QString &AMessageId
 	overlay.content = content;
 	overlay.messageId = AMessageId;
 	overlay.html = AHtml;
+	overlay.renderedHtml = AHtml;
+	overlay.sourceAnchorRect = ASourceAnchorRect;
+	overlay.sourceSpacerCursor = ASourceSpacerCursor;
 	overlay.outgoing = AOutgoing;
 	overlay.imageResources = bubbleImageResources;
 	FBubbleOverlays.append(overlay);
@@ -203,8 +207,15 @@ bool StyleViewer::setMessageDecoration(const QString &AMessageId, const QString 
 		DecorationHelper::createOrUpdateDecoration(overlay.decorations, ADecorationId, AHtml, 0, 0);
 		const QString renderedHtml = DecorationHelper::renderBubbleHtml(overlay.html, overlay.decorations);
 		const QString adjacentHtml = DecorationHelper::renderAdjacentHtml(overlay.decorations);
-		overlay.content->setHtml(QStringLiteral(
-			"<div class=\"xxxmessage\" style=\"background-color:transparent;\">%1</div>").arg(renderedHtml));
+		const QString reactionHtml = DecorationHelper::renderReactionHtml(overlay.decorations);
+		const bool bubbleChanged = overlay.renderedHtml != renderedHtml;
+		const bool reactionsChanged = overlay.renderedReactionHtml != reactionHtml;
+		if (bubbleChanged)
+		{
+			overlay.content->setHtml(QStringLiteral(
+				"<div class=\"xxxmessage\" style=\"background-color:transparent;\">%1</div>").arg(renderedHtml));
+			overlay.renderedHtml = renderedHtml;
+		}
 
 		if (!adjacentHtml.isEmpty())
 		{
@@ -248,8 +259,56 @@ bool StyleViewer::setMessageDecoration(const QString &AMessageId, const QString 
 			overlay.sideContent->hide();
 		}
 
+		if (!reactionHtml.isEmpty())
+		{
+			if (!overlay.reactionContent)
+			{
+				QTextBrowser *reactionContent = new QTextBrowser(viewport());
+				reactionContent->setObjectName(QStringLiteral("modernChatMessageReactions"));
+				reactionContent->setFrameShape(QFrame::NoFrame);
+				reactionContent->setReadOnly(true);
+				reactionContent->setOpenLinks(false);
+				reactionContent->setOpenExternalLinks(false);
+				reactionContent->setContextMenuPolicy(Qt::NoContextMenu);
+				reactionContent->setTextInteractionFlags(Qt::NoTextInteraction);
+				reactionContent->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+				reactionContent->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+				reactionContent->setLineWrapMode(QTextEdit::NoWrap);
+				reactionContent->setStyleSheet(QStringLiteral(
+					"QTextBrowser#modernChatMessageReactions { background: transparent; border: none; }") +
+					QStringLiteral("QTextBrowser#modernChatMessageReactions viewport { background: transparent; }"));
+				reactionContent->setAttribute(Qt::WA_TranslucentBackground, true);
+				reactionContent->viewport()->setAutoFillBackground(false);
+				QPalette palette = reactionContent->palette();
+				palette.setColor(QPalette::Base, Qt::transparent);
+				reactionContent->setPalette(palette);
+				reactionContent->document()->setDocumentMargin(0);
+				reactionContent->document()->setDefaultFont(overlay.content->document()->defaultFont());
+				reactionContent->document()->setDefaultStyleSheet(document()->defaultStyleSheet() +
+					QStringLiteral("\nbody { margin: 0; padding: 0; background: transparent; }\n"));
+				overlay.reactionContent = reactionContent;
+			}
+			if (reactionsChanged)
+			{
+				overlay.reactionContent->setHtml(reactionHtml);
+				overlay.renderedReactionHtml = reactionHtml;
+			}
+			overlay.reactionContent->document()->adjustSize();
+			const QSize reactionSize = overlay.reactionContent->document()->size().toSize();
+			overlay.reactionContent->setFixedSize(qMax(1, reactionSize.width() + 2),
+				qMax(1, reactionSize.height() + 2));
+			overlay.reactionContent->show();
+		}
+		else if (overlay.reactionContent)
+		{
+			overlay.reactionContent->clear();
+			overlay.reactionContent->hide();
+			overlay.renderedReactionHtml.clear();
+		}
+
 		QSet<QUrl> imageResources = DecorationHelper::imageResourcesFromHtml(renderedHtml);
 		imageResources.unite(DecorationHelper::imageResourcesFromHtml(adjacentHtml));
+		imageResources.unite(DecorationHelper::imageResourcesFromHtml(reactionHtml));
 		overlay.imageResources = imageResources;
 		for (const QUrl &url : imageResources)
 		{
@@ -259,15 +318,34 @@ bool StyleViewer::setMessageDecoration(const QString &AMessageId, const QString 
 				overlay.content->document()->addResource(QTextDocument::ImageResource, url, image);
 				if (overlay.sideContent)
 					overlay.sideContent->document()->addResource(QTextDocument::ImageResource, url, image);
+				if (overlay.reactionContent)
+					overlay.reactionContent->document()->addResource(QTextDocument::ImageResource, url, image);
 			}
 		}
-		overlay.content->document()->markContentsDirty(0, overlay.content->document()->characterCount());
-		overlay.content->viewport()->update();
+		if (bubbleChanged)
+		{
+			overlay.content->document()->markContentsDirty(0, overlay.content->document()->characterCount());
+			overlay.content->viewport()->update();
+		}
 		if (overlay.sideContent)
 		{
 			overlay.sideContent->document()->markContentsDirty(0,
 				overlay.sideContent->document()->characterCount());
 			overlay.sideContent->viewport()->update();
+		}
+		if (overlay.reactionContent && reactionsChanged)
+		{
+			overlay.reactionContent->document()->markContentsDirty(0,
+				overlay.reactionContent->document()->characterCount());
+			overlay.reactionContent->viewport()->update();
+		}
+		if (overlay.geometry.initialized)
+		{
+			const qreal reactionHeight = overlay.reactionContent &&
+				!overlay.reactionContent->isHidden()
+				? overlay.reactionContent->height() + 3 : 0;
+			DecorationHelper::setSourceSpacerHeight(overlay.sourceSpacerCursor,
+				overlay.geometry.documentRect.height() + reactionHeight);
 		}
 		updated = true;
 	}
@@ -282,6 +360,8 @@ void StyleViewer::clearMessageBubbles()
 	{
 		if (overlay.sideContent)
 			delete overlay.sideContent.data();
+		if (overlay.reactionContent)
+			delete overlay.reactionContent.data();
 		if (overlay.frame)
 			delete overlay.frame.data();
 	}
@@ -306,6 +386,12 @@ void StyleViewer::updateMessageBubbleResource(const QUrl &AUrl)
 		if (overlay.sideContent)
 		{
 			QTextDocument *doc = overlay.sideContent->document();
+			doc->addResource(QTextDocument::ImageResource, AUrl, image);
+			doc->markContentsDirty(0, doc->characterCount());
+		}
+		if (overlay.reactionContent)
+		{
+			QTextDocument *doc = overlay.reactionContent->document();
 			doc->addResource(QTextDocument::ImageResource, AUrl, image);
 			doc->markContentsDirty(0, doc->characterCount());
 		}
@@ -386,7 +472,9 @@ void StyleViewer::updateMessageBubbleGeometry()
 			continue;
 		}
 		const QRectF tableRect = document()->documentLayout()->frameBoundingRect(overlay.table.data());
-		if (!tableRect.isValid())
+		const QRectF anchorRect = overlay.sourceAnchorRect.isValid()
+			? overlay.sourceAnchorRect : tableRect;
+		if (!tableRect.isValid() && !anchorRect.isValid())
 		{
 			++i;
 			continue;
@@ -395,7 +483,7 @@ void StyleViewer::updateMessageBubbleGeometry()
 		const bool firstLayout = !overlay.geometry.initialized;
 		if (firstLayout)
 		{
-			const QRect provisionalRect = tableRect.translated(-scrollOffset).toAlignedRect();
+			const QRect provisionalRect = anchorRect.translated(-scrollOffset).toAlignedRect();
 			overlay.frame->setGeometry(provisionalRect);
 			if (QLayout *layout = overlay.frame->layout())
 				layout->activate();
@@ -417,17 +505,25 @@ void StyleViewer::updateMessageBubbleGeometry()
 			const qreal contentHeight = overlay.content->document()->documentLayout()->documentSize().height();
 			const QMargins margins = overlay.frame->layout()
 				? overlay.frame->layout()->contentsMargins() : QMargins();
-			if (!DecorationHelper::initializeBubbleGeometry(overlay.geometry, tableRect,
+			if (!DecorationHelper::initializeBubbleGeometry(overlay.geometry, anchorRect,
 				contentHeight, margins.top() + margins.bottom()))
 			{
 				++i;
 				continue;
 			}
+			const qreal reactionHeight = overlay.reactionContent &&
+				!overlay.reactionContent->isHidden()
+				? overlay.reactionContent->height() + 3 : 0;
+			DecorationHelper::setSourceSpacerHeight(overlay.sourceSpacerCursor,
+				overlay.geometry.documentRect.height() + reactionHeight);
 		}
 		else
 		{
-			// Existing bubble dimensions are immutable; only keep its document anchor current.
-			overlay.geometry.documentRect.moveTopLeft(tableRect.topLeft());
+			// Preserve each bubble's size and horizontal anchor. Only preceding flow changes may move it vertically.
+			QPointF anchorPosition = overlay.geometry.documentRect.topLeft();
+			if (tableRect.isValid())
+				anchorPosition.setY(tableRect.top());
+			overlay.geometry.documentRect.moveTopLeft(anchorPosition);
 		}
 
 		QRectF visibleRect = overlay.geometry.documentRect;
@@ -452,6 +548,20 @@ void StyleViewer::updateMessageBubbleGeometry()
 			else
 			{
 				overlay.sideContent->hide();
+			}
+		}
+		if (overlay.reactionContent && !overlay.reactionContent->isHidden())
+		{
+			const QRect reactionRect = DecorationHelper::reactionDecorationRect(bubbleRect,
+				overlay.reactionContent->size(), viewport()->size(), overlay.outgoing);
+			if (reactionRect.isValid())
+			{
+				overlay.reactionContent->setGeometry(reactionRect);
+				overlay.reactionContent->raise();
+			}
+			else
+			{
+				overlay.reactionContent->hide();
 			}
 		}
 		++i;

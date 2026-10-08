@@ -28,7 +28,9 @@ public:
 	QString cacheImageResource(const QString &APath, bool ARoundCorners = false);
 	void addMessageBubble(QTextTable *ATable, const QString &AHtml, const QColor &AFill);
 	void addMessageBubble(QTextTable *ATable, const QString &AMessageId,
-		const QString &AHtml, const QColor &AFill, bool AOutgoing = false);
+		const QString &AHtml, const QColor &AFill, bool AOutgoing = false,
+		const QRectF &ASourceAnchorRect = QRectF(),
+		const QTextCursor &ASourceSpacerCursor = QTextCursor());
 	bool setMessageDecoration(const QString &AMessageId, const QString &ADecorationId,
 		const QString &AHtml);
 	void clearMessageBubbles();
@@ -47,8 +49,13 @@ private:
 		QPointer<QFrame> frame;
 		QPointer<QTextBrowser> content;
 		QPointer<QTextBrowser> sideContent;
+		QPointer<QTextBrowser> reactionContent;
 		QString messageId;
 		QString html;
+		QString renderedHtml;
+		QString renderedReactionHtml;
+		QRectF sourceAnchorRect;
+		QTextCursor sourceSpacerCursor;
 		bool outgoing = false;
 		DecorationHelper::BubbleGeometrySnapshot geometry;
 		QMap<QString, DecorationHelper::Decoration> decorations;
