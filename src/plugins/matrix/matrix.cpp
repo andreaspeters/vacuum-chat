@@ -27,6 +27,7 @@
 #include <QInputDialog>
 #include <QLineEdit>
 #include <QMessageBox>
+#include <QElapsedTimer>
 #include <QTimer>
 #include <QPointer>
 
@@ -979,7 +980,7 @@ void Matrix::onCachedHistoryLoaded(const QString &roomId,
 		FLatestConversationEventIds.insert(roomId, mergedMessages.last().messageId());
 	if (!mergedMessages.isEmpty()) {
 		FCachedHistoryQueue.append(mergedMessages);
-		FHistoryQueuedRooms.insert(roomId);
+		FCachedHistoryRemainingByRoom[roomId] += mergedMessages.size();
 	} else {
 		finishHistoryLoad(roomId);
 	}
@@ -1031,21 +1032,20 @@ void Matrix::onHistoryPageLoaded(const QString &roomId,
 
 void Matrix::emitCachedHistoryBatch()
 {
-	const int batchSize = 25;
-	const int count = qMin(batchSize, FCachedHistoryQueue.size());
-	for (int i = 0; i < count; ++i)
-		emit protocolMessageReceived(FCachedHistoryQueue.takeFirst());
-	const QSet<QString> queuedRooms = FHistoryQueuedRooms;
-	for (const QString &roomId : queuedRooms) {
-		const bool hasQueuedMessages = std::any_of(FCachedHistoryQueue.cbegin(),
-			FCachedHistoryQueue.cend(), [&roomId](const BasicMessage &message) {
-				return message.conversationId() == roomId;
-			});
-		if (!hasQueuedMessages)
+	constexpr qsizetype batchSize = 25;
+	const qsizetype count = qMin(batchSize, FCachedHistoryQueue.size());
+	for (qsizetype i = 0; i < count; ++i) {
+		const BasicMessage message = FCachedHistoryQueue.takeFirst();
+		emit protocolMessageReceived(message);
+		auto roomIt = FCachedHistoryRemainingByRoom.find(message.conversationId());
+		if (roomIt != FCachedHistoryRemainingByRoom.end() && --roomIt.value() == 0) {
+			const QString roomId = roomIt.key();
+			FCachedHistoryRemainingByRoom.erase(roomIt);
 			finishHistoryLoad(roomId);
+		}
 	}
 	if (!FCachedHistoryQueue.isEmpty())
-		QTimer::singleShot(0, this, &Matrix::emitCachedHistoryBatch);
+		QTimer::singleShot(1, this, &Matrix::emitCachedHistoryBatch);
 	else
 		FCachedHistoryBatchScheduled = false;
 }
@@ -1819,8 +1819,8 @@ void Matrix::onAccountDisplayNameUpdateFinished(const QString &userId, bool succ
 
 void Matrix::onSyncReceived(const QList<MatrixTextEvent> &events)
 {
-	Q_UNUSED(events);
 	FNotificationsReady = true;
+	enqueueProtocolEventBatch(events);
 }
 
 void Matrix::onMessageHistoryChanged(const QString &roomId,
@@ -1828,15 +1828,71 @@ void Matrix::onMessageHistoryChanged(const QString &roomId,
 {
 	if (roomId.isEmpty())
 		return;
-	for (const MatrixTextEvent &event : events) {
-		const bool encrypted = event.metadata.value(QStringLiteral("outer_event_type")).toString() ==
-			QStringLiteral("m.room.encrypted");
-		if (event.roomId != roomId || (encrypted &&
-			event.metadata.value(QStringLiteral("decryption_status")).toString() !=
-				QStringLiteral("decrypted")))
+	enqueueProtocolEventBatch(events, roomId);
+}
+
+void Matrix::enqueueProtocolEventBatch(const QList<MatrixTextEvent> &events,
+	const QString &historyRoomId)
+{
+	if (events.isEmpty())
+		return;
+	FPendingProtocolEventBatches.append({events, historyRoomId});
+	if (FProtocolEventBatchScheduled)
+		return;
+	FProtocolEventBatchScheduled = true;
+	QTimer::singleShot(0, this, &Matrix::processNextProtocolEventBatch);
+}
+
+void Matrix::processNextProtocolEventBatch()
+{
+	constexpr qsizetype maxEventsPerTurn = 25;
+	constexpr qint64 maxTurnDurationMs = 5;
+	QElapsedTimer timer;
+	timer.start();
+	qsizetype processed = 0;
+
+	while (!FPendingProtocolEventBatches.isEmpty() && processed < maxEventsPerTurn &&
+		timer.elapsed() < maxTurnDurationMs) {
+		PendingProtocolEventBatch &pending = FPendingProtocolEventBatches.first();
+		if (FPendingProtocolEventIndex >= pending.events.size()) {
+			FPendingProtocolEventBatches.removeFirst();
+			FPendingProtocolEventIndex = 0;
 			continue;
-		queueOrEmitHistoryMessage(event.toBasicMessage());
+		}
+
+		const MatrixTextEvent event = pending.events.at(FPendingProtocolEventIndex++);
+		const bool fromHistorySnapshot = !pending.historyRoomId.isEmpty();
+		++processed;
+		if (fromHistorySnapshot) {
+			const bool encrypted = event.metadata.value(QStringLiteral("outer_event_type")).toString() ==
+				QStringLiteral("m.room.encrypted");
+			if (event.roomId != pending.historyRoomId || (encrypted &&
+				event.metadata.value(QStringLiteral("decryption_status")).toString() !=
+					QStringLiteral("decrypted")))
+				continue;
+		}
+
+		if (!fromHistorySnapshot && event.activeImageFetchPending)
+			continue;
+
+		const BasicMessage message = event.toBasicMessage();
+		if (fromHistorySnapshot)
+			queueOrEmitHistoryMessage(message);
+		else
+			onNetworkMessageReceived(message);
 	}
+
+	while (!FPendingProtocolEventBatches.isEmpty() &&
+		FPendingProtocolEventIndex >= FPendingProtocolEventBatches.first().events.size()) {
+		FPendingProtocolEventBatches.removeFirst();
+		FPendingProtocolEventIndex = 0;
+	}
+
+	if (FPendingProtocolEventBatches.isEmpty()) {
+		FProtocolEventBatchScheduled = false;
+		return;
+	}
+	QTimer::singleShot(1, this, &Matrix::processNextProtocolEventBatch);
 }
 
 void Matrix::onCachedHistoryLoadFailed(const QString &roomId, const QString &error)
@@ -1858,12 +1914,22 @@ void Matrix::queueOrEmitHistoryMessage(const BasicMessage &message)
 
 void Matrix::finishHistoryLoad(const QString &roomId)
 {
-	FHistoryQueuedRooms.remove(roomId);
-	FHistoryLoadingRooms.remove(roomId);
+	if (FCachedHistoryRemainingByRoom.value(roomId) > 0)
+		return;
 	const QList<BasicMessage> pendingMessages = FPendingHistoryMessages.take(roomId);
-	for (const BasicMessage &message :
-		mergeHistoryMessagesChronologically(QList<BasicMessage>(), pendingMessages))
-		emit protocolMessageReceived(message);
+	const QList<BasicMessage> orderedPendingMessages =
+		mergeHistoryMessagesChronologically(QList<BasicMessage>(), pendingMessages);
+	if (!orderedPendingMessages.isEmpty()) {
+		FCachedHistoryQueue.append(orderedPendingMessages);
+		FCachedHistoryRemainingByRoom[roomId] += orderedPendingMessages.size();
+		if (!FCachedHistoryBatchScheduled) {
+			FCachedHistoryBatchScheduled = true;
+			QTimer::singleShot(0, this, &Matrix::emitCachedHistoryBatch);
+		}
+		return;
+	}
+	FCachedHistoryRemainingByRoom.remove(roomId);
+	FHistoryLoadingRooms.remove(roomId);
 	FHistoryRequests.remove(roomId);
 	emit protocolHistoryLoaded(roomId);
 }

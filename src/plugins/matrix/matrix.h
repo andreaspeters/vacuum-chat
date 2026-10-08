@@ -142,6 +142,7 @@ private slots:
 	void onSyncError(const QString &AError);
 	void onInitialSyncCompleted();
 	void onSyncReceived(const QList<MatrixTextEvent> &events);
+	void processNextProtocolEventBatch();
 	void onMessageHistoryChanged(const QString &roomId, const QList<MatrixTextEvent> &events);
 	void onRosterChanged(const QList<ProtocolRoom> &rooms);
 	void onNetworkMessageReceived(const BasicMessage &message);
@@ -176,6 +177,7 @@ signals:
 
 private:
 	friend class MatrixPresenceLifecycleTestAccess;
+	friend class MatrixSyncBatchTestAccess;
 
 	QUuid FUuid;
 	MatrixNetwork *FMatrixNetwork;
@@ -216,6 +218,8 @@ private:
 	void onCachedHistoryLoadFailed(const QString &roomId, const QString &error);
 	void onHistoryPageLoaded(const QString &roomId, const MatrixHistoryPageResult &result);
 	void emitCachedHistoryBatch();
+	void enqueueProtocolEventBatch(const QList<MatrixTextEvent> &events,
+		const QString &historyRoomId = QString());
 	void queueOrEmitHistoryMessage(const BasicMessage &message);
 	void finishHistoryLoad(const QString &roomId);
 	QList<BasicMessage> mergeHistoryMessagesChronologically(
@@ -254,7 +258,16 @@ private:
 	QStringList FDeferredVerificationSasEmoji;
 	QString FDeferredVerificationSasDecimal;
 	QMap<QString, QString> FLatestConversationEventIds;
+	struct PendingProtocolEventBatch
+	{
+		QList<MatrixTextEvent> events;
+		QString historyRoomId;
+	};
+	QList<PendingProtocolEventBatch> FPendingProtocolEventBatches;
+	qsizetype FPendingProtocolEventIndex = 0;
+	bool FProtocolEventBatchScheduled = false;
 	QList<BasicMessage> FCachedHistoryQueue;
+	QMap<QString, qsizetype> FCachedHistoryRemainingByRoom;
 	bool FCachedHistoryBatchScheduled = false;
 	mutable QList<QPair<QString, QString>> FAvatarLoadQueue;
 	mutable QSet<QString> FAvatarLoadSeen;
@@ -262,7 +275,6 @@ private:
 
 	mutable QSet<QString> FHistoryRequests;
 	mutable QSet<QString> FHistoryLoadingRooms;
-	QSet<QString> FHistoryQueuedRooms;
 	mutable QMap<QString, QList<BasicMessage>> FPendingHistoryMessages;
 	struct PendingHistoryPageRequest
 	{

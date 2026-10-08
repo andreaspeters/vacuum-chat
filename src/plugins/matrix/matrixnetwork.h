@@ -37,6 +37,7 @@ struct MatrixTextEvent {
 	QString messageType;
 	QStringList attachments;
 	QVariantMap metadata;
+	bool activeImageFetchPending = false;
 
 	BasicMessage toBasicMessage() const
 	{
@@ -227,6 +228,7 @@ private slots:
 	void queryOwnDevices();
 	void claimOneTimeKey(const QString &userId, const QString &deviceId);
 	void onSyncFinished(QNetworkReply *reply);
+	void dispatchSyncEventBatch(const QList<MatrixTextEvent> &events);
 	void onSendFinished(QNetworkReply *reply);
 	void onReplyError(QNetworkReply *reply);
 	void onRoomEncryptionStateFinished(QNetworkReply *reply);

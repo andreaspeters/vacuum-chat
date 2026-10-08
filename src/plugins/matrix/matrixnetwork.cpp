@@ -5159,18 +5159,7 @@ void MatrixNetwork::onSyncFinished(QNetworkReply *reply)
 
 	if (!wasInitialSync && !events.isEmpty()) {
 		saveMessageHistory();
-		emit syncReceived(events);
-
-		for (const MatrixTextEvent &event : events) {
-			if (event.messageType == QStringLiteral("m.image")) {
-				if (event.roomId == FActiveRoomId)
-					requestImage(event);
-				else
-					emit messageReceived(event.toBasicMessage());
-				continue;
-			}
-			emit messageReceived(event.toBasicMessage());
-		}
+		dispatchSyncEventBatch(events);
 	}
 	
 
@@ -5180,6 +5169,22 @@ void MatrixNetwork::onSyncFinished(QNetworkReply *reply)
 		if (!FAccesToken.isEmpty() && !FSyncInFlight)
 			sync();
 	});
+}
+
+void MatrixNetwork::dispatchSyncEventBatch(const QList<MatrixTextEvent> &events)
+{
+	QList<MatrixTextEvent> uiEvents = events;
+	QList<MatrixTextEvent> activeImages;
+	for (int index = 0; index < uiEvents.size(); ++index) {
+		const MatrixTextEvent &event = events.at(index);
+		if (event.messageType == QStringLiteral("m.image") && event.roomId == FActiveRoomId) {
+			uiEvents[index].activeImageFetchPending = true;
+			activeImages.append(event);
+		}
+	}
+	emit syncReceived(uiEvents);
+	for (const MatrixTextEvent &event : activeImages)
+		requestImage(event);
 }
 
 QList<MatrixTextEvent> MatrixNetwork::messageHistory(const QString &roomId)
