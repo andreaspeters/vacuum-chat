@@ -310,6 +310,7 @@ void RecentContacts::updateFavoritesRoot()
         }
         IRosterIndex *favoriteIndex = FFavoriteIndexes.value(item);
         if (favoriteIndex) {
+            favoriteIndex->setData(RDR_RECENT_IS_FAVORITE, true);
             const QList<IRosterIndex *> proxies = recentItemProxyIndexes(item);
             FIndexProxies.insert(favoriteIndex, proxies);
             if (!proxies.isEmpty())

@@ -6,6 +6,11 @@
 
 namespace AvatarVisualPolicy
 {
+inline bool shouldShowRosterAvatar(bool isRecentFavorite)
+{
+    return !isRecentFavorite;
+}
+
 inline bool shouldGray(int show, bool showGrayAvatars)
 {
     return showGrayAvatars &&

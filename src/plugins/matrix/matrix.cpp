@@ -968,8 +968,11 @@ void Matrix::onCachedHistoryLoaded(const QString &roomId,
 		for (auto it = event.metadata.constBegin(); it != event.metadata.constEnd(); ++it)
 			metadata.insert(it.key(), it.value());
 		metadata.insert(QStringLiteral("historical"), true);
-		metadata.insert(QStringLiteral("sender_is_self"),
-			FNetworkUserId == event.sender);
+		const bool senderIsSelf = FNetworkUserId.isEmpty()
+			? (event.metadata.value(QStringLiteral("sender_is_self")).toBool() ||
+				MatrixSessionPolicy::matchesLoginUserId(FDatabaseUserId, event.sender))
+			: FNetworkUserId == event.sender;
+		metadata.insert(QStringLiteral("sender_is_self"), senderIsSelf);
 		message.setMetadata(metadata);
 		cachedMessages.append(message);
 	}
@@ -1008,7 +1011,11 @@ void Matrix::onHistoryPageLoaded(const QString &roomId,
 			for (auto it = event.metadata.constBegin(); it != event.metadata.constEnd(); ++it)
 				metadata.insert(it.key(), it.value());
 			metadata.insert(QStringLiteral("historical"), true);
-			metadata.insert(QStringLiteral("sender_is_self"), FNetworkUserId == event.sender);
+			const bool senderIsSelf = FNetworkUserId.isEmpty()
+				? (event.metadata.value(QStringLiteral("sender_is_self")).toBool() ||
+					MatrixSessionPolicy::matchesLoginUserId(FDatabaseUserId, event.sender))
+				: FNetworkUserId == event.sender;
+			metadata.insert(QStringLiteral("sender_is_self"), senderIsSelf);
 			message.setMetadata(metadata);
 			page.messages.append(message);
 		}
@@ -1627,30 +1634,39 @@ void Matrix::removeNotification(const QString &id)
 
 void Matrix::onNetworkMessageReceived(const BasicMessage &message)
 {
-	if (!message.conversationId().isEmpty() && !message.messageId().isEmpty())
-		FLatestConversationEventIds.insert(message.conversationId(), message.messageId());
+	BasicMessage normalizedMessage = message;
+	QVariantMap metadata = normalizedMessage.metadata();
+	const bool senderIsSelf = message.direction() == BasicMessage::Outgoing ||
+		(!FNetworkUserId.isEmpty() ? FNetworkUserId == message.sender() :
+			(metadata.value(QStringLiteral("sender_is_self")).toBool() ||
+			 MatrixSessionPolicy::matchesLoginUserId(FDatabaseUserId, message.sender())));
+	metadata.insert(QStringLiteral("sender_is_self"), senderIsSelf);
+	normalizedMessage.setMetadata(metadata);
+	if (!normalizedMessage.conversationId().isEmpty() && !normalizedMessage.messageId().isEmpty())
+		FLatestConversationEventIds.insert(normalizedMessage.conversationId(), normalizedMessage.messageId());
 	if (FNotificationsReady && FMatrixNetwork &&
-		message.metadata().value(QStringLiteral("room_type")).toString() != QStringLiteral("m.space") &&
-		room(message.conversationId()).roomType != QStringLiteral("m.space") &&
-		message.metadata().value(QStringLiteral("event_type")).toString() != QStringLiteral("m.reaction") &&
-		!message.metadata().value(QStringLiteral("historical")).toBool() &&
-		message.direction() == BasicMessage::Incoming &&
-		message.sender() != FNetworkUserId &&
-		message.conversationId() != FActiveConversationId &&
-		!message.messageId().isEmpty() && !FNotificationEventIds.contains(message.messageId())) {
+		normalizedMessage.metadata().value(QStringLiteral("room_type")).toString() != QStringLiteral("m.space") &&
+		room(normalizedMessage.conversationId()).roomType != QStringLiteral("m.space") &&
+		normalizedMessage.metadata().value(QStringLiteral("event_type")).toString() != QStringLiteral("m.reaction") &&
+		!normalizedMessage.metadata().value(QStringLiteral("historical")).toBool() &&
+		normalizedMessage.direction() == BasicMessage::Incoming &&
+		normalizedMessage.sender() != FNetworkUserId &&
+		normalizedMessage.conversationId() != FActiveConversationId &&
+		!normalizedMessage.messageId().isEmpty() &&
+		!FNotificationEventIds.contains(normalizedMessage.messageId())) {
 		ProtocolNotification notification;
-		notification.id = message.messageId();
+		notification.id = normalizedMessage.messageId();
 		notification.accountId = accountId();
-		notification.conversationId = message.conversationId();
-		notification.title = message.sender();
-		notification.body = message.body();
+		notification.conversationId = normalizedMessage.conversationId();
+		notification.title = normalizedMessage.sender();
+		notification.body = normalizedMessage.body();
 		notification.protocol = protocol();
-		notification.timestamp = message.timestamp();
-		notification.kind = message.metadata().value(QStringLiteral("highlight")).toBool()
+		notification.timestamp = normalizedMessage.timestamp();
+		notification.kind = normalizedMessage.metadata().value(QStringLiteral("highlight")).toBool()
 			? ProtocolNotification::Mention : ProtocolNotification::Message;
 		appendNotification(notification);
 	}
-	queueOrEmitHistoryMessage(message);
+	queueOrEmitHistoryMessage(normalizedMessage);
 }
 
 void Matrix::onAvatarImageReceived(const QString &key, const QImage &image)

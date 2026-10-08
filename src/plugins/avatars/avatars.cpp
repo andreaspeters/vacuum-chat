@@ -373,9 +373,12 @@ QList<quint32> Avatars::rosterLabels(int AOrder, const IRosterIndex *AIndex) con
 {
 	QList<quint32> labels;
 	if (AOrder==RLHO_AVATARS_AVATAR && FAvatarsVisible &&
+		AvatarVisualPolicy::shouldShowRosterAvatar(AIndex->data(RDR_RECENT_IS_FAVORITE).toBool()) &&
 		(FShowEmptyAvatars || !AIndex->data(RDR_AVATAR_HASH).toString().isEmpty() ||
 		!AIndex->data(RDR_AVATAR_KEY).toString().isEmpty()))
+	{
 		labels.append(FAvatarLabelId);
+	}
 	return labels;
 }
 

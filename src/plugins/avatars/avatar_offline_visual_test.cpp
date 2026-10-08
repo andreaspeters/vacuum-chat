@@ -42,5 +42,10 @@ int main(int argc, char **argv)
         disabledPixel.blue() == 0 && disabledPixel.alpha() == 255,
         "disabled gray-avatar option leaves Offline avatar unchanged");
 
+    passed &= check(AvatarVisualPolicy::shouldShowRosterAvatar(false),
+        "avatars remain visible on ordinary roster rows");
+    passed &= check(!AvatarVisualPolicy::shouldShowRosterAvatar(true),
+        "avatars are hidden on favorite copies");
+
     return passed ? 0 : 1;
 }

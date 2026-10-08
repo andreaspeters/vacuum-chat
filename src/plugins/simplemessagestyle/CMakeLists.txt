@@ -14,7 +14,9 @@ if (BUILD_TESTING)
 		simplemessagestyle.cpp
 		simplemessagestyle.h
 		styleviewer.cpp
-		styleviewer.h)
+		styleviewer.h
+		decorationhelper.cpp
+		decorationhelper.h)
 	target_compile_features(simplemessagestyle_autoscroll_tests PRIVATE cxx_std_11)
 	target_compile_definitions(simplemessagestyle_autoscroll_tests PRIVATE
 		AUTOSCROLL_STYLE_PATH=\"${CMAKE_SOURCE_DIR}/resources/simplemessagestyles/plain\"
