@@ -836,11 +836,57 @@ bool RosterChanger::showProtocolAddContactDialog(const QString &AAccountId)
 	return false;
 }
 
+bool RosterChanger::sendProtocolSelfAdvert(const QString &AAccountId,
+	const QString &AStreamId, IProtocolAdvertActions::AdvertType AType)
+{
+	if (!FPluginManager || AAccountId.isEmpty() || AStreamId.isEmpty())
+		return false;
+
+	IPlugin *accountPlugin = FPluginManager->pluginInterface("IAccountManager").value(0, NULL);
+	IAccountManager *accountManager = accountPlugin
+		? qobject_cast<IAccountManager *>(accountPlugin->instance()) : NULL;
+	const QUuid persistentAccountId = QUuid::fromString(AAccountId);
+	IAccount *account = accountManager && !persistentAccountId.isNull()
+		? accountManager->accountById(persistentAccountId) : NULL;
+	if (!account || !account->isActive() || account->accountId() != persistentAccountId)
+		return false;
+
+	for (IPlugin *plugin : FPluginManager->pluginInterface("IProtocolRoster"))
+	{
+		QObject *instance = plugin ? plugin->instance() : NULL;
+		IProtocolRoster *roster = instance
+			? qobject_cast<IProtocolRoster *>(instance) : NULL;
+		if (!roster || roster->streamId() != AStreamId || roster->accountId() != AAccountId)
+			continue;
+
+		IProtocolCapabilities *capabilities = qobject_cast<IProtocolCapabilities *>(instance);
+		IProtocolAdvertActions *actions = qobject_cast<IProtocolAdvertActions *>(instance);
+		return dispatchSelfAdvertAction(capabilities, actions, AAccountId, AType);
+	}
+	return false;
+}
+
 void RosterChanger::onShowProtocolAddContactDialog(bool)
 {
 	Action *action = qobject_cast<Action *>(sender());
 	if (action)
 		showProtocolAddContactDialog(action->data(Action::DR_Parametr1).toString());
+}
+
+void RosterChanger::onSendProtocolAdvert(bool)
+{
+	Action *action = qobject_cast<Action *>(sender());
+	if (!action)
+		return;
+
+	const int rawType = action->data(Action::DR_Parametr3).toInt();
+	if (rawType != static_cast<int>(IProtocolAdvertActions::AdvertType::ZeroHop) &&
+		rawType != static_cast<int>(IProtocolAdvertActions::AdvertType::Flood))
+		return;
+
+	sendProtocolSelfAdvert(action->data(Action::DR_Parametr1).toString(),
+		action->data(Action::DR_Parametr2).toString(),
+		static_cast<IProtocolAdvertActions::AdvertType>(rawType));
 }
 
 void RosterChanger::onShortcutActivated(const QString &AId, QWidget *AWidget)
@@ -932,6 +978,52 @@ void RosterChanger::onRosterIndexContextMenu(const QList<IRosterIndex *> &AIndex
 			const QString accountId = protocolAccountIdForRoot(AIndexes.first());
 			if (!accountId.isEmpty() && FPluginManager)
 			{
+				const QString protocolStreamId = AIndexes.first()->data(RDR_ACCOUNT_ID).toString();
+				for (IPlugin *plugin : FPluginManager->pluginInterface("IProtocolRoster"))
+				{
+					QObject *instance = plugin ? plugin->instance() : NULL;
+					IProtocolRoster *roster = instance
+						? qobject_cast<IProtocolRoster *>(instance) : NULL;
+					if (!roster || roster->streamId() != protocolStreamId ||
+						roster->accountId() != accountId)
+						continue;
+
+					IProtocolCapabilities *capabilities =
+						qobject_cast<IProtocolCapabilities *>(instance);
+					IProtocolAdvertActions *advertActions =
+						qobject_cast<IProtocolAdvertActions *>(instance);
+					const IProtocolAdvertActions::AdvertType zeroHopType =
+						IProtocolAdvertActions::AdvertType::ZeroHop;
+					if (canOfferSelfAdvertAction(capabilities, advertActions,
+						accountId, zeroHopType)) {
+						Action *advertAction = new Action(AMenu);
+						advertAction->setText(tr("Send Zero-Hop advert"));
+						advertAction->setData(Action::DR_Parametr1, accountId);
+						advertAction->setData(Action::DR_Parametr2, protocolStreamId);
+						advertAction->setData(Action::DR_Parametr3,
+							static_cast<int>(zeroHopType));
+						connect(advertAction, SIGNAL(triggered(bool)),
+							SLOT(onSendProtocolAdvert(bool)));
+						AMenu->addAction(advertAction, AG_RVCM_RCHANGER);
+					}
+
+					const IProtocolAdvertActions::AdvertType floodType =
+						IProtocolAdvertActions::AdvertType::Flood;
+					if (canOfferSelfAdvertAction(capabilities, advertActions,
+						accountId, floodType)) {
+						Action *advertAction = new Action(AMenu);
+						advertAction->setText(tr("Send network-wide (Flood) advert"));
+						advertAction->setData(Action::DR_Parametr1, accountId);
+						advertAction->setData(Action::DR_Parametr2, protocolStreamId);
+						advertAction->setData(Action::DR_Parametr3,
+							static_cast<int>(floodType));
+						connect(advertAction, SIGNAL(triggered(bool)),
+							SLOT(onSendProtocolAdvert(bool)));
+						AMenu->addAction(advertAction, AG_RVCM_RCHANGER);
+					}
+					break;
+				}
+
 				for (IPlugin *plugin : FPluginManager->pluginInterface("IProtocolCapabilities"))
 				{
 					QObject *instance = plugin ? plugin->instance() : NULL;

@@ -19,7 +19,9 @@ public:
         CapabilityViewHistory = 1 << 5,
         CapabilityManageRemoteArchive = 1 << 6,
         CapabilityShowProfile = 1 << 7,
-        CapabilityEditProfile = 1 << 8
+        CapabilityEditProfile = 1 << 8,
+        CapabilitySendZeroHopAdvert = 1 << 9,
+        CapabilitySendFloodAdvert = 1 << 10
     };
     Q_DECLARE_FLAGS(Capabilities, Capability)
 

@@ -28,6 +28,7 @@
 #include <interfaces/inotifications.h>
 #include <interfaces/ioptionsmanager.h>
 #include <interfaces/ixmppuriqueries.h>
+#include <interfaces/iprotocoladvertactions.h>
 #include <utils/shortcuts.h>
 #include <utils/widgetmanager.h>
 #include "addcontactdialog.h"
@@ -144,6 +145,7 @@ protected slots:
 protected slots:
 	void onShowAddContactDialog(bool);
 	void onShowProtocolAddContactDialog(bool);
+	void onSendProtocolAdvert(bool);
 	void onRosterItemReceived(IRoster *ARoster, const IRosterItem &AItem, const IRosterItem &ABefore);
 	void onRosterClosed(IRoster *ARoster);
 	void onShortcutActivated(const QString &AId, QWidget *AWidget);
@@ -156,6 +158,8 @@ protected slots:
 private:
 	QString protocolAccountIdForRoot(IRosterIndex *AIndex) const;
 	bool showProtocolAddContactDialog(const QString &AAccountId);
+	bool sendProtocolSelfAdvert(const QString &AAccountId, const QString &AStreamId,
+		IProtocolAdvertActions::AdvertType AType);
 
 	IPluginManager *FPluginManager;
 	IRosterPlugin *FRosterPlugin;

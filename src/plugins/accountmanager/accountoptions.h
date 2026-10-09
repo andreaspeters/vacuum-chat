@@ -14,6 +14,10 @@
 #include <utils/jid.h>
 #include <utils/options.h>
 #include <ui_accountoptions.h>
+#include "meshcorebledevicecatalog.h"
+
+class QLabel;
+class QBluetoothDeviceDiscoveryAgent;
 
 class AccountOptions :
 		public QWidget,
@@ -63,8 +67,14 @@ private:
 	// MeshCore fields
 	QWidget *FMeshCoreFields;
 	QComboBox *FMeshCoreTransport;
-	QLineEdit *FMeshCoreMacAddress;
+	MeshCoreBleAddressSelection FMeshCoreMacAddress;
 	QLineEdit *FMeshCorePort;
+	QComboBox *FMeshCoreBleDevices;
+	QPushButton *FMeshCoreScanBle;
+	QLabel *FMeshCoreBleStatus;
+	QBluetoothDeviceDiscoveryAgent *FMeshCoreBleDiscoveryAgent = nullptr;
+	bool FMeshCoreBleScanFailed = false;
+	MeshCoreBleDeviceCatalog FMeshCoreBleDeviceCatalog;
 };
 
 #endif // ACCOUNTOPTIONS_H

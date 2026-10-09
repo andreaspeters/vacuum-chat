@@ -5,6 +5,7 @@
 #include "meshcoreblelifecycle.h"
 
 #include <interfaces/iprotocolmessaging.h>
+#include <interfaces/iprotocoladvertactions.h>
 #include <interfaces/iprotocolpresence.h>
 #include <interfaces/ipresence.h>
 
@@ -12,12 +13,14 @@
 #include <QDateTime>
 #include <QDir>
 #include <QDirIterator>
+#include <QEventLoop>
 #include <QFile>
 #include <QCryptographicHash>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QTimer>
 #include <utils/options.h>
 #include <functional>
 #include <iostream>
@@ -453,8 +456,71 @@ int main(int argc, char *argv[])
         selfInfo[4 + i] = static_cast<char>(i);
     transport->receivePacket(selfInfo);
     if (transport->sentPayloads.size() != 2 ||
+        transport->sentPayloads.constLast() != QByteArray::fromHex("1603")) {
+        std::cerr << "SELF_INFO did not trigger the DEVICE_QUERY command\\n";
+        return 1;
+    }
+    QByteArray deviceInfo(2, '\0');
+    deviceInfo[0] = static_cast<char>(0x0d);
+    transport->receivePacket(deviceInfo);
+    if (transport->sentPayloads.size() != 3 ||
+        transport->sentPayloads.constLast() != QByteArray::fromHex("1f00")) {
+        std::cerr << "DEVICE_INFO did not start channel discovery before contact loading\\n";
+        return 1;
+    }
+
+    for (quint8 index = 0; index < 8; ++index) {
+        const QByteArray name = index == 0 ? QByteArray("Operations") : QByteArray();
+        if (index == 4)
+            transport->receivePacket(QByteArray(1, static_cast<char>(0x01)));
+        else
+            transport->receivePacket(channelInfoPacket(index, name, index == 2 || index == 3));
+        if (index == 0) {
+            const QList<MeshCoreChannel> visibleRooms = protocol.discoverChannels();
+            if (channelsChangedCount != 1 || visibleRooms.size() != 1 ||
+                visibleRooms.constFirst().name != QStringLiteral("Operations")) {
+                std::cerr << "room was not published before channel discovery completed\\n";
+                return 1;
+            }
+        }
+        if (index < 7) {
+            const QByteArray request = transport->sentPayloads.constLast();
+            if (request.size() != 2 || request.at(0) != static_cast<char>(0x1f) ||
+                request.at(1) != static_cast<char>(index + 1)) {
+                std::cerr << "channel scan did not request indices sequentially\\n";
+                return 1;
+            }
+        }
+    }
+    if (protocol.availableChannelSlots() != (QList<int>() << 2 << 3 << 4) ||
         transport->sentPayloads.constLast() != QByteArray(1, static_cast<char>(0x04))) {
-        std::cerr << "SELF_INFO did not trigger a full contacts request\n";
+        std::cerr << "channel discovery did not complete before contact retrieval\\n";
+        return 1;
+    }
+    const int contactSyncRequestCount = transport->sentPayloads.size();
+
+    // A missing contact-list response must time out and retry without reopening
+    // the transport.
+    QEventLoop timeoutLoop;
+    QTimer::singleShot(6300, &timeoutLoop, &QEventLoop::quit);
+    timeoutLoop.exec();
+    if (transport->openCount != 1 ||
+        transport->sentPayloads.size() != contactSyncRequestCount + 1 ||
+        transport->sentPayloads.constLast() != QByteArray(1, static_cast<char>(0x04))) {
+        std::cerr << "contact-list timeout did not retry roster sync\n";
+        return 1;
+    }
+
+    // A malformed contact-list response must retry roster synchronization
+    // without reopening the BLE/USB transport.
+    transport->receivePacket(QByteArray(1, static_cast<char>(0x02)));
+    QEventLoop retryLoop;
+    QTimer::singleShot(1300, &retryLoop, &QEventLoop::quit);
+    retryLoop.exec();
+    if (transport->openCount != 1 ||
+        transport->sentPayloads.size() != contactSyncRequestCount + 2 ||
+        transport->sentPayloads.constLast() != QByteArray(1, static_cast<char>(0x04))) {
+        std::cerr << "malformed contact-list response did not retry roster sync\n";
         return 1;
     }
 
@@ -462,6 +528,11 @@ int main(int argc, char *argv[])
     appendLe32(contactStart, 1);
     transport->receivePacket(contactStart);
     transport->receivePacket(contactRecord(QByteArray("Alice"), 1234));
+    if (contactsChangedCount != 1 || protocol.discoverContacts().size() != 1 ||
+        protocol.discoverContacts().constFirst().name != QStringLiteral("Alice")) {
+        std::cerr << "contact was not published before the contact list completed\\n";
+        return 1;
+    }
     QByteArray contactEnd(1, static_cast<char>(0x04));
     appendLe32(contactEnd, 1234);
     transport->receivePacket(contactEnd);
@@ -474,35 +545,8 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    if (transport->sentPayloads.size() != 3 ||
-        transport->sentPayloads.constLast() != QByteArray::fromHex("1f00")) {
-        std::cerr << "completed contact sync did not request channel zero\n";
-        return 1;
-    }
-
-    for (quint8 index = 0; index < 8; ++index) {
-        const QByteArray name = index == 0 ? QByteArray("Operations") : QByteArray();
-        if (index == 4)
-            transport->receivePacket(QByteArray(1, static_cast<char>(0x01)));
-        else
-            transport->receivePacket(channelInfoPacket(index, name, index == 2 || index == 3));
-        if (index < 7) {
-            const QByteArray request = transport->sentPayloads.constLast();
-            if (request.size() != 2 || request.at(0) != static_cast<char>(0x1f) ||
-                request.at(1) != static_cast<char>(index + 1)) {
-                std::cerr << "channel scan did not request indices sequentially\n";
-                return 1;
-            }
-        }
-    }
-
-    if (protocol.availableChannelSlots() != (QList<int>() << 2 << 3 << 4)) {
-        std::cerr << "only empty slots with zero secrets or missing slots were advertised as free\n";
-        return 1;
-    }
-
     if (transport->sentPayloads.constLast() != QByteArray(1, static_cast<char>(0x0a))) {
-        std::cerr << "completed channel sync did not start queued-message polling\n";
+        std::cerr << "completed initial contact sync did not start message polling\n";
         return 1;
     }
     transport->receivePacket(incomingDirectMessage);
@@ -691,7 +735,7 @@ int main(int argc, char *argv[])
     transport->receivePacket(QByteArray(1, static_cast<char>(0x0a)));
 
     const QList<MeshCoreChannel> channels = protocol.discoverChannels();
-    if (channelsChangedCount != 1 || channels.size() != 1 ||
+    if (channelsChangedCount != 2 || channels.size() != 1 ||
         channels.first().id != QStringLiteral("0") ||
         channels.first().name != QStringLiteral("Operations") ||
         !channels.first().topic.isEmpty() || !channels.first().members.isEmpty()) {
@@ -741,7 +785,7 @@ int main(int argc, char *argv[])
         transport->receivePacket(channelInfoPacket(index, name));
     }
     const QList<MeshCoreChannel> configuredChannels = protocol.discoverChannels();
-    if (channelsChangedCount != 2 || configuredChannels.size() != 2 ||
+    if (channelsChangedCount != 4 || configuredChannels.size() != 2 ||
         configuredChannels.at(1).id != QStringLiteral("1") ||
         configuredChannels.at(1).name != configuredChannelName ||
         !channelConfigurationFinished || !channelConfigurationSucceeded ||
@@ -812,7 +856,7 @@ int main(int argc, char *argv[])
             addedContactFound = true;
     }
     if (contactsChangedCount != 2 || !addedContactFound ||
-        channelsChangedCount != 3 || !contactAdditionFinished ||
+        channelsChangedCount != 5 || !contactAdditionFinished ||
         !contactAdditionSucceeded || contactAdditionResultId != addedContactPublicKey ||
         transport->sentPayloads.constLast() != QByteArray(1, static_cast<char>(0x0a))) {
         std::cerr << "successful ADD_UPDATE_CONTACT was not reflected after catalog refresh\n";
@@ -861,6 +905,48 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    const int sendsBeforeAdvert = transport->sentPayloads.size();
+    bool zeroHopAdvertAccepted = false;
+    const bool zeroHopAdvertInvoked = QMetaObject::invokeMethod(
+        &protocol, "sendSelfAdvert", Qt::DirectConnection,
+        Q_RETURN_ARG(bool, zeroHopAdvertAccepted), Q_ARG(bool, false));
+    if (!zeroHopAdvertInvoked || !zeroHopAdvertAccepted ||
+        transport->sentPayloads.constLast() != QByteArray::fromHex("0700")) {
+        std::cerr << "zero-hop self-advert did not send command 07 00\n";
+        return 1;
+    }
+    bool overlappingAdvertAccepted = true;
+    if (!QMetaObject::invokeMethod(&protocol, "sendSelfAdvert", Qt::DirectConnection,
+            Q_RETURN_ARG(bool, overlappingAdvertAccepted), Q_ARG(bool, true)) ||
+        overlappingAdvertAccepted || transport->sentPayloads.size() != sendsBeforeAdvert + 1) {
+        std::cerr << "overlapping self-advert was not rejected while awaiting ACK\n";
+        return 1;
+    }
+    transport->receivePacket(QByteArray(1, static_cast<char>(0x00)));
+    if (transport->sentPayloads.size() != sendsBeforeAdvert + 1) {
+        std::cerr << "self-advert ACK incorrectly started a roster refresh\n";
+        return 1;
+    }
+
+    bool floodAdvertAccepted = false;
+    if (!QMetaObject::invokeMethod(&protocol, "sendSelfAdvert", Qt::DirectConnection,
+            Q_RETURN_ARG(bool, floodAdvertAccepted), Q_ARG(bool, true)) ||
+        !floodAdvertAccepted ||
+        transport->sentPayloads.constLast() != QByteArray::fromHex("0701")) {
+        std::cerr << "network-wide self-advert did not send command 07 01\n";
+        return 1;
+    }
+    transport->receivePacket(QByteArray::fromHex("0107"));
+    bool advertAfterErrorAccepted = false;
+    if (!QMetaObject::invokeMethod(&protocol, "sendSelfAdvert", Qt::DirectConnection,
+            Q_RETURN_ARG(bool, advertAfterErrorAccepted), Q_ARG(bool, false)) ||
+        !advertAfterErrorAccepted ||
+        transport->sentPayloads.constLast() != QByteArray::fromHex("0700")) {
+        std::cerr << "self-advert ERR did not release the command slot\n";
+        return 1;
+    }
+    transport->receivePacket(QByteArray(1, static_cast<char>(0x00)));
+
     const QString outgoingDirectText = QStringLiteral("direct out");
     if (!protocol.sendMessage(contacts.first().id, outgoingDirectText)) {
         std::cerr << "direct message was not accepted by the connected transport\n";
@@ -904,6 +990,10 @@ int main(int argc, char *argv[])
     QByteArray interfaceSelfInfo(58, '\0');
     interfaceSelfInfo[0] = static_cast<char>(0x05);
     interfaceTransport->receivePacket(interfaceSelfInfo);
+    interfaceTransport->receivePacket(QByteArray(1, static_cast<char>(0x0d)));
+    for (quint8 index = 0; index < 8; ++index)
+        interfaceTransport->receivePacket(channelInfoPacket(
+            index, index == 0 ? QByteArray("Operations") : QByteArray()));
     QByteArray interfaceContactStart(1, static_cast<char>(0x02));
     appendLe32(interfaceContactStart, 1);
     interfaceTransport->receivePacket(interfaceContactStart);
@@ -911,9 +1001,6 @@ int main(int argc, char *argv[])
     QByteArray interfaceContactEnd(1, static_cast<char>(0x04));
     appendLe32(interfaceContactEnd, 1234);
     interfaceTransport->receivePacket(interfaceContactEnd);
-    for (quint8 index = 0; index < 8; ++index)
-        interfaceTransport->receivePacket(channelInfoPacket(
-            index, index == 0 ? QByteArray("Operations") : QByteArray()));
     interfaceTransport->receivePacket(QByteArray(1, static_cast<char>(0x0a)));
 
     MeshCorePlugin interfaceProvider(interfaceProtocol);
@@ -929,6 +1016,14 @@ int main(int argc, char *argv[])
         std::cerr << "active MeshCore provider did not expose IProtocolMessaging\n";
         return 1;
     }
+    IProtocolAdvertActions *genericAdvertActions =
+        qobject_cast<IProtocolAdvertActions *>(interfaceProvider.instance());
+    if (!genericAdvertActions || genericAdvertActions->sendSelfAdvert(AccountId(),
+            IProtocolAdvertActions::AdvertType::ZeroHop)) {
+        std::cerr << "MeshCore provider did not safely expose IProtocolAdvertActions\n";
+        return 1;
+    }
+
     int interfaceMessageCount = 0;
     BasicMessage lastInterfaceMessage;
     QObject::connect(&interfaceProvider, &MeshCorePlugin::protocolMessageReceived,
@@ -1190,6 +1285,44 @@ int main(int argc, char *argv[])
         std::cerr << "createTransport was unexpectedly called for invalid backend\n";
         return 1;
     }
+
+    FakeTransport *legacyTransport = new FakeTransport();
+    TestMeshCoreProtocol *legacyProtocol = new TestMeshCoreProtocol(legacyTransport);
+    if (!legacyProtocol->initialize(QStringLiteral("legacy-device")) ||
+        !legacyProtocol->connectToDevice()) {
+        std::cerr << "legacy fallback protocol setup failed\n";
+        return 1;
+    }
+    QByteArray legacySelfInfo(58, '\0');
+    legacySelfInfo[0] = static_cast<char>(0x05);
+    legacyTransport->receivePacket(legacySelfInfo);
+    legacyTransport->receivePacket(QByteArray::fromHex("0101"));
+    if (legacyTransport->sentPayloads.size() != 3 ||
+        legacyTransport->sentPayloads.constLast() != QByteArray::fromHex("1f00")) {
+        std::cerr << "rejected DEVICE_QUERY did not continue with channel discovery\n";
+        return 1;
+    }
+    delete legacyProtocol;
+
+    FakeTransport *timeoutTransport = new FakeTransport();
+    TestMeshCoreProtocol *timeoutProtocol = new TestMeshCoreProtocol(timeoutTransport);
+    if (!timeoutProtocol->initialize(QStringLiteral("timeout-device")) ||
+        !timeoutProtocol->connectToDevice()) {
+        std::cerr << "timeout fallback protocol setup failed\n";
+        return 1;
+    }
+    QByteArray timeoutSelfInfo(58, '\0');
+    timeoutSelfInfo[0] = static_cast<char>(0x05);
+    timeoutTransport->receivePacket(timeoutSelfInfo);
+    QEventLoop deviceQueryTimeoutLoop;
+    QTimer::singleShot(5200, &deviceQueryTimeoutLoop, &QEventLoop::quit);
+    deviceQueryTimeoutLoop.exec();
+    if (timeoutTransport->sentPayloads.size() != 3 ||
+        timeoutTransport->sentPayloads.constLast() != QByteArray::fromHex("1f00")) {
+        std::cerr << "timed-out DEVICE_QUERY did not continue with channel discovery\n";
+        return 1;
+    }
+    delete timeoutProtocol;
 
     std::cout << "MeshCoreProtocol tests passed\n";
     return 0;

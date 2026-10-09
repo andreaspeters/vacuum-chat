@@ -10,6 +10,7 @@
 #include <interfaces/iprotocolaccount.h>
 #include <interfaces/iprotocolcapabilities.h>
 #include <interfaces/iprotocolcontactactions.h>
+#include <interfaces/iprotocoladvertactions.h>
 #include <interfaces/iprotocolpresence.h>
 #include <interfaces/iaccountmanager.h>
 
@@ -19,11 +20,11 @@ class IMessageWidgets;
 class MeshCoreProtocol;
 class QTimer;
 
-class MeshCorePlugin : public QObject, public IPlugin, public IProtocolRoster, public IProtocolMessaging, public IProtocolCapabilities, public IProtocolContactActions, public IProtocolPresence
+class MeshCorePlugin : public QObject, public IPlugin, public IProtocolRoster, public IProtocolMessaging, public IProtocolCapabilities, public IProtocolContactActions, public IProtocolAdvertActions, public IProtocolPresence
 {
     Q_OBJECT
     Q_PLUGIN_METADATA(IID "Vacuum.Core.IPlugin/1.0" FILE "meshcore.json")
-    Q_INTERFACES(IPlugin IProtocolRoster IProtocolMessaging IProtocolCapabilities IProtocolContactActions IProtocolPresence)
+    Q_INTERFACES(IPlugin IProtocolRoster IProtocolMessaging IProtocolCapabilities IProtocolContactActions IProtocolAdvertActions IProtocolPresence)
 
 public:
     MeshCorePlugin();
@@ -45,6 +46,7 @@ public:
     IProtocolCapabilities::Capabilities capabilitiesForAccount(const AccountId &accountId,
         const ConversationId &targetId = ConversationId()) const override;
     bool showAddContactDialog(const AccountId &accountId) override;
+    bool sendSelfAdvert(const AccountId &accountId, AdvertType type) override;
     QString protocol() const override;
     QString streamId() const override;
     QList<ProtocolRosterEntry> entries() const override;

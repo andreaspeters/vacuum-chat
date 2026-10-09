@@ -2,6 +2,7 @@
 #define MESHCORE_H
 
 #include <QObject>
+#include <QTimer>
 #include <QByteArray>
 #include <QList>
 #include <QString>
@@ -74,6 +75,7 @@ public:
 
     State getProtocolState() const { return protocolState; }
     DeviceState getDeviceState() const { return deviceState; }
+    bool canSendSelfAdvert() const { return managementCommandReady(); }
     QString getBackend() const { return backend; }
     void setBackend(const QString &backend) { this->backend = backend; }
     QString localPublicKeyHex() const { return currentPublicKeyHex; }
@@ -81,6 +83,7 @@ public:
 public slots:
     bool setChannel(int channelIndex, const QString &name, const QByteArray &secret);
     bool addContact(const QString &publicKeyHex, const QString &name);
+    bool sendSelfAdvert(bool flood);
 
 signals:
     void messageReceived(const BasicMessage &message);
@@ -98,7 +101,18 @@ protected:
     virtual MeshCoreTransport* createTransport(const QString &backend) const;
 
 private:
-    enum ManagementCommand { NoManagementCommand, SetChannelCommand, AddContactCommand };
+    enum class InitialRosterSyncStage {
+        None,
+        Channels,
+        Contacts
+    };
+
+    enum ManagementCommand {
+        NoManagementCommand,
+        SetChannelCommand,
+        AddContactCommand,
+        SendSelfAdvertCommand
+    };
 
     // Handle transport signals and update protocol state
     void onTransportConnected();
@@ -108,8 +122,12 @@ private:
     bool sendAppStart();
     void handlePacket(const QByteArray &payload);
     void abortContactSync();
+    void startContactSync();
+    void retryRosterSync(const QString &reason);
+    void finishRosterSync();
     void beginChannelSync();
     void requestNextChannel();
+    void publishChannelSlot(quint8 channelIndex);
     void abortChannelSync();
     void advanceChannelSync();
     void handleChannelInfo(const QByteArray &packet);
@@ -122,7 +140,6 @@ private:
     QString messageHistoryDirectory() const;
     bool persistMessage(const BasicMessage &message, bool &inserted) const;
     void removePersistedMessage(const BasicMessage &message) const;
-
     QString backend;
     QString devicePath;
     QString deviceMacAddress;
@@ -145,8 +162,14 @@ private:
     bool messagesWaiting = false;
     bool appStartSent = false;
     bool awaitingSelfInfo = false;
+    bool awaitingDeviceInfo = false;
     bool awaitingContactListStart = false;
     bool receivingContactList = false;
+    QTimer rosterSyncTimeoutTimer;
+    QTimer rosterSyncRetryTimer;
+    int rosterSyncRetryCount = 0;
+    bool rosterSyncActive = false;
+    InitialRosterSyncStage initialRosterSyncStage = InitialRosterSyncStage::None;
     ManagementCommand pendingManagementCommand = NoManagementCommand;
     bool awaitingManagementCommandResult = false;
     int pendingChannelIndex = -1;

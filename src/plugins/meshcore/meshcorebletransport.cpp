@@ -316,6 +316,8 @@ void MeshCoreBleTransport::onDescriptorWritten(
     m_notificationWritePending = false;
     m_isConnected = true;
     m_lifecycle.markConnected();
+    qWarning() << "[MC-SYNC] BLE notifications ready; negotiated MTU"
+               << (m_controller ? m_controller->mtu() : 0);
     emit connected();
     processNextWrite();
 }

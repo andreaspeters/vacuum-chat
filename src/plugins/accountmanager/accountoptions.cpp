@@ -4,8 +4,14 @@
 #include <QMessageBox>
 #include <QTextDocument>
 #include <QFormLayout>
+#include <QHBoxLayout>
+#include <QLabel>
 #include <QVBoxLayout>
 #include <interfaces/iemoticons.h>
+#ifndef OS2
+#include <QBluetoothDeviceDiscoveryAgent>
+#include <QBluetoothDeviceInfo>
+#endif
 
 AccountOptions::AccountOptions(IAccountManager *AManager, IPluginManager *APluginManager, const QUuid &AAccountId, QWidget *AParent) : QWidget(AParent)
 {
@@ -84,16 +90,95 @@ AccountOptions::AccountOptions(IAccountManager *AManager, IPluginManager *APlugi
 	FMeshCoreTransport = new QComboBox(FMeshCoreFields);
 	FMeshCoreTransport->addItem(tr("BLE"), QStringLiteral("ble"));
 	FMeshCoreTransport->addItem(tr("USB"), QStringLiteral("usb"));
-	FMeshCoreMacAddress = new QLineEdit(FMeshCoreFields);
 	FMeshCorePort = new QLineEdit(FMeshCoreFields);
+	FMeshCoreBleDevices = new QComboBox(FMeshCoreFields);
+	FMeshCoreBleDevices->setObjectName(QStringLiteral("meshcoreBleDevices"));
+	FMeshCoreScanBle = new QPushButton(tr("Search for MeshCore Bluetooth devices"), FMeshCoreFields);
+	FMeshCoreScanBle->setObjectName(QStringLiteral("meshcoreScanBleDevices"));
+	FMeshCoreBleStatus = new QLabel(tr("Search for nearby MeshCore BLE devices to select one."), FMeshCoreFields);
+	FMeshCoreBleStatus->setObjectName(QStringLiteral("meshcoreBleScanStatus"));
+	FMeshCoreBleStatus->setWordWrap(true);
+	QWidget *bleDeviceRow = new QWidget(FMeshCoreFields);
+	QHBoxLayout *bleDeviceLayout = new QHBoxLayout(bleDeviceRow);
+	bleDeviceLayout->setContentsMargins(0, 0, 0, 0);
+	bleDeviceLayout->addWidget(FMeshCoreBleDevices, 1);
+	bleDeviceLayout->addWidget(FMeshCoreScanBle);
 
 	// Set default values
-	FMeshCoreMacAddress->setText(QStringLiteral("10:BD:A3:5A:6B:E9"));
 	FMeshCorePort->setText(QStringLiteral("/dev/ttyACM0"));
 
 	meshcoreLayout->addRow(tr("Transport:"), FMeshCoreTransport);
-	meshcoreLayout->addRow(tr("BLE MAC Address:"), FMeshCoreMacAddress);
+	meshcoreLayout->addRow(tr("Available MeshCore devices:"), bleDeviceRow);
+	meshcoreLayout->addRow(QString(), FMeshCoreBleStatus);
 	meshcoreLayout->addRow(tr("USB Port:"), FMeshCorePort);
+	connect(FMeshCoreBleDevices, QOverload<int>::of(&QComboBox::activated),
+		this, [this](int index) {
+			const QString address = FMeshCoreBleDevices->itemData(index).toString();
+			if (FMeshCoreMacAddress.select(address))
+				emit modified();
+		});
+
+#ifndef OS2
+	FMeshCoreBleDiscoveryAgent = new QBluetoothDeviceDiscoveryAgent(this);
+	FMeshCoreBleDiscoveryAgent->setLowEnergyDiscoveryTimeout(15000);
+	connect(FMeshCoreBleDiscoveryAgent, &QBluetoothDeviceDiscoveryAgent::deviceDiscovered,
+		this, [this](const QBluetoothDeviceInfo &device) {
+			const bool isBle = device.coreConfigurations().testFlag(
+				QBluetoothDeviceInfo::LowEnergyCoreConfiguration);
+			if (!FMeshCoreBleDeviceCatalog.addDevice(device.name(), device.address().toString(), isBle))
+				return;
+			const QList<MeshCoreBleDevice> devices = FMeshCoreBleDeviceCatalog.devices();
+			const MeshCoreBleDevice &candidate = devices.last();
+			FMeshCoreBleDevices->addItem(candidate.displayName, candidate.address);
+			FMeshCoreBleStatus->setText(tr("Found %n MeshCore BLE device(s); scanning…", "", devices.size()));
+		});
+	connect(FMeshCoreBleDiscoveryAgent, &QBluetoothDeviceDiscoveryAgent::finished,
+		this, [this]() {
+			FMeshCoreScanBle->setText(tr("Search for MeshCore Bluetooth devices"));
+			FMeshCoreScanBle->setEnabled(true);
+			if (FMeshCoreBleScanFailed)
+				return;
+			const int count = FMeshCoreBleDeviceCatalog.devices().size();
+			FMeshCoreBleStatus->setText(count == 0
+				? tr("No MeshCore BLE devices found.")
+				: tr("Found %n MeshCore BLE device(s).", "", count));
+		});
+	connect(FMeshCoreBleDiscoveryAgent, &QBluetoothDeviceDiscoveryAgent::errorOccurred,
+		this, [this](QBluetoothDeviceDiscoveryAgent::Error error) {
+			if (error == QBluetoothDeviceDiscoveryAgent::NoError)
+				return;
+			FMeshCoreBleScanFailed = true;
+			FMeshCoreBleStatus->setText(FMeshCoreBleDiscoveryAgent->errorString());
+			FMeshCoreScanBle->setText(tr("Search for MeshCore Bluetooth devices"));
+			FMeshCoreScanBle->setEnabled(true);
+		});
+	connect(FMeshCoreScanBle, &QPushButton::clicked, this, [this]() {
+		if (!FMeshCoreBleDiscoveryAgent)
+			return;
+		if (FMeshCoreBleDiscoveryAgent->isActive()) {
+			FMeshCoreBleDiscoveryAgent->stop();
+			FMeshCoreScanBle->setText(tr("Search for MeshCore Bluetooth devices"));
+			FMeshCoreScanBle->setEnabled(true);
+			return;
+		}
+		FMeshCoreBleDeviceCatalog.clear();
+		FMeshCoreBleDevices->clear();
+		FMeshCoreBleDevices->addItem(tr("Select a discovered device…"), QString());
+		FMeshCoreBleScanFailed = false;
+		FMeshCoreBleStatus->setText(tr("Searching for MeshCore BLE devices…"));
+		FMeshCoreScanBle->setText(tr("Cancel search"));
+		FMeshCoreBleDiscoveryAgent->start(QBluetoothDeviceDiscoveryAgent::LowEnergyMethod);
+		if (!FMeshCoreBleDiscoveryAgent->isActive() &&
+			FMeshCoreBleDiscoveryAgent->error() != QBluetoothDeviceDiscoveryAgent::NoError) {
+			FMeshCoreBleScanFailed = true;
+			FMeshCoreBleStatus->setText(FMeshCoreBleDiscoveryAgent->errorString());
+			FMeshCoreScanBle->setText(tr("Search for MeshCore Bluetooth devices"));
+		}
+	});
+#else
+	FMeshCoreScanBle->setEnabled(false);
+	FMeshCoreBleStatus->setText(tr("Bluetooth device discovery is unavailable in this build."));
+#endif
 
 	if (QVBoxLayout *root = qobject_cast<QVBoxLayout *>(layout()))
 		root->insertWidget(2, FMeshCoreFields);
@@ -156,7 +241,6 @@ AccountOptions::AccountOptions(IAccountManager *AManager, IPluginManager *APlugi
 	// Connect meshcore signals
 	connect(FMeshCoreTransport, QOverload<int>::of(&QComboBox::currentIndexChanged),
 		this, [this](int){ emit modified(); });
-	connect(FMeshCoreMacAddress,&QLineEdit::textChanged,this,[this](const QString &){ emit modified(); });
 	connect(FMeshCorePort,&QLineEdit::textChanged,this,[this](const QString &){ emit modified(); });
 
 	reset();
@@ -164,6 +248,10 @@ AccountOptions::AccountOptions(IAccountManager *AManager, IPluginManager *APlugi
 
 AccountOptions::~AccountOptions()
 {
+#ifndef OS2
+	if (FMeshCoreBleDiscoveryAgent && FMeshCoreBleDiscoveryAgent->isActive())
+		FMeshCoreBleDiscoveryAgent->stop();
+#endif
 	if (FAccount == NULL)
 	{
 		Options::node(OPV_ACCOUNT_ROOT).removeChilds("account",FAccountId.toString());
@@ -200,7 +288,7 @@ void AccountOptions::apply()
 		{
 			// Store meshcore settings under meshcore.* namespace
 			accountOptions.setValue(FMeshCoreTransport->currentData().toString(), "meshcore.transport");
-			accountOptions.setValue(FMeshCoreMacAddress->text().trimmed(), "meshcore.mac");
+			accountOptions.setValue(FMeshCoreMacAddress.address().trimmed(), "meshcore.mac");
 			accountOptions.setValue(FMeshCorePort->text().trimmed(), "meshcore.port");
 			FAccount->setPassword(QString()); // Empty password for meshcore
 		}
@@ -252,8 +340,9 @@ void AccountOptions::reset()
 		FMeshCoreTransport->setCurrentIndex(FMeshCoreTransport->findData(
 			meshcoreTransport.isEmpty() ? QStringLiteral("ble") : meshcoreTransport));
 		const QString meshcoreMac = FAccount->optionsNode().value("meshcore.mac").toString();
-		FMeshCoreMacAddress->setText(meshcoreMac.isEmpty()
-			? QStringLiteral("10:BD:A3:5A:6B:E9") : meshcoreMac);
+		FMeshCoreMacAddress.reset(meshcoreMac);
+		if (FMeshCoreBleDevices->count() > 0)
+			FMeshCoreBleDevices->setCurrentIndex(0);
 		const QString meshcorePort = FAccount->optionsNode().value("meshcore.port").toString();
 		FMeshCorePort->setText(meshcorePort.isEmpty()
 			? QStringLiteral("/dev/ttyACM0") : meshcorePort);

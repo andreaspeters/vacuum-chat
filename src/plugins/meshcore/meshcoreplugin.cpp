@@ -501,11 +501,15 @@ void MeshCorePlugin::bindProtocolSignals()
 
 void MeshCorePlugin::onContactsChanged()
 {
+    qWarning() << "[MC-SYNC] roster provider received contactsChanged; contacts"
+               << (FProtocol ? FProtocol->discoverContacts().size() : 0);
     emit protocolRosterChanged();
 }
 
 void MeshCorePlugin::onChannelsChanged()
 {
+    qWarning() << "[MC-SYNC] roster provider received channelsChanged; rooms"
+               << (FProtocol ? FProtocol->discoverChannels().size() : 0);
     emit protocolRosterChanged();
 }
 
@@ -530,6 +534,10 @@ IProtocolCapabilities::Capabilities MeshCorePlugin::capabilitiesForAccount(
         return capabilities;
 
     capabilities |= IProtocolCapabilities::CapabilityAddContact;
+    if (FProtocol->canSendSelfAdvert()) {
+        capabilities |= IProtocolCapabilities::CapabilitySendZeroHopAdvert;
+        capabilities |= IProtocolCapabilities::CapabilitySendFloodAdvert;
+    }
     if (!targetId.isEmpty())
         capabilities |= IProtocolCapabilities::CapabilityViewHistory;
     return capabilities;
@@ -541,6 +549,23 @@ bool MeshCorePlugin::showAddContactDialog(const AccountId &accountId)
         return false;
     showJoinChatDialog(accountId);
     return true;
+}
+
+bool MeshCorePlugin::sendSelfAdvert(const AccountId &accountId, AdvertType type)
+{
+    IProtocolCapabilities::Capability capability;
+    switch (type) {
+    case AdvertType::ZeroHop:
+        capability = IProtocolCapabilities::CapabilitySendZeroHopAdvert;
+        break;
+    case AdvertType::Flood:
+        capability = IProtocolCapabilities::CapabilitySendFloodAdvert;
+        break;
+    default:
+        return false;
+    }
+    return FProtocol && hasCapabilities(accountId, capability) &&
+        FProtocol->sendSelfAdvert(type == AdvertType::Flood);
 }
 
 void MeshCorePlugin::showJoinChatDialog(const QString &boundAccountId)

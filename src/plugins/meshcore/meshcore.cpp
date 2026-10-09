@@ -111,6 +111,40 @@ bool MeshCoreCodec::isBleFrame(const QByteArray &data) { return !data.isEmpty();
 MeshCoreProtocol::MeshCoreProtocol(QObject *parent)
     : QObject(parent), deviceMacAddress(QStringLiteral("10:BD:A3:5A:6B:E9"))
 {
+    rosterSyncTimeoutTimer.setSingleShot(true);
+    rosterSyncRetryTimer.setSingleShot(true);
+    connect(&rosterSyncTimeoutTimer, &QTimer::timeout, this, [this]() {
+        if (awaitingDeviceInfo) {
+            awaitingDeviceInfo = false;
+            qWarning() << "MeshCore DEVICE_QUERY timed out; continuing with channel discovery";
+            beginChannelSync();
+            return;
+        }
+        QString phase = QStringLiteral("unknown roster phase");
+        if (awaitingSelfInfo)
+            phase = QStringLiteral("SELF_INFO");
+        else if (awaitingContactListStart)
+            phase = QStringLiteral("CONTACTS_START");
+        else if (receivingContactList)
+            phase = QStringLiteral("CONTACT_LIST");
+        else if (awaitingChannelInfo)
+            phase = QStringLiteral("CHANNEL_INFO");
+        retryRosterSync(QStringLiteral("%1 response timed out").arg(phase));
+    });
+    connect(&rosterSyncRetryTimer, &QTimer::timeout, this, [this]() {
+        if (protocolState != Connected || !rosterSyncActive)
+            return;
+        if (awaitingSelfInfo) {
+            appStartSent = false;
+            awaitingSelfInfo = false;
+            if (!sendAppStart())
+                retryRosterSync(QStringLiteral("failed to resend Companion APP_START"));
+        } else if (initialRosterSyncStage == InitialRosterSyncStage::Channels) {
+            beginChannelSync();
+        } else {
+            startContactSync();
+        }
+    });
 }
 
 MeshCoreProtocol::~MeshCoreProtocol() { disconnect(); }
@@ -130,6 +164,11 @@ bool MeshCoreProtocol::connectToDevice()
     if (protocolState == Connecting || protocolState == Connected)
         return true;
     currentPublicKeyHex.clear();
+    rosterSyncTimeoutTimer.stop();
+    rosterSyncRetryTimer.stop();
+    rosterSyncRetryCount = 0;
+    rosterSyncActive = false;
+    initialRosterSyncStage = InitialRosterSyncStage::None;
 
     const bool allowedBackend = backend == "usb" || backend == "ble";
     if (!allowedBackend) {
@@ -162,6 +201,7 @@ bool MeshCoreProtocol::connectToDevice()
 
     appStartSent = false;
     awaitingSelfInfo = false;
+    awaitingDeviceInfo = false;
     awaitingContactListStart = false;
     receivingContactList = false;
     pendingContacts.clear();
@@ -188,6 +228,9 @@ bool MeshCoreProtocol::connectToDevice()
 
 bool MeshCoreProtocol::disconnect()
 {
+    rosterSyncTimeoutTimer.stop();
+    rosterSyncRetryTimer.stop();
+    rosterSyncActive = false;
     if (transport)
         transport->close();
 
@@ -200,6 +243,7 @@ bool MeshCoreProtocol::disconnect()
     deviceState = DeviceOffline;
     appStartSent = false;
     awaitingSelfInfo = false;
+    awaitingDeviceInfo = false;
     abortContactSync();
     abortChannelSync();
     abortMessageSync();
@@ -259,6 +303,8 @@ bool MeshCoreProtocol::sendAppStart()
         return false;
 
     appStartSent = true;
+    rosterSyncActive = true;
+    rosterSyncTimeoutTimer.start(5000);
     return true;
 }
 
@@ -268,6 +314,59 @@ void MeshCoreProtocol::abortContactSync()
     receivingContactList = false;
     expectedContactCount = 0;
     pendingContacts.clear();
+}
+
+void MeshCoreProtocol::startContactSync()
+{
+    if (protocolState != Connected || channelSyncInProgress || messageSyncInProgress || !transport ||
+        awaitingSelfInfo || awaitingDeviceInfo || awaitingContactListStart || receivingContactList)
+        return;
+
+    // Reset sync state
+    pendingContacts.clear();
+    expectedContactCount = 0;
+    awaitingContactListStart = true;
+
+    if (!transport->sendPayload(QByteArray(1, static_cast<char>(0x04)))) {
+        abortContactSync();
+        retryRosterSync(QStringLiteral("failed to request Companion contacts"));
+        return;
+    }
+    rosterSyncActive = true;
+    rosterSyncTimeoutTimer.start(5000);
+}
+
+void MeshCoreProtocol::retryRosterSync(const QString &reason)
+{
+    if (protocolState != Connected || !transport)
+        return;
+
+    rosterSyncTimeoutTimer.stop();
+    rosterSyncRetryTimer.stop();
+    awaitingDeviceInfo = false;
+    abortContactSync();
+    abortChannelSync();
+    if (rosterSyncRetryCount >= 3) {
+        rosterSyncActive = false;
+        qWarning() << "MeshCore roster sync stopped after 3 retries:" << reason;
+        if (pendingManagementCommand != NoManagementCommand)
+            finishManagementCommand(false, reason);
+        return;
+    }
+
+    ++rosterSyncRetryCount;
+    qWarning() << "Retrying MeshCore roster sync" << rosterSyncRetryCount << "of 3:" << reason;
+    rosterSyncRetryTimer.start(1000);
+}
+
+void MeshCoreProtocol::finishRosterSync()
+{
+    rosterSyncTimeoutTimer.stop();
+    rosterSyncRetryTimer.stop();
+    rosterSyncRetryCount = 0;
+    rosterSyncActive = false;
+    awaitingDeviceInfo = false;
+    initialRosterSyncStage = InitialRosterSyncStage::None;
 }
 
 void MeshCoreProtocol::beginChannelSync()
@@ -297,8 +396,15 @@ void MeshCoreProtocol::requestNextChannel()
     if (requestedChannelIndex >= 8) {
         channels = pendingChannels;
         freeChannelSlots = pendingFreeChannelSlots;
+        qWarning() << "[MC-SYNC] channel catalog published; rooms" << channels.size();
         abortChannelSync();
         emit channelsChanged();
+        if (initialRosterSyncStage == InitialRosterSyncStage::Channels) {
+            initialRosterSyncStage = InitialRosterSyncStage::Contacts;
+            startContactSync();
+            return;
+        }
+        finishRosterSync();
         if ((pendingManagementCommand == SetChannelCommand ||
              pendingManagementCommand == AddContactCommand) &&
             !awaitingManagementCommandResult)
@@ -312,6 +418,7 @@ void MeshCoreProtocol::requestNextChannel()
     command.append(static_cast<char>(0x1f)); // CMD_GET_CHANNEL
     command.append(static_cast<char>(requestedChannelIndex));
     awaitingChannelInfo = true;
+    rosterSyncTimeoutTimer.start(5000);
     if (!transport->sendPayload(command)) {
         abortChannelSync();
         if (pendingManagementCommand != NoManagementCommand &&
@@ -320,6 +427,44 @@ void MeshCoreProtocol::requestNextChannel()
                 QStringLiteral("Failed to refresh MeshCore channels after the update"));
         onTransportError(QStringLiteral("Failed to request MeshCore channel info"));
     }
+}
+
+void MeshCoreProtocol::publishChannelSlot(quint8 channelIndex)
+{
+    const QString channelId = QString::number(channelIndex);
+    int currentIndex = -1;
+    for (int index = 0; index < channels.size(); ++index) {
+        if (channels.at(index).id == channelId) {
+            currentIndex = index;
+            break;
+        }
+    }
+
+    int pendingIndex = -1;
+    for (int index = 0; index < pendingChannels.size(); ++index) {
+        if (pendingChannels.at(index).id == channelId) {
+            pendingIndex = index;
+            break;
+        }
+    }
+
+    bool changed = false;
+    if (currentIndex >= 0 &&
+        (pendingIndex < 0 || channels.at(currentIndex).name != pendingChannels.at(pendingIndex).name)) {
+        channels.removeAt(currentIndex);
+        currentIndex = -1;
+        changed = true;
+    }
+    if (pendingIndex >= 0 && currentIndex < 0) {
+        const MeshCoreChannel channel = pendingChannels.at(pendingIndex);
+        int insertAt = 0;
+        while (insertAt < channels.size() && channels.at(insertAt).id.toInt() < channelIndex)
+            ++insertAt;
+        channels.insert(insertAt, channel);
+        changed = true;
+    }
+    if (changed)
+        emit channelsChanged();
 }
 
 void MeshCoreProtocol::advanceChannelSync()
@@ -333,11 +478,7 @@ void MeshCoreProtocol::handleChannelInfo(const QByteArray &packet)
 {
     if (packet.size() < 50 ||
         static_cast<quint8>(packet.at(1)) != requestedChannelIndex) {
-        abortChannelSync();
-        if (pendingManagementCommand != NoManagementCommand &&
-            !awaitingManagementCommandResult)
-            finishManagementCommand(false,
-                QStringLiteral("MeshCore returned an invalid channel catalog response"));
+        retryRosterSync(QStringLiteral("MeshCore returned an invalid channel catalog response"));
         return;
     }
 
@@ -361,6 +502,7 @@ void MeshCoreProtocol::handleChannelInfo(const QByteArray &packet)
         if (hasZeroSecret)
             pendingFreeChannelSlots.append(requestedChannelIndex);
     }
+    publishChannelSlot(requestedChannelIndex);
     advanceChannelSync();
 }
 
@@ -368,6 +510,7 @@ void MeshCoreProtocol::handleChannelError()
 {
     // A missing channel index is a valid response when probing all eight slots.
     pendingFreeChannelSlots.append(requestedChannelIndex);
+    publishChannelSlot(requestedChannelIndex);
     advanceChannelSync();
 }
 
@@ -447,6 +590,26 @@ bool MeshCoreProtocol::addContact(const QString &publicKeyHex, const QString &na
         finishManagementCommand(false,
             QStringLiteral("Failed to send MeshCore contact update"));
         onTransportError(QStringLiteral("Failed to send MeshCore contact update"));
+        return false;
+    }
+    return true;
+}
+
+bool MeshCoreProtocol::sendSelfAdvert(bool flood)
+{
+    if (!managementCommandReady())
+        return false;
+
+    // CMD_SEND_SELF_ADVERT (0x07): type 0 is zero-hop; type 1 is flood.
+    QByteArray command;
+    command.append(static_cast<char>(0x07));
+    command.append(static_cast<char>(flood ? 0x01 : 0x00));
+    pendingManagementCommand = SendSelfAdvertCommand;
+    awaitingManagementCommandResult = true;
+    if (!transport->sendPayload(command)) {
+        finishManagementCommand(false,
+            QStringLiteral("Failed to send MeshCore self-advert command"));
+        onTransportError(QStringLiteral("Failed to send MeshCore self-advert command"));
         return false;
     }
     return true;
@@ -617,17 +780,44 @@ void MeshCoreProtocol::handlePacket(const QByteArray &payload)
     const std::uint8_t packetType = packet.front();
     if (packetType == 0x05 && awaitingSelfInfo) {
         MeshCoreSelfInfo selfInfo;
-        if (!MeshCoreCompanionCodec::decodeSelfInfo(packet, selfInfo))
+        if (!MeshCoreCompanionCodec::decodeSelfInfo(packet, selfInfo)) {
+            qWarning() << "[MC-SYNC] SELF_INFO decode failed; payload bytes" << payload.size();
             return;
+        }
 
         awaitingSelfInfo = false;
-        awaitingContactListStart = true;
+        initialRosterSyncStage = InitialRosterSyncStage::Channels;
         // Store the public key from SELF_INFO packet
         currentPublicKeyHex = QString::fromStdString(selfInfo.publicKeyHex);
-        if (!transport->sendPayload(QByteArray(1, static_cast<char>(0x04)))) {
-            abortContactSync();
-            onTransportError(QStringLiteral("Failed to request Companion contacts"));
+        QByteArray deviceQuery = QByteArray::fromHex("1603"); // CMD_DEVICE_QUERY protocol version 3
+        awaitingDeviceInfo = true;
+        if (!transport->sendPayload(deviceQuery)) {
+            awaitingDeviceInfo = false;
+            retryRosterSync(QStringLiteral("failed to query MeshCore device info"));
+            return;
         }
+        qWarning() << "[MC-SYNC] SELF_INFO accepted; DEVICE_QUERY sent; payload bytes"
+                   << payload.size();
+        rosterSyncTimeoutTimer.start(5000);
+        return;
+    }
+
+    if (awaitingDeviceInfo && packetType == 0x0d) {
+        qWarning() << "[MC-SYNC] DEVICE_INFO received; payload bytes" << payload.size();
+        awaitingDeviceInfo = false;
+        rosterSyncTimeoutTimer.stop();
+        beginChannelSync();
+        return;
+    }
+
+    if (awaitingDeviceInfo && packetType == 0x01) {
+        const int errorCode = payload.size() > 1
+            ? static_cast<quint8>(payload.at(1)) : 0;
+        qWarning() << "MeshCore rejected DEVICE_QUERY (error" << errorCode
+                   << "); continuing with channel discovery";
+        awaitingDeviceInfo = false;
+        rosterSyncTimeoutTimer.stop();
+        beginChannelSync();
         return;
     }
 
@@ -644,15 +834,9 @@ void MeshCoreProtocol::handlePacket(const QByteArray &payload)
             if (pendingManagementCommand == SetChannelCommand) {
                 beginChannelSync();
             } else if (pendingManagementCommand == AddContactCommand) {
-                pendingContacts.clear();
-                expectedContactCount = 0;
-                awaitingContactListStart = true;
-                if (!transport->sendPayload(QByteArray(1, static_cast<char>(0x04)))) {
-                    abortContactSync();
-                    finishManagementCommand(false,
-                        QStringLiteral("Failed to refresh MeshCore contacts after the update"));
-                    onTransportError(QStringLiteral("Failed to request Companion contacts"));
-                }
+                startContactSync();
+            } else if (pendingManagementCommand == SendSelfAdvertCommand) {
+                finishManagementCommand(true, QString());
             }
         }
         return;
@@ -661,38 +845,28 @@ void MeshCoreProtocol::handlePacket(const QByteArray &payload)
     if (packetType == 0x02 && awaitingContactListStart) {
         std::uint32_t contactCount = 0;
         if (!MeshCoreCompanionCodec::decodeContactListStart(packet, contactCount)) {
-            abortContactSync();
-            if (pendingManagementCommand == AddContactCommand &&
-                !awaitingManagementCommandResult)
-                finishManagementCommand(false,
-                    QStringLiteral("MeshCore returned an invalid contact list start"));
+            retryRosterSync(QStringLiteral("MeshCore returned an invalid contact list start"));
             return;
         }
 
         expectedContactCount = contactCount;
+        qWarning() << "[MC-SYNC] contact list started; expected contacts" << contactCount;
         pendingContacts.clear();
         awaitingContactListStart = false;
         receivingContactList = true;
+        rosterSyncTimeoutTimer.start(5000);
         return;
     }
 
     if (packetType == 0x03 && receivingContactList) {
         if (static_cast<std::uint32_t>(pendingContacts.size()) >= expectedContactCount) {
-            abortContactSync();
-            if (pendingManagementCommand == AddContactCommand &&
-                !awaitingManagementCommandResult)
-                finishManagementCommand(false,
-                    QStringLiteral("MeshCore returned too many contacts"));
+            retryRosterSync(QStringLiteral("MeshCore returned too many contacts"));
             return;
         }
 
         MeshCoreContactRecord record;
         if (!MeshCoreCompanionCodec::decodeContactRecord(packet, record)) {
-            abortContactSync();
-            if (pendingManagementCommand == AddContactCommand &&
-                !awaitingManagementCommandResult)
-                finishManagementCommand(false,
-                    QStringLiteral("MeshCore returned an invalid contact record"));
+            retryRosterSync(QStringLiteral("MeshCore returned an invalid contact record"));
             return;
         }
 
@@ -702,6 +876,22 @@ void MeshCoreProtocol::handlePacket(const QByteArray &payload)
                                          static_cast<int>(record.advertisedName.size()));
         contact.lastSeen = static_cast<qint64>(record.lastAdvert);
         pendingContacts.append(contact);
+        bool foundContact = false;
+        bool contactChanged = true;
+        for (MeshCoreContact &existing : contacts) {
+            if (existing.id != contact.id)
+                continue;
+            foundContact = true;
+            contactChanged = existing.name != contact.name || existing.lastSeen != contact.lastSeen;
+            if (contactChanged)
+                existing = contact;
+            break;
+        }
+        if (!foundContact)
+            contacts.append(contact);
+        if (contactChanged)
+            emit contactsChanged();
+        rosterSyncTimeoutTimer.start(5000);
         return;
     }
 
@@ -709,19 +899,36 @@ void MeshCoreProtocol::handlePacket(const QByteArray &payload)
         std::uint32_t lastModified = 0;
         if (!MeshCoreCompanionCodec::decodeContactListEnd(packet, lastModified) ||
             static_cast<std::uint32_t>(pendingContacts.size()) != expectedContactCount) {
-            abortContactSync();
-            if (pendingManagementCommand == AddContactCommand &&
-                !awaitingManagementCommandResult)
-                finishManagementCommand(false,
-                    QStringLiteral("MeshCore returned an incomplete contact list"));
+            retryRosterSync(QStringLiteral("MeshCore returned an incomplete contact list"));
             return;
         }
 
         Q_UNUSED(lastModified);
+        bool contactsChangedAtEnd = contacts.size() != pendingContacts.size();
+        if (!contactsChangedAtEnd) {
+            for (int index = 0; index < contacts.size(); ++index) {
+                const MeshCoreContact &current = contacts.at(index);
+                const MeshCoreContact &pending = pendingContacts.at(index);
+                if (current.id != pending.id || current.name != pending.name ||
+                    current.lastSeen != pending.lastSeen) {
+                    contactsChangedAtEnd = true;
+                    break;
+                }
+            }
+        }
         contacts = pendingContacts;
+        qWarning() << "[MC-SYNC] contact list published; contacts" << contacts.size();
         abortContactSync();
-        emit contactsChanged();
-        beginChannelSync();
+        rosterSyncTimeoutTimer.stop();
+        if (contactsChangedAtEnd)
+            emit contactsChanged();
+        if (initialRosterSyncStage == InitialRosterSyncStage::Contacts) {
+            finishRosterSync();
+            messagesWaiting = true;
+            startMessageSync();
+        } else {
+            beginChannelSync();
+        }
         return;
     }
 
@@ -839,6 +1046,9 @@ void MeshCoreProtocol::handlePacket(const QByteArray &payload)
 void MeshCoreProtocol::onTransportDisconnected()
 {
     if (protocolState == Connected || protocolState == Connecting) {
+        rosterSyncTimeoutTimer.stop();
+        rosterSyncRetryTimer.stop();
+        rosterSyncActive = false;
         if (pendingManagementCommand != NoManagementCommand)
             finishManagementCommand(false,
                 QStringLiteral("Device disconnected before the command completed"));
@@ -858,6 +1068,11 @@ void MeshCoreProtocol::onTransportDisconnected()
 
 void MeshCoreProtocol::onPacketReceived(const QByteArray &payload)
 {
+    if (rosterSyncActive && !payload.isEmpty())
+        qWarning() << "[MC-SYNC] RX packet type"
+                   << QStringLiteral("0x%1").arg(static_cast<quint8>(payload.at(0)),
+                                                 2, 16, QLatin1Char('0'))
+                   << "bytes" << payload.size();
     handlePacket(payload);
 }
 
