@@ -5467,7 +5467,8 @@ bool MatrixNetwork::replacePendingEvent(const QString &roomId, const QString &tr
 		runDatabase([&](MatrixDatabase &database) {
 			database.replaceTimelineEventId(roomId, transactionId, serverEvent.eventId);
 		});
-		emit messageHistoryChanged(roomId, history);
+		// The enclosing /sync batch delivers this event once. Re-emitting the full
+		// room history here replays unrelated messages and can rebuild the chat UI.
 		return true;
 	}
 	return false;

@@ -1023,7 +1023,8 @@ void Matrix::onHistoryPageLoaded(const QString &roomId,
 				: FNetworkUserId == event.sender;
 			metadata.insert(QStringLiteral("sender_is_self"), senderIsSelf);
 			message.setMetadata(metadata);
-			page.messages.append(message);
+			if (!isDisplayedLocalEchoDuplicate(message))
+				page.messages.append(message);
 		}
 		if (FMatrixNetwork && !result.events.isEmpty()) {
 			MatrixNetwork *network = FMatrixNetwork;
@@ -1049,7 +1050,8 @@ void Matrix::emitCachedHistoryBatch()
 	const qsizetype count = qMin(batchSize, FCachedHistoryQueue.size());
 	for (qsizetype i = 0; i < count; ++i) {
 		const BasicMessage message = FCachedHistoryQueue.takeFirst();
-		emit protocolMessageReceived(message);
+		if (!isDisplayedLocalEchoDuplicate(message))
+			emit protocolMessageReceived(message);
 		auto roomIt = FCachedHistoryRemainingByRoom.find(message.conversationId());
 		if (roomIt != FCachedHistoryRemainingByRoom.end() && --roomIt.value() == 0) {
 			const QString roomId = roomIt.key();
@@ -1206,6 +1208,7 @@ bool Matrix::sendMessage(const BasicMessage &message)
 		FNetworkUserId, QString(), body, QDateTime::currentDateTimeUtc(),
 		QStringLiteral("matrix"), BasicMessage::Outgoing);
 	localEcho.setMetadata(metadata);
+	FDisplayedLocalEchoTransactions.insert(message.conversationId() + QChar('\n') + transactionId);
 	emit protocolMessageReceived(localEcho);
 	if (messageType == QStringLiteral("m.text")) {
 		QJsonObject content = textPayload.content;
@@ -1638,6 +1641,23 @@ void Matrix::removeNotification(const QString &id)
 	emit protocolNotificationsChanged();
 }
 
+bool Matrix::isDisplayedLocalEchoDuplicate(const BasicMessage &message) const
+{
+	if (message.conversationId().isEmpty())
+		return false;
+	const QString roomPrefix = message.conversationId() + QChar('\n');
+	const QVariantMap metadata = message.metadata();
+	for (const QString &key : {QStringLiteral("replaces_txn_id"),
+		QStringLiteral("txn_id")}) {
+		const QString transactionId = metadata.value(key).toString();
+		if (!transactionId.isEmpty() &&
+			FDisplayedLocalEchoTransactions.contains(roomPrefix + transactionId))
+			return true;
+	}
+	return !message.messageId().isEmpty() &&
+		FDisplayedLocalEchoTransactions.contains(roomPrefix + message.messageId());
+}
+
 void Matrix::onNetworkMessageReceived(const BasicMessage &message)
 {
 	BasicMessage normalizedMessage = message;
@@ -1926,6 +1946,8 @@ void Matrix::onCachedHistoryLoadFailed(const QString &roomId, const QString &err
 
 void Matrix::queueOrEmitHistoryMessage(const BasicMessage &message)
 {
+	if (isDisplayedLocalEchoDuplicate(message))
+		return;
 	const QString roomId = message.conversationId();
 	if (!roomId.isEmpty() && FHistoryLoadingRooms.contains(roomId)) {
 		FPendingHistoryMessages[roomId].append(message);

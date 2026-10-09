@@ -3,6 +3,7 @@
 - CHANGE: [ui] sync with chat events to reduce load.
 - ADD:    [ui] notification notice.
 - FIX:    [matrix] own messages moving from right to left.
+- FIX:    [ui,matrix] stop to refresh whole chat after matrix sync.
 
 ## v2.1.0
 

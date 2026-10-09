@@ -8,6 +8,20 @@
 
 #include <iostream>
 
+class MatrixNetworkTestAccess
+{
+public:
+	static void seedPendingEvent(MatrixNetwork &network, const MatrixTextEvent &event)
+	{
+		network.FMessageHistory[event.roomId].append(event);
+	}
+	static bool replacePendingEvent(MatrixNetwork &network, const QString &roomId,
+		const QString &transactionId, const MatrixTextEvent &serverEvent)
+	{
+		return network.replacePendingEvent(roomId, transactionId, serverEvent);
+	}
+};
+
 class MatrixSyncBatchTestAccess
 {
 public:
@@ -36,6 +50,25 @@ public:
 	static void setNetworkUserId(Matrix &matrix, const QString &userId)
 	{
 		matrix.FNetworkUserId = userId;
+	}
+	static QString latestConversationEventId(const Matrix &matrix, const QString &roomId)
+	{
+		return matrix.FLatestConversationEventIds.value(roomId);
+	}
+	static void configureMessageSending(Matrix &matrix, MatrixNetwork *network, const QString &userId)
+	{
+		matrix.FMatrixNetwork = network;
+		matrix.FNetworkLoggedIn = true;
+		matrix.FNetworkUserId = userId;
+	}
+	static void deliverPendingMessage(Matrix &matrix, const BasicMessage &message)
+	{
+		matrix.onNetworkMessageReceived(message);
+	}
+	static void dispatchHistorySnapshot(Matrix &matrix, const QString &roomId,
+		const QList<MatrixTextEvent> &events)
+	{
+		matrix.onMessageHistoryChanged(roomId, events);
 	}
 	static void dispatchLiveSyncEvents(Matrix &matrix, const QList<MatrixTextEvent> &events)
 	{
@@ -334,6 +367,119 @@ int main(int argc, char **argv)
         return 1;
     if (!check(liveOwnIsSelf && !liveRemoteIsSelf,
             "live sync marks the logged-in sender as self and other senders as remote"))
+        return 1;
+
+    // A locally sent reply is displayed immediately and is the sole UI event for
+    // that transaction. Pending/network, sync, history-snapshot and SQLite copies
+    // must not replace its reply rendering or deliver another protocol message.
+    MatrixNetwork localEchoNetwork;
+    Matrix localEchoMatrix;
+    const QString localUser = QStringLiteral("@alice:example.invalid");
+    const QString localRoom = QStringLiteral("!local-echo:example.invalid");
+    MatrixSyncBatchTestAccess::configureMessageSending(localEchoMatrix,
+        &localEchoNetwork, localUser);
+    QList<BasicMessage> localEchoDeliveries;
+    QObject::connect(&localEchoMatrix, &Matrix::protocolMessageReceived, &localEchoMatrix,
+        [&localEchoDeliveries](const BasicMessage &message) {
+            localEchoDeliveries.append(message);
+        });
+    BasicMessage replyToSend(QString(), localRoom, localUser, QString(),
+        QStringLiteral("my reply"), QDateTime::fromMSecsSinceEpoch(7000, QTimeZone::utc()),
+        QStringLiteral("matrix"), BasicMessage::Outgoing);
+    replyToSend.setMetadata({{QStringLiteral("msgtype"), QStringLiteral("m.text")},
+        {QStringLiteral("reply_to_event_id"), QStringLiteral("$original-message")}});
+    if (!check(localEchoMatrix.sendMessage(replyToSend) && localEchoDeliveries.size() == 1,
+            "sending a reply immediately emits exactly one local echo"))
+        return 1;
+    const BasicMessage localEcho = localEchoDeliveries.first();
+    const QString localTransactionId = localEcho.metadata().value(
+        QStringLiteral("txn_id")).toString();
+    if (!check(!localTransactionId.isEmpty() &&
+            localEcho.metadata().value(QStringLiteral("reply_to_event_id")).toString() ==
+                QStringLiteral("$original-message"),
+            "the immediate local echo keeps its transaction ID and reply target"))
+        return 1;
+
+    BasicMessage pendingEcho(localTransactionId, localRoom, localUser, QString(),
+        QStringLiteral("my reply"), QDateTime::fromMSecsSinceEpoch(7000, QTimeZone::utc()),
+        QStringLiteral("matrix"), BasicMessage::Outgoing);
+    pendingEcho.setMetadata({{QStringLiteral("txn_id"), localTransactionId},
+        {QStringLiteral("reply_to_event_id"), QStringLiteral("$original-message")}});
+    MatrixSyncBatchTestAccess::deliverPendingMessage(localEchoMatrix, pendingEcho);
+    if (!check(localEchoDeliveries.size() == 1,
+            "the network pending copy of a sent reply is ignored"))
+        return 1;
+
+    MatrixTextEvent serverEcho;
+    serverEcho.roomId = localRoom;
+    serverEcho.eventId = QStringLiteral("$server-reply");
+    serverEcho.userId = localUser;
+    serverEcho.content = QStringLiteral("my reply");
+    serverEcho.timestamp = QStringLiteral("7001");
+    serverEcho.eventType = QStringLiteral("m.room.message");
+    serverEcho.messageType = QStringLiteral("m.text");
+    serverEcho.metadata.insert(QStringLiteral("replaces_txn_id"), localTransactionId);
+    serverEcho.metadata.insert(QStringLiteral("reply_to_event_id"), QStringLiteral("$original-message"));
+    MatrixTextEvent pendingStored = serverEcho;
+    pendingStored.eventId = localTransactionId;
+    pendingStored.metadata.clear();
+    pendingStored.metadata.insert(QStringLiteral("txn_id"), localTransactionId);
+    MatrixNetworkTestAccess::seedPendingEvent(localEchoNetwork, pendingStored);
+    int replaceHistorySnapshotCount = 0;
+    QObject::connect(&localEchoNetwork, &MatrixNetwork::messageHistoryChanged,
+        &localEchoNetwork, [&replaceHistorySnapshotCount](const QString &,
+            const QList<MatrixTextEvent> &) { ++replaceHistorySnapshotCount; });
+    const bool replacedPending = MatrixNetworkTestAccess::replacePendingEvent(
+        localEchoNetwork, localRoom, localTransactionId, serverEcho);
+    const QList<MatrixTextEvent> replacedNetworkHistory =
+        localEchoNetwork.messageHistory(localRoom);
+    if (!check(replacedPending && replacedNetworkHistory.size() == 1 &&
+            replacedNetworkHistory.first().eventId == serverEcho.eventId &&
+            replaceHistorySnapshotCount == 0,
+            "server acknowledgement updates network history without replaying the whole room to UI"))
+        return 1;
+    MatrixSyncBatchTestAccess::dispatchLiveSyncEvents(localEchoMatrix, {serverEcho});
+    if (!check(QMetaObject::invokeMethod(&localEchoMatrix, "processNextProtocolEventBatch",
+            Qt::DirectConnection) && localEchoDeliveries.size() == 1 &&
+            MatrixSyncBatchTestAccess::latestConversationEventId(localEchoMatrix, localRoom) ==
+                serverEcho.eventId,
+            "the /sync echo is suppressed from UI without skipping Matrix state updates"))
+        return 1;
+
+    MatrixSyncBatchTestAccess::dispatchHistorySnapshot(localEchoMatrix, localRoom,
+        {serverEcho});
+    if (!check(QMetaObject::invokeMethod(&localEchoMatrix, "processNextProtocolEventBatch",
+            Qt::DirectConnection) && localEchoDeliveries.size() == 1,
+            "the replacement history snapshot does not emit the sent reply again"))
+        return 1;
+
+    MatrixTimelineEvent cachedReply;
+    cachedReply.roomId = localRoom;
+    cachedReply.eventId = serverEcho.eventId;
+    cachedReply.sender = localUser;
+    cachedReply.originTs = 7001;
+    cachedReply.eventType = serverEcho.eventType;
+    cachedReply.messageType = serverEcho.messageType;
+    cachedReply.content = serverEcho.content;
+    for (auto it = serverEcho.metadata.constBegin(); it != serverEcho.metadata.constEnd(); ++it)
+        cachedReply.metadata.insert(it.key(), it.value());
+    MatrixSyncBatchTestAccess::loadCachedHistory(localEchoMatrix, localRoom,
+        {cachedReply});
+    MatrixSyncBatchTestAccess::processCachedHistoryBatch(localEchoMatrix);
+    if (!check(localEchoDeliveries.size() == 1,
+            "the SQLite history copy does not emit the sent reply again"))
+        return 1;
+
+    MatrixTextEvent incomingControl = serverEcho;
+    incomingControl.eventId = QStringLiteral("$incoming-control");
+    incomingControl.userId = QStringLiteral("@bob:example.invalid");
+    incomingControl.metadata.clear();
+    MatrixSyncBatchTestAccess::dispatchLiveSyncEvents(localEchoMatrix,
+        {incomingControl});
+    if (!check(QMetaObject::invokeMethod(&localEchoMatrix, "processNextProtocolEventBatch",
+            Qt::DirectConnection) && localEchoDeliveries.size() == 2 &&
+            localEchoDeliveries.last().messageId() == incomingControl.eventId,
+            "an unrelated incoming message still reaches the UI exactly once"))
         return 1;
 
     std::cout << "PASS: Matrix sync events are delivered in bounded ordered batches\n";

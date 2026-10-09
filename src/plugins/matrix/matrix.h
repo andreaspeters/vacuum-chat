@@ -199,6 +199,7 @@ private:
 	QList<ProtocolNotification> FNotifications;
 	QDialog *FInitialSyncWindow;
 	QSet<QString> FNotificationEventIds;
+	QSet<QString> FDisplayedLocalEchoTransactions;
 	bool FNotificationsReady = false;
 
 	void loadRoomsFromDatabase();
@@ -218,6 +219,7 @@ private:
 	void onCachedHistoryLoadFailed(const QString &roomId, const QString &error);
 	void onHistoryPageLoaded(const QString &roomId, const MatrixHistoryPageResult &result);
 	void emitCachedHistoryBatch();
+	bool isDisplayedLocalEchoDuplicate(const BasicMessage &message) const;
 	void enqueueProtocolEventBatch(const QList<MatrixTextEvent> &events,
 		const QString &historyRoomId = QString());
 	void queueOrEmitHistoryMessage(const BasicMessage &message);
