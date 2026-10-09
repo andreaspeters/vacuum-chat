@@ -3,6 +3,7 @@
 #include "protocolmessagerouting.h"
 #include "protocolmessagehistory.h"
 #include "roomsidebarstate.h"
+#include "matriximagedisplay.h"
 #include <interfaces/iemoticons.h>
 #include <interfaces/iprotocolcapabilities.h>
 #include <interfaces/protocolhistoryactionpolicy.h>
@@ -1155,12 +1156,15 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 			view->document()->addResource(QTextDocument::ImageResource, QUrl(resourceUrl), decodedImage);
 			notifyImageResourceUpdated(view, QUrl(resourceUrl));
 		}
+		const int availableWidth = view ? view->viewport()->width() : 0;
+		const QSize displaySize = MatrixImageDisplay::sizeForDisplay(decodedImage.size(), availableWidth);
 		const QString escapedUrl = resourceUrl.toHtmlEscaped();
 		const QString escapedAlt = body.toHtmlEscaped();
 		const QString imageHtml = QStringLiteral(
-			"<div><img src=\"%1\" alt=\"%2\" "
-			"style=\"max-width:50%; max-width:300px; height:auto;\" /></div>")
-			.arg(escapedUrl, escapedAlt);
+			"<div><img src=\"%1\" alt=\"%2\" width=\"%3\" height=\"%4\" /></div>")
+			.arg(escapedUrl, escapedAlt)
+			.arg(displaySize.width())
+			.arg(displaySize.height());
 		appendOrReplace(replyHtml + imageHtml);
 	}
 	else if (messageType == QStringLiteral("m.image") || messageType == QStringLiteral("m.file"))

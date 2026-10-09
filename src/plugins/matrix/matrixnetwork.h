@@ -153,7 +153,8 @@ public:
 	Q_INVOKABLE void requestImage(const MatrixTextEvent &event);
 	Q_INVOKABLE void requestDisplayName(const QString &userId);
 	Q_INVOKABLE void requestRoomName(const QString &roomId);
-	Q_INVOKABLE void requestJoinedMembers(const QString &roomId);
+	Q_INVOKABLE void refreshRoomMetadata(const QString &roomId);
+	Q_INVOKABLE void requestJoinedMembers(const QString &roomId, bool forceRefresh = false);
 	Q_INVOKABLE void refreshRosterSnapshot();
 	Q_INVOKABLE void setKnownRoomTypes(const QVariantMap &roomTypes);
 	Q_INVOKABLE void requestHistoricalImages(const QString &roomId,
@@ -206,6 +207,7 @@ signals:
 	void publicRoomsReceived(const MatrixPublicRooms::Result &result);
 	void directRoomCreated(const QString &userId, const QString &roomId, const QString &error);
 	void rosterChanged(const QList<ProtocolRoom> &rooms);
+	void roomMetadataChanged(const ProtocolRoom &room);
 	void roomKeyRequestReceived(const QString &sender, const QString &deviceId,
 		const QString &roomId, const QString &sessionId, const QString &requestId);
 	void deviceKeysReceived(const QString &userId, const QString &deviceId,
@@ -232,6 +234,7 @@ private slots:
 	void onSendFinished(QNetworkReply *reply);
 	void onReplyError(QNetworkReply *reply);
 	void onRoomEncryptionStateFinished(QNetworkReply *reply);
+	void onRoomMetadataStateFinished(QNetworkReply *reply);
 
 private:
 	friend class MatrixNetworkTestAccess;
@@ -253,6 +256,7 @@ private:
 	void saveMessageHistory() const;
 	void restorePersistedRooms();
 	void emitRosterSnapshot();
+	void emitRoomMetadataUpdate(const QString &roomId);
 	bool mergeMessageEvent(const MatrixTextEvent &event, bool fromHistoryBackfill = false);
 	bool replacePendingEvent(const QString &roomId, const QString &transactionId,
 		const MatrixTextEvent &serverEvent);
@@ -299,6 +303,8 @@ private:
 	QSet<QString> FDirectRoomIds;
 	QSet<QString> FDisplayNameRequests;
 	QSet<QString> FRoomNameRequests;
+	QMap<QString, quint64> FRoomMetadataRequests;
+	quint64 FRoomMetadataRequestCounter = 0;
 	QMap<QString, quint64> FRoomEncryptionStateRequests;
 	quint64 FRoomEncryptionStateQueryCounter = 0;
 	QMap<QString, QJsonArray> FPendingRoomEncryptionSends;

@@ -200,6 +200,12 @@ int main(int argc, char **argv)
 		{QStringLiteral("historical"), true}, {QStringLiteral("file_path"), QStringLiteral("/cache/photo.bin")},
 		{QStringLiteral("url"), QStringLiteral("mxc://media.example.org/photo")},
 		{QStringLiteral("decoded_image"), QStringLiteral("decoded-payload")}});
+	BasicMessage cachedImageWithFilePath = imagePlaceholder;
+	cachedImageWithFilePath.setMetadata({{QStringLiteral("msgtype"), QStringLiteral("m.image")},
+		{QStringLiteral("historical"), true}, {QStringLiteral("file_path"), QStringLiteral("/cache/photo.bin")},
+		{QStringLiteral("url"), QStringLiteral("mxc://media.example.org/photo")}});
+	passed &= check(ProtocolMessageHistory::isMediaHydrationUpdate(cachedImageWithFilePath, hydratedImage),
+		"cached file path alone must not suppress decoded-image hydration");
 	passed &= check(ProtocolMessageHistory::isMediaHydrationUpdate(imagePlaceholder, hydratedImage),
 		"same-event image payload is recognized as media hydration");
 	passed &= check(!ProtocolMessageHistory::isMediaHydrationUpdate(hydratedImage, hydratedImage),

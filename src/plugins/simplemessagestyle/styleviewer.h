@@ -58,6 +58,7 @@ private:
 		QRectF sourceAnchorRect;
 		QTextCursor sourceSpacerCursor;
 		bool outgoing = false;
+		bool contentSizeDirty = false;
 		DecorationHelper::BubbleGeometrySnapshot geometry;
 		QMap<QString, DecorationHelper::Decoration> decorations;
 		QSet<QUrl> imageResources;

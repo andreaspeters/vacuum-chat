@@ -1477,6 +1477,30 @@ void MatrixNetwork::requestHistoricalImages(const QString &roomId,
 	}
 }
 
+void MatrixNetwork::refreshRoomMetadata(const QString &roomId)
+{
+	if (roomId.isEmpty() || FAccesToken.isEmpty() || !FRooms.contains(roomId))
+		return;
+
+	requestJoinedMembers(roomId, true);
+	if (FRoomMetadataRequests.contains(roomId))
+		return;
+	const quint64 requestId = ++FRoomMetadataRequestCounter;
+	FRoomMetadataRequests.insert(roomId, requestId);
+	const QString path = QStringLiteral("/_matrix/client/v3/rooms/%1/state")
+		.arg(QString::fromUtf8(QUrl::toPercentEncoding(roomId)));
+	QNetworkRequest request(QUrl(constructUrl(path)));
+	request.setAttribute(QNetworkRequest::Http2AllowedAttribute, FUseHttp2);
+	request.setRawHeader("Authorization", QByteArray("Bearer ") + FAccesToken.toUtf8());
+	QNetworkReply *reply = FNetworkAccessManager->get(request);
+	reply->setProperty("requestType", QStringLiteral("room_metadata_state"));
+	reply->setProperty("roomId", roomId);
+	reply->setProperty("requestId", QVariant::fromValue(requestId));
+	reply->setProperty("userId", FUserId);
+	reply->setProperty("serverUrl", FNormalizedServerUrl);
+	reply->setProperty("loginGeneration", QVariant::fromValue(FActiveLoginGeneration));
+}
+
 void MatrixNetwork::requestRoomName(const QString &roomId)
 {
 	if (roomId.isEmpty() || FAccesToken.isEmpty() || FRoomNameRequests.contains(roomId))
@@ -1562,6 +1586,64 @@ void MatrixNetwork::requestRoomEncryptionState(const QString &roomId)
 	reply->setProperty("loginGeneration", QVariant::fromValue(FActiveLoginGeneration));
 }
 
+void MatrixNetwork::onRoomMetadataStateFinished(QNetworkReply *reply)
+{
+	if (!reply)
+		return;
+	const QString roomId = reply->property("roomId").toString();
+	const quint64 requestId = reply->property("requestId").toULongLong();
+	if (FRoomMetadataRequests.value(roomId) != requestId) {
+		reply->deleteLater();
+		return;
+	}
+	FRoomMetadataRequests.remove(roomId);
+	if (reply->property("loginGeneration").toULongLong() != FActiveLoginGeneration ||
+		reply->property("userId").toString() != FUserId ||
+		reply->property("serverUrl").toString() != FNormalizedServerUrl ||
+		!FRooms.contains(roomId)) {
+		reply->deleteLater();
+		return;
+	}
+	if (reply->error() != QNetworkReply::NoError) {
+		qWarning() << "Matrix room-metadata refresh failed:" << roomId
+			<< reply->errorString() << "httpStatus:"
+			<< reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+		reply->deleteLater();
+		return;
+	}
+	QJsonParseError parseError;
+	const QJsonDocument document = QJsonDocument::fromJson(reply->readAll(), &parseError);
+	if (parseError.error != QJsonParseError::NoError || !document.isArray()) {
+		qWarning() << "Matrix room-metadata refresh returned invalid state:" << roomId;
+		reply->deleteLater();
+		return;
+	}
+	ProtocolRoom &room = FRooms[roomId];
+	for (const QJsonValue &stateValue : document.array()) {
+		const QJsonObject state = stateValue.toObject();
+		if (state.value(QStringLiteral("state_key")).toString().size() != 0)
+			continue;
+		const QJsonObject content = state.value(QStringLiteral("content")).toObject();
+		const QString type = state.value(QStringLiteral("type")).toString();
+		if (type == QStringLiteral("m.room.name"))
+			room.name = content.value(QStringLiteral("name")).toString();
+		else if (type == QStringLiteral("m.room.topic"))
+			room.subject = content.value(QStringLiteral("topic")).toString();
+		else if (type == QStringLiteral("m.room.avatar"))
+			room.avatarUrl = content.value(QStringLiteral("url")).toString();
+	}
+	bool roomSaved = false;
+	runDatabase([&](MatrixDatabase &database) {
+		roomSaved = database.saveRoomState(roomId, room.name, room.subject, room.avatarUrl,
+			room.membership, room.isDirect, room.isEncrypted, room.encryptionStateKnown,
+			QString(), FRoomPrevBatch.value(roomId));
+	});
+	if (!roomSaved)
+		qWarning() << "Failed to persist refreshed Matrix room metadata" << roomId;
+	emitRoomMetadataUpdate(roomId);
+	reply->deleteLater();
+}
+
 void MatrixNetwork::onRoomEncryptionStateFinished(QNetworkReply *reply)
 {
 	if (!reply)
@@ -1628,10 +1710,10 @@ void MatrixNetwork::onRoomEncryptionStateFinished(QNetworkReply *reply)
 	reply->deleteLater();
 }
 
-void MatrixNetwork::requestJoinedMembers(const QString &roomId)
+void MatrixNetwork::requestJoinedMembers(const QString &roomId, bool forceRefresh)
 {
 	if (roomId.isEmpty() || FAccesToken.isEmpty() || FJoinedMembersRequests.contains(roomId) ||
-		FJoinedMembersLoaded.contains(roomId))
+		(!forceRefresh && FJoinedMembersLoaded.contains(roomId)))
 		return;
 	FJoinedMembersRequests.insert(roomId);
 	const QString path = QStringLiteral("/_matrix/client/v3/rooms/%1/joined_members")
@@ -1642,6 +1724,40 @@ void MatrixNetwork::requestJoinedMembers(const QString &roomId)
 	QNetworkReply *reply = FNetworkAccessManager->get(request);
 	reply->setProperty("requestType", QStringLiteral("joined_members"));
 	reply->setProperty("roomId", roomId);
+	reply->setProperty("roomMetadataRefresh", forceRefresh);
+}
+
+void MatrixNetwork::emitRoomMetadataUpdate(const QString &roomId)
+{
+	if (!FRooms.contains(roomId))
+		return;
+	ProtocolRoom updated = FRooms.value(roomId);
+	updated.isDirect = FHasDirectRoomData && FDirectRoomIds.contains(roomId);
+	if (updated.isDirect) {
+		for (const ProtocolRosterEntry &member : updated.members) {
+			if (member.id == FUserId)
+				continue;
+			updated.name = member.name.isEmpty() ? member.id : member.name;
+			if (updated.avatarUrl.isEmpty())
+				updated.avatarUrl = member.avatarUrl;
+			break;
+		}
+	}
+	QStringList memberIds;
+	for (const ProtocolRosterEntry &member : updated.members)
+		if (!member.id.isEmpty())
+			memberIds.append(member.id);
+	memberIds.removeDuplicates();
+	QMap<QString, bool> verificationStates;
+	bool verificationStatesLoaded = false;
+	runDatabase([&](MatrixDatabase &database) {
+		verificationStatesLoaded = database.userVerificationStates(memberIds, verificationStates);
+	});
+	for (ProtocolRosterEntry &member : updated.members) {
+		member.hasVerificationState = verificationStatesLoaded;
+		member.isVerified = verificationStates.value(member.id, false);
+	}
+	emit roomMetadataChanged(updated);
 }
 
 void MatrixNetwork::emitRosterSnapshot()
@@ -2378,6 +2494,8 @@ void MatrixNetwork::onReplyFinished(QNetworkReply *reply)
 			emitRosterSnapshot();
 			sync();
 		}
+	} else if (type == "room_metadata_state") {
+		onRoomMetadataStateFinished(reply);
 	} else if (type == "joined_members") {
 		const QString roomId = reply->property("roomId").toString();
 		FJoinedMembersRequests.remove(roomId);
@@ -2407,7 +2525,10 @@ void MatrixNetwork::onReplyFinished(QNetworkReply *reply)
 				if (room.memberCount < 0 || room.memberCount != room.members.size())
 					room.memberCount = room.members.size();
 				FJoinedMembersLoaded.insert(roomId);
-				emitRosterSnapshot();
+				if (reply->property("roomMetadataRefresh").toBool())
+					emitRoomMetadataUpdate(roomId);
+				else
+					emitRosterSnapshot();
 			}
 		} else {
 			qWarning() << "Matrix joined-members request failed:" << reply->errorString()

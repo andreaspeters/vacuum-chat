@@ -6,6 +6,7 @@
 #include <QFrame>
 #include <QImage>
 #include <QKeyEvent>
+#include <QPixmap>
 #include <QPalette>
 #include <QPointer>
 #include <QRegularExpression>
@@ -23,6 +24,26 @@
 #include <QWheelEvent>
 #include <utils/imageloadscheduler.h>
 #include <utils/roundedavatar.h>
+
+namespace
+{
+QSize imageSizeForResource(const QVariant &resource)
+{
+	const QImage image = resource.value<QImage>();
+	if (!image.isNull())
+		return image.size();
+
+	const QPixmap pixmap = resource.value<QPixmap>();
+	if (!pixmap.isNull())
+		return pixmap.size();
+
+	QImage decoded;
+	const QByteArray data = resource.toByteArray();
+	if (!data.isEmpty() && decoded.loadFromData(data))
+		return decoded.size();
+	return QSize();
+}
+}
 
 StyleViewer::StyleViewer(QWidget *AParent) : AnimatedTextBrowser(AParent)
 {
@@ -176,6 +197,13 @@ void StyleViewer::addMessageBubble(QTextTable *ATable, const QString &AMessageId
 
 	content->setHtml(QStringLiteral(
 		"<div class=\"xxxmessage\" style=\"background-color:transparent;\">%1</div>").arg(AHtml));
+	for (const QUrl &url : bubbleImageResources)
+	{
+		const QSize imageSize = imageSizeForResource(document()->resource(QTextDocument::ImageResource, url));
+		if (!imageSize.isEmpty())
+			DecorationHelper::updateImageFormatForResource(*contentDocument, url,
+				imageSize, content->viewport()->width());
+	}
 	layout->addWidget(content);
 	BubbleOverlay overlay;
 	overlay.table = ATable;
@@ -375,8 +403,16 @@ bool StyleViewer::replaceMessageBubbleContent(const QString &AMessageId, const Q
 		const QString renderedHtml = DecorationHelper::renderBubbleHtml(overlay.html, overlay.decorations);
 		overlay.content->setHtml(QStringLiteral(
 			"<div class=\"xxxmessage\" style=\"background-color:transparent;\">%1</div>").arg(renderedHtml));
+		for (const QUrl &url : imageResources)
+		{
+			const QSize imageSize = imageSizeForResource(document()->resource(QTextDocument::ImageResource, url));
+			if (!imageSize.isEmpty())
+				DecorationHelper::updateImageFormatForResource(*overlay.content->document(), url,
+					imageSize, overlay.content->viewport()->width());
+		}
 		overlay.renderedHtml = renderedHtml;
 		overlay.imageResources = imageResources;
+		overlay.contentSizeDirty = true;
 		scheduleMessageBubbleGeometryUpdate();
 		return true;
 	}
@@ -402,7 +438,9 @@ void StyleViewer::updateMessageBubbleResource(const QUrl &AUrl)
 	const QVariant image = document()->resource(QTextDocument::ImageResource, AUrl);
 	if (!image.isValid())
 		return;
-	for (const BubbleOverlay &overlay : FBubbleOverlays)
+	const QSize imageSize = imageSizeForResource(image);
+	bool geometryUpdateNeeded = false;
+	for (BubbleOverlay &overlay : FBubbleOverlays)
 	{
 		if (!overlay.imageResources.contains(AUrl))
 			continue;
@@ -410,7 +448,11 @@ void StyleViewer::updateMessageBubbleResource(const QUrl &AUrl)
 		{
 			QTextDocument *doc = overlay.content->document();
 			doc->addResource(QTextDocument::ImageResource, AUrl, image);
+			if (!imageSize.isEmpty())
+				DecorationHelper::updateImageFormatForResource(*doc, AUrl, imageSize,
+					overlay.content->viewport()->width());
 			doc->markContentsDirty(0, doc->characterCount());
+			overlay.contentSizeDirty = true;
 		}
 		if (overlay.sideContent)
 		{
@@ -424,7 +466,10 @@ void StyleViewer::updateMessageBubbleResource(const QUrl &AUrl)
 			doc->addResource(QTextDocument::ImageResource, AUrl, image);
 			doc->markContentsDirty(0, doc->characterCount());
 		}
+		geometryUpdateNeeded = true;
 	}
+	if (geometryUpdateNeeded)
+		scheduleMessageBubbleGeometryUpdate();
 }
 
 QTextDocumentFragment StyleViewer::bubbleSelection() const
@@ -512,8 +557,8 @@ void StyleViewer::updateMessageBubbleGeometry()
 		const bool firstLayout = !overlay.geometry.initialized;
 		if (firstLayout)
 		{
-			const QRect provisionalRect = anchorRect.translated(-scrollOffset).toAlignedRect();
-			overlay.frame->setGeometry(provisionalRect);
+			QRectF bubbleAnchorRect = anchorRect;
+			overlay.frame->setGeometry(bubbleAnchorRect.translated(-scrollOffset).toAlignedRect());
 			if (QLayout *layout = overlay.frame->layout())
 				layout->activate();
 
@@ -522,6 +567,18 @@ void StyleViewer::updateMessageBubbleGeometry()
 			{
 				++i;
 				continue;
+			}
+
+			const qreal frameInsets = qMax(0, overlay.frame->width() -
+				overlay.content->viewport()->width());
+			bubbleAnchorRect = DecorationHelper::bubbleRectForContentWidth(bubbleAnchorRect,
+				DecorationHelper::maximumImageDisplayWidth(*overlay.content->document()),
+				frameInsets, overlay.outgoing);
+			if (bubbleAnchorRect.width() > overlay.frame->width())
+			{
+				overlay.frame->setGeometry(bubbleAnchorRect.translated(-scrollOffset).toAlignedRect());
+				if (QLayout *layout = overlay.frame->layout())
+					layout->activate();
 			}
 
 			const int textWidth = overlay.content->viewport()->width();
@@ -534,12 +591,13 @@ void StyleViewer::updateMessageBubbleGeometry()
 			const qreal contentHeight = overlay.content->document()->documentLayout()->documentSize().height();
 			const QMargins margins = overlay.frame->layout()
 				? overlay.frame->layout()->contentsMargins() : QMargins();
-			if (!DecorationHelper::initializeBubbleGeometry(overlay.geometry, anchorRect,
+			if (!DecorationHelper::initializeBubbleGeometry(overlay.geometry, bubbleAnchorRect,
 				contentHeight, margins.top() + margins.bottom()))
 			{
 				++i;
 				continue;
 			}
+			overlay.contentSizeDirty = false;
 			const qreal reactionHeight = overlay.reactionContent &&
 				!overlay.reactionContent->isHidden()
 				? overlay.reactionContent->height() + 3 : 0;
@@ -548,6 +606,25 @@ void StyleViewer::updateMessageBubbleGeometry()
 		}
 		else
 		{
+			if (overlay.contentSizeDirty && overlay.content && overlay.content->document() &&
+				overlay.content->document()->documentLayout())
+			{
+				const int textWidth = overlay.content->viewport()->width();
+				if (textWidth > 0)
+					overlay.content->document()->setTextWidth(textWidth);
+				const qreal contentHeight = overlay.content->document()->documentLayout()->documentSize().height();
+				const QMargins margins = overlay.frame->layout()
+					? overlay.frame->layout()->contentsMargins() : QMargins();
+				const QRectF currentRect = overlay.geometry.documentRect;
+				DecorationHelper::initializeBubbleGeometry(overlay.geometry, currentRect,
+					contentHeight, margins.top() + margins.bottom());
+				overlay.contentSizeDirty = false;
+				const qreal reactionHeight = overlay.reactionContent &&
+					!overlay.reactionContent->isHidden()
+					? overlay.reactionContent->height() + 3 : 0;
+				DecorationHelper::setSourceSpacerHeight(overlay.sourceSpacerCursor,
+					overlay.geometry.documentRect.height() + reactionHeight);
+			}
 			// Preserve each bubble's size and horizontal anchor. Only preceding flow changes may move it vertically.
 			QPointF anchorPosition = overlay.geometry.documentRect.topLeft();
 			if (tableRect.isValid())

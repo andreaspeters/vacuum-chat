@@ -2,6 +2,8 @@
 #define MATRIX_H
 
 #include <QObject>
+#include <QElapsedTimer>
+#include "matrixmetadatarefreshpolicy.h"
 #include <QMap>
 #include <QSet>
 #include <QPointer>
@@ -145,6 +147,7 @@ private slots:
 	void processNextProtocolEventBatch();
 	void onMessageHistoryChanged(const QString &roomId, const QList<MatrixTextEvent> &events);
 	void onRosterChanged(const QList<ProtocolRoom> &rooms);
+	void onRoomMetadataChanged(const ProtocolRoom &room);
 	void onNetworkMessageReceived(const BasicMessage &message);
 	void onAvatarImageReceived(const QString &key, const QImage &image);
 	void onDisplayNameReceived(const QString &userId, const QString &displayName);
@@ -196,6 +199,8 @@ private:
 	int FShow;
 	QString FStatus;
 	mutable QString FActiveConversationId;
+	mutable QElapsedTimer FMetadataRefreshClock;
+	mutable MatrixMetadataRefreshPolicy FMetadataRefreshPolicy;
 	QList<ProtocolNotification> FNotifications;
 	QDialog *FInitialSyncWindow;
 	QSet<QString> FNotificationEventIds;

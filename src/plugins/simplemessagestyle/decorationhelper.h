@@ -38,6 +38,11 @@ public:
     static qreal overlayHeightForContent(qreal contentHeight, qreal verticalInsets);
     static bool initializeBubbleGeometry(BubbleGeometrySnapshot &snapshot,
         const QRectF &tableRect, qreal contentHeight, qreal verticalInsets);
+    static bool updateImageFormatForResource(QTextDocument &document, const QUrl &resourceUrl,
+        const QSize &sourceImageSize, int availableWidth);
+    static qreal maximumImageDisplayWidth(const QTextDocument &document);
+    static QRectF bubbleRectForContentWidth(const QRectF &currentRect, qreal contentWidth,
+        qreal horizontalInsets, bool outgoing);
 
 private:
     DecorationHelper() = default;

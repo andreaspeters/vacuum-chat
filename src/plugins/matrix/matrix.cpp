@@ -49,6 +49,7 @@ static QString matrixAvatarCachePath(const QString &profileDirectory, const QStr
 Matrix::Matrix()
 	: FUuid("{5f9b0e2a-6c1e-4c93-9e2d-7e8b0f3d6a41}"), FMatrixNetwork(nullptr), FAccountManager(nullptr), FOptionsManager(nullptr), FMatrixAccount(nullptr), FShow(0), FInitialSyncWindow(nullptr)
 {
+	FMetadataRefreshClock.start();
 }
 
 QString Matrix::streamId() const
@@ -803,6 +804,8 @@ void Matrix::onAccountShown(IAccount *AAccount)
 	connect(FMatrixNetwork, SIGNAL(syncError(QString)), this, SLOT(onSyncError(QString)), Qt::UniqueConnection);
 	connect(FMatrixNetwork, SIGNAL(rosterChanged(QList<ProtocolRoom>)),
 		this, SLOT(onRosterChanged(QList<ProtocolRoom>)), Qt::UniqueConnection);
+	connect(FMatrixNetwork, &MatrixNetwork::roomMetadataChanged, this,
+		&Matrix::onRoomMetadataChanged, Qt::UniqueConnection);
 	connect(FMatrixNetwork, SIGNAL(messageReceived(BasicMessage)),
 		this, SLOT(onNetworkMessageReceived(BasicMessage)), Qt::UniqueConnection);
 	connect(FMatrixNetwork, &MatrixNetwork::typingChanged,
@@ -1095,6 +1098,7 @@ void Matrix::onLoginSuccess(const QString &AUserId, const QString &AAccessToken,
 		FNetworkDeviceId = ADeviceId;
 	FAvatarLoadSeen.clear();
 	FNetworkLoggedIn = true;
+	FMetadataRefreshPolicy.clear();
 	Q_UNUSED(AAccessToken);
 	if (!FProtocolRooms.isEmpty())
 		emit protocolRosterChanged();
@@ -1413,7 +1417,30 @@ void Matrix::setActiveConversation(const QString &conversationId) const
 	if (!FMatrixNetwork)
 		return;
 	QMetaObject::invokeMethod(FMatrixNetwork, "setActiveRoom", Qt::QueuedConnection,
-			Q_ARG(QString, conversationId));
+		Q_ARG(QString, conversationId));
+	if (!FNetworkLoggedIn || conversationId.isEmpty())
+		return;
+
+	const ProtocolRoom currentRoom = room(conversationId);
+	if (currentRoom.id.isEmpty())
+		return;
+	bool missingDisplayName = currentRoom.name.trimmed().isEmpty() ||
+		currentRoom.name == currentRoom.id;
+	bool missingAvatar = currentRoom.avatarUrl.trimmed().isEmpty();
+	if (currentRoom.isDirect) {
+		for (const ProtocolRosterEntry &member : currentRoom.members) {
+			if (member.id.isEmpty() || member.id == FNetworkUserId)
+				continue;
+			missingDisplayName = missingDisplayName || member.name.trimmed().isEmpty() ||
+				member.name == member.id;
+			missingAvatar = missingAvatar || member.avatarUrl.trimmed().isEmpty();
+		}
+	}
+	const QString scopeKey = accountId() + QChar('\n') + conversationId;
+	if ((missingDisplayName || missingAvatar) &&
+		FMetadataRefreshPolicy.shouldCheck(scopeKey, true, FMetadataRefreshClock.elapsed()))
+		QMetaObject::invokeMethod(FMatrixNetwork, "refreshRoomMetadata",
+			Qt::QueuedConnection, Q_ARG(QString, conversationId));
 }
 
 void Matrix::loadConversationAvatars(const QString &conversationId) const
@@ -2012,6 +2039,25 @@ QList<BasicMessage> Matrix::mergeHistoryMessagesChronologically(
 		return leftTime.toMSecsSinceEpoch() < rightTime.toMSecsSinceEpoch();
 	});
 	return messages;
+}
+
+void Matrix::onRoomMetadataChanged(const ProtocolRoom &updatedRoom)
+{
+	for (ProtocolRoom &room : FProtocolRooms) {
+		if (room.id != updatedRoom.id)
+			continue;
+		const QString previousAvatarUrl = room.avatarUrl;
+		ProtocolRoom refreshed = updatedRoom;
+		if (refreshed.roomType.isEmpty())
+			refreshed.roomType = room.roomType;
+		refreshed.avatarKey = accountId() + QStringLiteral("\nroom\n") + refreshed.id;
+		room = refreshed;
+		if (room.id == FActiveConversationId && !room.avatarUrl.isEmpty() &&
+			room.avatarUrl != previousAvatarUrl)
+			loadRoomAvatar(room.id);
+		emit protocolRosterChanged();
+		return;
+	}
 }
 
 void Matrix::onRosterChanged(const QList<ProtocolRoom> &rooms)

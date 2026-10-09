@@ -95,8 +95,7 @@ inline bool hasMediaPayload(const BasicMessage &AMessage)
 	const QString messageType = metadata.value(QStringLiteral("msgtype")).toString();
 	if (messageType == QStringLiteral("m.image")) {
 		const QVariant decodedImage = metadata.value(QStringLiteral("decoded_image"));
-		return (decodedImage.isValid() && !decodedImage.isNull()) ||
-			!metadata.value(QStringLiteral("file_path")).toString().isEmpty();
+		return decodedImage.isValid() && !decodedImage.isNull();
 	}
 	return messageType == QStringLiteral("m.file") &&
 		!metadata.value(QStringLiteral("file_path")).toString().isEmpty();
