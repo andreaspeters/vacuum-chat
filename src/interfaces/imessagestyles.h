@@ -102,6 +102,12 @@ public:
 		(void)AWidget; (void)AMessageId; (void)ADecorationId; (void)AHtml;
 		return false;
 	}
+	virtual bool replaceMessageContent(QWidget *AWidget, const QString &AMessageId,
+		const QString &AHtml)
+	{
+		(void)AWidget; (void)AMessageId; (void)AHtml;
+		return false;
+	}
 protected:
 	virtual void widgetAdded(QWidget *AWidget) const =0;
 	virtual void widgetRemoved(QWidget *AWidget) const =0;

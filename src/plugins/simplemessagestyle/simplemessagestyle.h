@@ -74,6 +74,7 @@ public:
 		QDateTime lastTime;
 		bool scrollStarted;
 		bool followTail;
+		bool suppressTailCorrection;
 	};
 private:
 	bool isAvatarExistsCached(const QString &APath) const;
@@ -94,6 +95,8 @@ public:
 	virtual bool appendContent(QWidget *AWidget, const QString &AHtml, const IMessageContentOptions &AOptions);
 	virtual bool setMessageDecoration(QWidget *AWidget, const QString &AMessageId,
 		const QString &ADecorationId, const QString &AHtml);
+	virtual bool replaceMessageContent(QWidget *AWidget, const QString &AMessageId,
+		const QString &AHtml);
 	//ISimpleMessageStyle
 	virtual QMap<QString, QVariant> infoValues() const;
 	virtual QList<QString> variants() const;

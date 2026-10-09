@@ -130,8 +130,8 @@ int main(int argc, char **argv)
 	passed &= check(samePositionMerge == ProtocolMessageHistory::TransactionEchoMergeResult::ReplacedLocalEcho &&
 		originalIndex == 1 && currentIndex == originalIndex,
 		"in-order server echo stays at the rendered local echo position");
-	passed &= check(!ProtocolMessageHistory::requiresTimelineRebuild(
-		originalIndex, currentIndex, samePositionHistory.size(), true),
+	passed &= check(!ProtocolMessageHistory::requiresTimelineRebuild(currentIndex,
+		samePositionHistory.size(), true),
 		"unchanged rendered position does not require a full timeline rebuild");
 	passed &= check(!ProtocolMessageHistory::requiresChronologicalSort(samePositionHistory, currentIndex),
 		"in-order echo replacement does not sort the full conversation");
@@ -163,14 +163,30 @@ int main(int argc, char **argv)
 		outOfOrderHistory, serverEcho.messageId());
 	passed &= check(outOfOrderIndex == 1 &&
 		ProtocolMessageHistory::requiresChronologicalSort(outOfOrderHistory, replacementIndex),
-		"out-of-order echo replacement requires sorting before rebuild");
-	passed &= check(!ProtocolMessageHistory::requiresTimelineRebuild(1, 0, 2, true),
+		"out-of-order echo replacement sorts canonical history");
+	passed &= check(!ProtocolMessageHistory::requiresTimelineRebuild(0, 2, true),
 		"a reordered transaction echo keeps the existing visible bubble without rebuilding the timeline");
-	passed &= check(!ProtocolMessageHistory::requiresTimelineRebuild(-1, 1, 3, false) &&
-		!ProtocolMessageHistory::requiresTimelineRebuild(-1, 2, 3, false),
-		"new live messages do not rebuild the timeline regardless of chronological insertion position");
-	passed &= check(ProtocolMessageHistory::requiresTimelineRebuild(2, -1, 3, true),
+	passed &= check(ProtocolMessageHistory::requiresTimelineRebuild(1, 3, false) &&
+		!ProtocolMessageHistory::requiresTimelineRebuild(2, 3, false),
+		"an out-of-order new live message rebuilds while a tail event appends incrementally");
+	passed &= check(ProtocolMessageHistory::requiresTimelineRebuild(-1, 2, true),
 		"a previously rendered message missing from canonical history triggers a recovery rebuild");
+
+	const QList<BasicMessage> previousLoadedHistory{laterMessage};
+	const QList<BasicMessage> pendingOlderLiveMessage{olderMessage};
+	const QList<BasicMessage> mergedWithOlderLiveMessage =
+		ProtocolMessageHistory::mergeOlderPage(previousLoadedHistory, pendingOlderLiveMessage);
+	passed &= check(mergedWithOlderLiveMessage.size() == 2 &&
+		mergedWithOlderLiveMessage.first().messageId() == olderMessage.messageId() &&
+		mergedWithOlderLiveMessage.last().messageId() == laterMessage.messageId(),
+		"history completion merges an older live message with the existing history");
+	passed &= check(ProtocolMessageHistory::requiresHistoryMergeRebuild(
+		previousLoadedHistory, mergedWithOlderLiveMessage),
+		"an older live message queued during history loading rebuilds the timeline so it is visible in chronological order");
+	const QList<BasicMessage> missingPreviouslyLoadedHistory{olderMessage};
+	passed &= check(ProtocolMessageHistory::requiresHistoryMergeRebuild(
+		previousLoadedHistory, missingPreviouslyLoadedHistory),
+		"history completion rebuilds only if a previously loaded message actually disappeared");
 
 	BasicMessage imagePlaceholder(QStringLiteral("$old-image"), QStringLiteral("!room:test"),
 		QStringLiteral("@other:test"), QString(), QStringLiteral("photo.png"),

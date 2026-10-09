@@ -33,6 +33,7 @@ public:
 		const QTextCursor &ASourceSpacerCursor = QTextCursor());
 	bool setMessageDecoration(const QString &AMessageId, const QString &ADecorationId,
 		const QString &AHtml);
+	bool replaceMessageBubbleContent(const QString &AMessageId, const QString &AHtml);
 	void clearMessageBubbles();
 	QTextDocumentFragment bubbleSelection() const;
 	QTextDocumentFragment bubbleTextUnderPosition(const QPoint &APosition) const;

@@ -171,8 +171,22 @@ int main(int argc, char **argv)
     IProtocolProfileActions *profileActions = qobject_cast<IProtocolProfileActions *>(matrix.instance());
     MatrixPresenceLifecycleTestAccess::setNetwork(matrix, &network);
 
+    int initialOfflinePresenceChanges = 0;
+    QString initialPresenceStream;
+    QObject::connect(&matrix, &Matrix::protocolPresenceChanged, &matrix,
+        [&initialOfflinePresenceChanges, &initialPresenceStream](const QString &streamId, int show, const QString &) {
+            if (show == IPresence::Offline) {
+                ++initialOfflinePresenceChanges;
+                initialPresenceStream = streamId;
+            }
+        });
+
     MatrixPresenceLifecycleTestAccess::showAccount(matrix, &account);
     application.processEvents(QEventLoop::AllEvents);
+    const bool initialOfflinePresenceAnnounced = check(
+        initialOfflinePresenceChanges == 1 && !initialPresenceStream.isEmpty() &&
+            matrix.show() == IPresence::Offline,
+        "showing a Matrix account publishes its initial Offline state to generic presence consumers");
     const bool noImplicitLogin = check(network.loginCalls == 0,
         "activating an enabled Matrix account must prepare it without logging in");
     const bool canSetPresenceWhileDisconnected = check(
@@ -284,7 +298,7 @@ int main(int argc, char **argv)
         "the current account can still complete its own login after a stale response");
 
     MatrixPresenceLifecycleTestAccess::detachNetwork(matrix);
-    return noImplicitLogin && canSetPresenceWhileDisconnected && cannotEditProfileBeforeLogin &&
+    return initialOfflinePresenceAnnounced && noImplicitLogin && canSetPresenceWhileDisconnected && cannotEditProfileBeforeLogin &&
         profileActionsExposed && profileEditRejectedBeforeLogin && canEditProfileDuringInitialSync &&
         profileEditAccepted && profileUpdateDispatched && onlineRequestAccepted &&
         repeatedRequestAccepted && loginStarted &&

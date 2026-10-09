@@ -183,13 +183,27 @@ bool SimpleMessageStyle::changeOptions(QWidget *AWidget, const IMessageStyleOpti
 			AClean = true;
 			FWidgetStatus[view].scrollStarted = false;
 			FWidgetStatus[view].followTail = true;
+			FWidgetStatus[view].suppressTailCorrection = false;
 			view->installEventFilter(this);
+			connect(view->document()->documentLayout(),
+				&QAbstractTextDocumentLayout::documentSizeChanged, this,
+				[this, view](const QSizeF &) {
+					if (!FWidgetStatus.contains(view))
+						return;
+					WidgetStatus &wstatus = FWidgetStatus[view];
+					if (wstatus.followTail && !wstatus.suppressTailCorrection)
+					{
+						wstatus.scrollStarted = true;
+						FScrollTimer.start();
+					}
+				});
 			connect(view, &StyleViewer::userScrollPositionChanged, this,
 				[this, view](int APosition, int AMaximum) {
 					if (FWidgetStatus.contains(view))
 					{
 						WidgetStatus &wstatus = FWidgetStatus[view];
 						wstatus.followTail = APosition >= AMaximum;
+						wstatus.suppressTailCorrection = false;
 						if (!wstatus.followTail)
 							wstatus.scrollStarted = false;
 					}
@@ -212,6 +226,7 @@ bool SimpleMessageStyle::changeOptions(QWidget *AWidget, const IMessageStyleOpti
 			wstatus.lastKind = -1;
 			wstatus.lastId = QString();
 			wstatus.lastTime = QDateTime();
+			wstatus.suppressTailCorrection = false;
 			setVariant(AWidget, AOptions.extended.value(MSO_VARIANT).toString());
 			QString html = makeStyleTemplate();
 			fillStyleKeywords(html,AOptions);
@@ -262,6 +277,7 @@ bool SimpleMessageStyle::appendContent(QWidget *AWidget, const QString &AHtml, c
 		}
 
 		WidgetStatus &wstatus = FWidgetStatus[AWidget];
+		wstatus.suppressTailCorrection = AOptions.noScroll;
 		const bool shouldFollowTail = wstatus.followTail && !AOptions.noScroll;
 
 		QTextCursor cursor(view->document());
@@ -329,6 +345,19 @@ bool SimpleMessageStyle::setMessageDecoration(QWidget *AWidget, const QString &A
 		return false;
 	StyleViewer *view = qobject_cast<StyleViewer *>(AWidget);
 	return view && view->setMessageDecoration(AMessageId, ADecorationId, AHtml);
+}
+
+bool SimpleMessageStyle::replaceMessageContent(QWidget *AWidget, const QString &AMessageId,
+	const QString &AHtml)
+{
+	if (!FWidgetStatus.contains(AWidget) || AMessageId.isEmpty())
+		return false;
+	StyleViewer *view = qobject_cast<StyleViewer *>(AWidget);
+	if (!view)
+		return false;
+	if (isModernChatStyle(FStylePath))
+		roundModernChatImages(view, AHtml);
+	return view->replaceMessageBubbleContent(AMessageId, AHtml);
 }
 
 QMap<QString, QVariant> SimpleMessageStyle::infoValues() const
@@ -641,7 +670,7 @@ bool SimpleMessageStyle::eventFilter(QObject *AWatched, QEvent *AEvent)
 		if (FWidgetStatus.contains(view))
 		{
 			WidgetStatus &wstatus = FWidgetStatus[view];
-			if (!wstatus.scrollStarted && wstatus.followTail)
+			if (!wstatus.scrollStarted && wstatus.followTail && !wstatus.suppressTailCorrection)
 			{
 				wstatus.scrollStarted = true;
 				FScrollTimer.start();
@@ -664,7 +693,7 @@ void SimpleMessageStyle::onScrollAfterResize()
 		if (it->scrollStarted)
 		{
 			it->scrollStarted = false;
-			if (it->followTail)
+			if (it->followTail && !it->suppressTailCorrection)
 			{
 				StyleViewer *view = qobject_cast<StyleViewer *>(it.key());
 				QScrollBar *scrollBar = view->verticalScrollBar();

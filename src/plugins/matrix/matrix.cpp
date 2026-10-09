@@ -844,6 +844,12 @@ void Matrix::onAccountShown(IAccount *AAccount)
 	connect(FMatrixNetwork, &MatrixNetwork::receiptReceived, this,
 		&Matrix::onNetworkReceiptReceived, Qt::UniqueConnection);
 
+	// Publish initial Offline presence to allow StatusChanger to enable the explicit Connect action.
+	// Do not login or start sync merely because the account was shown.
+	FShow = IPresence::Offline;
+	FStatus = QStringLiteral("Offline");
+	emit protocolPresenceChanged(FStreamId, FShow, FStatus);
+
 	// SQLite cache is available offline; loading it must not depend on login or /sync.
 	loadRoomsFromDatabase();
 }

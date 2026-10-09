@@ -121,7 +121,8 @@ protected:
 		const ProtocolRoom &ARoom, const ProtocolRosterEntry &AMember);
 	void showRoomInviteDialog(QWidget *AParent, IProtocolMessaging *AMessaging,
 		const ProtocolRoom &ARoom);
-	void renderProtocolMessage(IChatWindow *AWindow, IProtocolMessaging *AMessaging, const BasicMessage &AMessage);
+	void renderProtocolMessage(IChatWindow *AWindow, IProtocolMessaging *AMessaging,
+		const BasicMessage &AMessage, bool AReplaceExisting = false);
 	void renderProtocolHistory(IChatWindow *AWindow, IProtocolMessaging *AMessaging);
 	void rebuildProtocolConversation(IChatWindow *AWindow, IProtocolMessaging *AMessaging,
 		const QString &AHistoryKey);

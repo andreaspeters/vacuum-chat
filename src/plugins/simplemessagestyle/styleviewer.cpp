@@ -354,6 +354,35 @@ bool StyleViewer::setMessageDecoration(const QString &AMessageId, const QString 
 	return updated;
 }
 
+bool StyleViewer::replaceMessageBubbleContent(const QString &AMessageId, const QString &AHtml)
+{
+	if (AMessageId.isEmpty())
+		return false;
+
+	for (BubbleOverlay &overlay : FBubbleOverlays)
+	{
+		if (overlay.messageId != AMessageId || !overlay.content)
+			continue;
+
+		const QSet<QUrl> imageResources = DecorationHelper::imageResourcesFromHtml(AHtml);
+		for (const QUrl &url : imageResources)
+		{
+			const QVariant image = document()->resource(QTextDocument::ImageResource, url);
+			if (image.isValid())
+				overlay.content->document()->addResource(QTextDocument::ImageResource, url, image);
+		}
+		overlay.html = AHtml;
+		const QString renderedHtml = DecorationHelper::renderBubbleHtml(overlay.html, overlay.decorations);
+		overlay.content->setHtml(QStringLiteral(
+			"<div class=\"xxxmessage\" style=\"background-color:transparent;\">%1</div>").arg(renderedHtml));
+		overlay.renderedHtml = renderedHtml;
+		overlay.imageResources = imageResources;
+		scheduleMessageBubbleGeometryUpdate();
+		return true;
+	}
+	return false;
+}
+
 void StyleViewer::clearMessageBubbles()
 {
 	for (const BubbleOverlay &overlay : FBubbleOverlays)

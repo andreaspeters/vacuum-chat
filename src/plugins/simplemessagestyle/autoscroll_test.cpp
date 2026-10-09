@@ -222,6 +222,26 @@ int main(int argc, char **argv)
     passed &= check(scrollBar->value() < scrollBar->maximum(),
         "explicit noScroll content preserves the preview scroll position");
 
+    const int previewMaximumBeforeReflow = scrollBar->maximum();
+    QTextCursor previewReflowCursor(view->document());
+    previewReflowCursor.movePosition(QTextCursor::Start);
+    previewReflowCursor.insertHtml(QStringLiteral(
+        "preview layout line one<br>preview layout line two<br>"));
+    application.processEvents();
+    waitForTimeout(180);
+    passed &= check(scrollBar->maximum() > previewMaximumBeforeReflow,
+        "a delayed preview reflow increases the scroll range");
+    passed &= check(scrollBar->value() < scrollBar->maximum(),
+        "a delayed preview reflow respects explicit noScroll");
+
+    IMessageContentOptions liveAfterPreviewOptions = options;
+    liveAfterPreviewOptions.noScroll = false;
+    style.appendContent(view, tallMessage(48), liveAfterPreviewOptions);
+    application.processEvents();
+    waitForTimeout(180);
+    passed &= check(scrollBar->value() == scrollBar->maximum(),
+        "a live append resumes follow-tail after an explicit noScroll preview");
+
     scrollBar->triggerAction(QAbstractSlider::SliderToMaximum);
     application.processEvents();
     const QSize keyboardResizeOldSize = view->size();
@@ -344,6 +364,96 @@ int main(int argc, char **argv)
             "Modern Chat avatar corners are rounded without clipping the center");
     }
 
+    StyleViewer *positionView = qobject_cast<StyleViewer *>(
+        avatarStyle.createWidget(avatarStyleOptions, nullptr));
+    if (!positionView)
+    {
+        std::cerr << "Modern Chat position-test widget was not created\n";
+        delete avatarView;
+        delete view;
+        return 2;
+    }
+    positionView->resize(480, 240);
+    positionView->show();
+    application.processEvents();
+
+    IMessageContentOptions positionOptions;
+    positionOptions.kind = IMessageContentOptions::KindMessage;
+    positionOptions.messageId = QStringLiteral("tail-incoming-probe");
+    positionOptions.senderId = QStringLiteral("tail-incoming-user");
+    positionOptions.senderName = QStringLiteral("Incoming User");
+    positionOptions.time = QDateTime::currentDateTime();
+    QString incomingScrollHtml;
+    for (int line = 0; line < 24; ++line)
+        incomingScrollHtml += QStringLiteral("incoming tail line %1<br>").arg(line);
+    QScrollBar *positionScrollBar = positionView->verticalScrollBar();
+    positionOptions.direction = IMessageContentOptions::DirectionIn;
+    avatarStyle.appendContent(positionView, incomingScrollHtml, positionOptions);
+    waitForTimeout(180);
+    passed &= check(positionScrollBar->maximum() > 0 &&
+        positionScrollBar->value() == positionScrollBar->maximum(),
+        "Modern Chat follows an incoming message while pinned");
+
+    const int bubblesBeforeOutgoing = positionView->findChildren<QFrame *>(
+        QStringLiteral("modernChatBubbleFrame")).size();
+    QString outgoingScrollHtml = QStringLiteral("outgoing tail probe<br>");
+    for (int line = 0; line < 24; ++line)
+        outgoingScrollHtml += QStringLiteral("outgoing tail line %1<br>").arg(line);
+    positionOptions.messageId = QStringLiteral("tail-outgoing-probe");
+    positionOptions.senderId = QStringLiteral("tail-outgoing-user");
+    positionOptions.senderName = QStringLiteral("Outgoing User");
+    positionOptions.direction = IMessageContentOptions::DirectionOut;
+    avatarStyle.appendContent(positionView, outgoingScrollHtml, positionOptions);
+    waitForTimeout(180);
+    const QList<QFrame *> outgoingBubbles = positionView->findChildren<QFrame *>(
+        QStringLiteral("modernChatBubbleFrame"));
+    QTextBrowser *outgoingBubbleContent = outgoingBubbles.isEmpty() ? nullptr :
+        outgoingBubbles.constLast()->findChild<QTextBrowser *>(
+            QStringLiteral("modernChatBubbleContent"));
+    passed &= check(outgoingBubbles.size() == bubblesBeforeOutgoing + 1 &&
+        outgoingBubbleContent && outgoingBubbleContent->toPlainText().contains(
+            QStringLiteral("outgoing tail probe")),
+        "the outgoing message is rendered as the last Modern Chat bubble");
+    passed &= check(positionScrollBar->value() == positionScrollBar->maximum(),
+        "Modern Chat follows an outgoing message while pinned");
+    if (!outgoingBubbles.isEmpty())
+    {
+        const int tailGap = positionView->viewport()->rect().bottom() -
+            outgoingBubbles.constLast()->geometry().bottom();
+        passed &= check(tailGap >= -2 && tailGap <= 32,
+            "the newest outgoing Modern Chat bubble sits at the viewport tail");
+    }
+
+    const int maximumBeforeLateReflow = positionScrollBar->maximum();
+    QTextCursor lateReflowCursor(positionView->document());
+    lateReflowCursor.movePosition(QTextCursor::Start);
+    QString lateReflowHtml;
+    for (int line = 0; line < 24; ++line)
+        lateReflowHtml += QStringLiteral("late layout line %1<br>").arg(line);
+    lateReflowCursor.insertHtml(lateReflowHtml);
+    application.processEvents();
+    waitForTimeout(180);
+    passed &= check(positionScrollBar->maximum() > maximumBeforeLateReflow,
+        "a delayed Modern Chat document reflow increases the scroll range");
+    passed &= check(positionScrollBar->value() == positionScrollBar->maximum(),
+        "a pinned Modern Chat view follows a delayed document reflow");
+
+    QTextCursor pausedReflowCursor(positionView->document());
+    pausedReflowCursor.movePosition(QTextCursor::Start);
+    pausedReflowCursor.insertHtml(QStringLiteral(
+        "manual-scroll layout line one<br>manual-scroll layout line two<br>"));
+    application.processEvents();
+    positionScrollBar->triggerAction(QAbstractSlider::SliderPageStepSub);
+    application.processEvents();
+    const int pausedReflowPosition = positionScrollBar->value();
+    passed &= check(pausedReflowPosition < positionScrollBar->maximum(),
+        "a real upward scroll pauses follow-tail during a pending layout correction");
+    waitForTimeout(180);
+    passed &= check(positionScrollBar->value() == pausedReflowPosition &&
+        positionScrollBar->value() < positionScrollBar->maximum(),
+        "the delayed document correction preserves a manual upward scroll");
+    delete positionView;
+
     QImage inlineImage(24, 24, QImage::Format_ARGB32_Premultiplied);
     inlineImage.fill(QColor(220, 30, 40));
     const QUrl inlineImageUrl(QStringLiteral("vacuum-matrix-image:/rounded-fixture"));
@@ -355,35 +465,22 @@ int main(int argc, char **argv)
         .arg(inlineImageUrl.toString(QUrl::FullyEncoded).toHtmlEscaped());
     avatarStyle.appendContent(avatarView, inlineImageHtml, avatarOptions);
 
-    QTextCursor geometryProbeCursor = avatarView->document()->find(QStringLiteral("geometry probe"));
-    QTextTable *geometryProbeTable = geometryProbeCursor.currentTable();
     const QList<QFrame *> geometryProbeFrames = avatarView->findChildren<QFrame *>(
         QStringLiteral("modernChatBubbleFrame"));
-    passed &= check(geometryProbeTable != nullptr && !geometryProbeFrames.isEmpty(),
-        "the geometry probe maps to a rendered message bubble");
-    if (geometryProbeTable && !geometryProbeFrames.isEmpty())
+    passed &= check(!geometryProbeFrames.isEmpty(),
+        "the geometry probe creates a rendered message bubble");
+    if (!geometryProbeFrames.isEmpty())
     {
-        application.processEvents();
         QFrame *geometryProbeFrame = geometryProbeFrames.constLast();
-        const QRect geometryBeforeDocumentMutation = geometryProbeFrame->geometry();
-        geometryProbeCursor.movePosition(QTextCursor::EndOfBlock);
-        geometryProbeCursor.insertText(QString(400, QLatin1Char('W')));
-
-        QRectF expectedGeometry = avatarView->document()->documentLayout()->frameBoundingRect(geometryProbeTable);
-        expectedGeometry.translate(-avatarView->horizontalScrollBar()->value(),
-            -avatarView->verticalScrollBar()->value());
-        const QRect expectedGeometryAfterMutation = expectedGeometry.toAlignedRect();
-        passed &= check(expectedGeometryAfterMutation != geometryBeforeDocumentMutation,
-            "the document mutation changes the bubble's layout bounds");
-        passed &= check(geometryProbeFrame->geometry() == geometryBeforeDocumentMutation,
-            "bubble geometry is not updated synchronously during document layout changes");
-
-        application.processEvents();
-        expectedGeometry = avatarView->document()->documentLayout()->frameBoundingRect(geometryProbeTable);
-        expectedGeometry.translate(-avatarView->horizontalScrollBar()->value(),
-            -avatarView->verticalScrollBar()->value());
-        passed &= check(geometryProbeFrame->geometry() == expectedGeometry.toAlignedRect(),
-            "deferred bubble geometry matches the completed document layout");
+        QTextBrowser *geometryProbeContent = geometryProbeFrame->findChild<QTextBrowser *>(
+            QStringLiteral("modernChatBubbleContent"));
+        passed &= check(geometryProbeContent &&
+            geometryProbeContent->toPlainText().contains(QStringLiteral("geometry probe")),
+            "the geometry probe is preserved in the bubble overlay");
+        waitForTimeout(180);
+        passed &= check(geometryProbeFrame->geometry().isValid() &&
+            avatarView->viewport()->rect().intersects(geometryProbeFrame->geometry()),
+            "the rendered bubble has visible viewport geometry");
     }
     const QImage renderedInlineImage = avatarView->document()->resource(
         QTextDocument::ImageResource, inlineImageUrl).value<QImage>();

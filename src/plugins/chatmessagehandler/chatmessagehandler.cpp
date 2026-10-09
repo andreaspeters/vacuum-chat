@@ -665,11 +665,13 @@ void ChatMessageHandler::onProtocolMessageReceived(const BasicMessage &AMessage)
 				FProtocolRenderedMessages.contains(messageKey + QStringLiteral("|image"));
 			sortProtocolMessagesChronologically(history);
 			if (mediaHydration) {
-				// Replace the rendered placeholder by rebuilding the timeline from the updated event.
-				scheduleProtocolConversationRebuild(window, messaging, historyKey, sender());
+				// Hydrate the existing event in place; appending is only a fallback when it
+				// has not reached this window yet.
+				renderProtocolMessage(window, messaging, AMessage, true);
 			} else if (!alreadyRendered) {
-				const bool outOfOrder = duplicateIndex + 1 < history.size();
-				if (outOfOrder)
+				const int currentIndex = ProtocolMessageHistory::findMessageIndex(history,
+					AMessage.messageId());
+				if (ProtocolMessageHistory::requiresTimelineRebuild(currentIndex, history.size(), false))
 					scheduleProtocolConversationRebuild(window, messaging, historyKey, sender());
 				else
 					renderProtocolMessage(window, messaging, AMessage);
@@ -701,8 +703,8 @@ void ChatMessageHandler::onProtocolMessageReceived(const BasicMessage &AMessage)
 					sortProtocolMessagesChronologically(history);
 					currentIndex = ProtocolMessageHistory::findMessageIndex(history, currentMessageId);
 				}
-				if (ProtocolMessageHistory::requiresTimelineRebuild(previousIndex, currentIndex,
-					history.size(), previouslyRendered)) {
+				if (ProtocolMessageHistory::requiresTimelineRebuild(currentIndex, history.size(),
+					previouslyRendered)) {
 					scheduleProtocolConversationRebuild(window, messaging, historyKey, sender());
 				} else if (transactionMerge ==
 					ProtocolMessageHistory::TransactionEchoMergeResult::ReplacedLocalEcho ||
@@ -714,14 +716,13 @@ void ChatMessageHandler::onProtocolMessageReceived(const BasicMessage &AMessage)
 				return;
 			}
 		}
-		const bool outOfOrder = !history.isEmpty() && AMessage.timestamp().isValid() &&
-			history.last().timestamp().isValid() &&
-			AMessage.timestamp() < history.last().timestamp();
 		history.append(AMessage);
 		sortProtocolMessagesChronologically(history);
-		if (outOfOrder) {
+		const int currentIndex = ProtocolMessageHistory::findMessageIndex(history,
+			AMessage.messageId());
+		if (ProtocolMessageHistory::requiresTimelineRebuild(currentIndex, history.size(), false))
 			scheduleProtocolConversationRebuild(window, messaging, historyKey, sender());
-		} else
+		else
 			renderProtocolMessage(window, messaging, AMessage);
 		return;
 	}
@@ -788,20 +789,8 @@ void ChatMessageHandler::onProtocolHistoryLoaded(const QString &ARoomId)
 	if (!window)
 		return;
 	bindProtocolHistoryPaging(window, messaging, historyKey, sender());
-	bool hasOutOfOrderNewMessage = false;
-	if (hadHistory && !previousHistory.isEmpty()) {
-		QSet<QString> previousIds;
-		for (const BasicMessage &message : previousHistory)
-			previousIds.insert(message.messageId());
-		for (const BasicMessage &message : uniqueMessages)
-			if (!previousIds.contains(message.messageId()) && message.timestamp().isValid() &&
-				previousHistory.last().timestamp().isValid() &&
-				message.timestamp() < previousHistory.last().timestamp()) {
-				hasOutOfOrderNewMessage = true;
-				break;
-			}
-	}
-	if (hasOutOfOrderNewMessage) {
+	if (hadHistory && ProtocolMessageHistory::requiresHistoryMergeRebuild(
+		previousHistory, uniqueMessages)) {
 		scheduleProtocolConversationRebuild(window, messaging, historyKey, sender());
 		return;
 	}
@@ -983,7 +972,7 @@ void ChatMessageHandler::requestOlderProtocolHistoryPage(const QString &AHistory
 }
 
 void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMessaging *AMessaging,
-	const BasicMessage &AMessage)
+	const BasicMessage &AMessage, bool AReplaceExisting)
 {
 	if (!AWindow || !AMessaging)
 		return;
@@ -1100,7 +1089,7 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 		updateProtocolReactionDecoration(AWindow, eventKey, AMessage.messageId());
 		return;
 	}
-	if (FProtocolRenderedMessages.contains(messageKey))
+	if (!AReplaceExisting && FProtocolRenderedMessages.contains(messageKey))
 		return;
 	IMessageContentOptions options;
 	options.kind = IMessageContentOptions::KindMessage;
@@ -1149,11 +1138,16 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 		? AMessaging->stripReplyFallback(body, QStringLiteral("text/plain")) : body;
 	const QString formattedBodyForDisplay = !replyHtml.isEmpty()
 		? AMessaging->stripReplyFallback(formattedBody, QStringLiteral("text/html")) : formattedBody;
+	const auto appendOrReplace = [AWindow, &options, AReplaceExisting](const QString &html) {
+		IViewWidget *viewWidget = AWindow->viewWidget();
+		if (!AReplaceExisting || !viewWidget->replaceMessage(options.messageId, html))
+			viewWidget->appendHtml(html, options);
+	};
 
 	if (messageType == QStringLiteral("m.text") &&
 		messageFormat == QStringLiteral("org.matrix.custom.html") && !formattedBodyForDisplay.isEmpty())
-		AWindow->viewWidget()->appendHtml(replyHtml + AMessaging->highlightMentions(AMessaging->sanitizeHtml(
-			AMessaging->formatEmoticonsForDisplay(formattedBodyForDisplay))), options);
+		appendOrReplace(replyHtml + AMessaging->highlightMentions(AMessaging->sanitizeHtml(
+			AMessaging->formatEmoticonsForDisplay(formattedBodyForDisplay))));
 	else if (messageType == QStringLiteral("m.image") && !decodedImage.isNull() && !resourceUrl.isEmpty())
 	{
 		QTextEdit *view = qobject_cast<QTextEdit *>(AWindow->viewWidget()->styleWidget());
@@ -1167,15 +1161,15 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 			"<div><img src=\"%1\" alt=\"%2\" "
 			"style=\"max-width:50%; max-width:300px; height:auto;\" /></div>")
 			.arg(escapedUrl, escapedAlt);
-		AWindow->viewWidget()->appendHtml(replyHtml + imageHtml, options);
+		appendOrReplace(replyHtml + imageHtml);
 	}
 	else if (messageType == QStringLiteral("m.image") || messageType == QStringLiteral("m.file"))
 	{
 		const QString filePath = AMessage.metadata().value(QStringLiteral("file_path")).toString();
 		if (!filePath.isEmpty()) {
 			const QString href = QUrl::fromLocalFile(filePath).toString().toHtmlEscaped();
-			AWindow->viewWidget()->appendHtml(replyHtml + QStringLiteral("<a href=\"%1\">%2</a>")
-				.arg(href, body.isEmpty() ? tr("Open attachment") : body.toHtmlEscaped()), options);
+			appendOrReplace(replyHtml + QStringLiteral("<a href=\"%1\">%2</a>")
+				.arg(href, body.isEmpty() ? tr("Open attachment") : body.toHtmlEscaped()));
 		} else {
 			QUrl requestUrl;
 			requestUrl.setScheme(QStringLiteral("vacuum-media"));
@@ -1192,8 +1186,8 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 			requestUrl.setQuery(query);
 			const QString label = messageType == QStringLiteral("m.image")
 				? tr("Load image") : tr("Load attachment");
-			AWindow->viewWidget()->appendHtml(replyHtml + QStringLiteral("<a href=\"%1\">%2</a>")
-				.arg(requestUrl.toString(QUrl::FullyEncoded).toHtmlEscaped(), label), options);
+			appendOrReplace(replyHtml + QStringLiteral("<a href=\"%1\">%2</a>")
+				.arg(requestUrl.toString(QUrl::FullyEncoded).toHtmlEscaped(), label));
 		}
 	}
 	else
@@ -1203,7 +1197,7 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 		const QString displayBody = AMessaging->formatEmoticonsForDisplay(bodyForDisplay);
 		const QString escapedBody = displayBody.toHtmlEscaped().replace(QStringLiteral("\n"),
 			QStringLiteral("<br/>"));
-		AWindow->viewWidget()->appendHtml(replyHtml + AMessaging->highlightMentions(escapedBody), options);
+		appendOrReplace(replyHtml + AMessaging->highlightMentions(escapedBody));
 	}
 	if (!AMessage.messageId().isEmpty())
 		FProtocolRenderedMessages.insert(prefix + AMessage.messageId());

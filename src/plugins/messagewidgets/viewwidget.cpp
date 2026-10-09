@@ -122,12 +122,14 @@ void ViewWidget::appendHtml(const QString &AHtml, const IMessageContentOptions &
 
 bool ViewWidget::replaceMessage(const QString &AMessageId, const QString &AHtml)
 {
-	QTextEdit *view = qobject_cast<QTextEdit *>(FStyleWidget);
-	if (!view || !FMessageRanges.contains(AMessageId))
-		return false;
+	if (FMessageStyle && FMessageStyle->replaceMessageContent(FStyleWidget, AMessageId, AHtml))
+		return true;
 	const QStringList decorationIds = FMessageDecorations.value(AMessageId).keys();
 	for (const QString &decorationId : decorationIds)
 		setMessageDecoration(AMessageId, decorationId, QString());
+	QTextEdit *view = qobject_cast<QTextEdit *>(FStyleWidget);
+	if (!view || !FMessageRanges.contains(AMessageId))
+		return false;
 	const QPair<int, int> range = FMessageRanges.value(AMessageId);
 	QTextCursor cursor(view->document());
 	cursor.setPosition(range.first);

@@ -167,14 +167,38 @@ inline bool requiresChronologicalSort(const QList<BasicMessage> &AHistory, int A
 		precedes(AHistory.at(AIndex + 1), AHistory.at(AIndex));
 }
 
-inline bool requiresTimelineRebuild(int APreviousIndex, int ACurrentIndex,
-	int AHistorySize, bool APreviouslyRendered)
+inline bool requiresTimelineRebuild(int ACurrentIndex, int AHistorySize, bool APreviouslyRendered)
 {
-	if (ACurrentIndex < 0)
-		return true;
-	if (APreviousIndex >= 0 && APreviousIndex != ACurrentIndex)
-		return true;
-	return !APreviouslyRendered && ACurrentIndex != AHistorySize - 1;
+	if (APreviouslyRendered)
+		return ACurrentIndex < 0;
+	// The rendered view is append-only. Rebuild when a newly received event sorts
+	// before the tail; otherwise its chronological position in history and its
+	// position in the visible conversation diverge.
+	return ACurrentIndex >= 0 && ACurrentIndex + 1 < AHistorySize;
+}
+
+inline bool requiresHistoryMergeRebuild(const QList<BasicMessage> &APreviousHistory,
+	const QList<BasicMessage> &AMergedHistory)
+{
+	for (const BasicMessage &message : APreviousHistory)
+		if (!message.messageId().isEmpty() && findMessageIndex(AMergedHistory, message.messageId()) < 0)
+			return true;
+	if (!APreviousHistory.isEmpty()) {
+		QSet<QString> previousIds;
+		for (const BasicMessage &message : APreviousHistory)
+			if (!message.messageId().isEmpty())
+				previousIds.insert(message.messageId());
+		const BasicMessage &previousTail = APreviousHistory.last();
+		for (const BasicMessage &message : AMergedHistory) {
+			if (message.messageId().isEmpty() || previousIds.contains(message.messageId()))
+				continue;
+			const QDateTime messageTime = message.timestamp();
+			const QDateTime tailTime = previousTail.timestamp();
+			if (messageTime.isValid() && tailTime.isValid() && messageTime < tailTime)
+				return true;
+		}
+	}
+	return false;
 }
 
 inline TransactionEchoMergeResult mergeTransactionEcho(QList<BasicMessage> &AHistory,
