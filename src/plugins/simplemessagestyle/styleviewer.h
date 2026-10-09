@@ -16,6 +16,7 @@
 #include <utils/animatedtextbrowser.h>
 
 class QKeyEvent;
+class QShowEvent;
 class QWheelEvent;
 
 class StyleViewer: 
@@ -30,7 +31,7 @@ public:
 	void addMessageBubble(QTextTable *ATable, const QString &AMessageId,
 		const QString &AHtml, const QColor &AFill, bool AOutgoing = false,
 		const QRectF &ASourceAnchorRect = QRectF(),
-		const QTextCursor &ASourceSpacerCursor = QTextCursor());
+		const QTextCursor &ASourceTextCursor = QTextCursor());
 	bool setMessageDecoration(const QString &AMessageId, const QString &ADecorationId,
 		const QString &AHtml);
 	bool replaceMessageBubbleContent(const QString &AMessageId, const QString &AHtml);
@@ -44,6 +45,7 @@ protected:
 	void wheelEvent(QWheelEvent *AEvent) override;
 	void keyPressEvent(QKeyEvent *AEvent) override;
 	void resizeEvent(QResizeEvent *AEvent) override;
+	void showEvent(QShowEvent *AEvent) override;
 private:
 	struct BubbleOverlay {
 		QPointer<QTextTable> table;
@@ -56,6 +58,7 @@ private:
 		QString renderedHtml;
 		QString renderedReactionHtml;
 		QRectF sourceAnchorRect;
+		QTextCursor sourceTextCursor;
 		QTextCursor sourceSpacerCursor;
 		bool outgoing = false;
 		bool contentSizeDirty = false;

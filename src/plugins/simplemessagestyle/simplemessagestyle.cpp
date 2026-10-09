@@ -262,7 +262,9 @@ bool SimpleMessageStyle::appendContent(QWidget *AWidget, const QString &AHtml, c
 		const bool sameSender = isSameSender(AWidget,AOptions);
 		QString html = makeContentTemplate(AOptions,sameSender);
 		fillContentKeywords(html,AOptions,sameSender,view);
-		const QString preparedMessage = prepareMessage(AHtml,AOptions);
+		QString contentHtml = AHtml;
+		contentHtml.remove(QChar::Null);
+		const QString preparedMessage = prepareMessage(contentHtml,AOptions);
 		QString bubbleMarker;
 		if (modernChat && AOptions.kind == IMessageContentOptions::KindMessage)
 		{
@@ -295,7 +297,7 @@ bool SimpleMessageStyle::appendContent(QWidget *AWidget, const QString &AHtml, c
 				QTextTable *bubbleTable = markerCursor.currentTable();
 				markerCursor.removeSelectedText();
 				QRectF sourceAnchorRect;
-				QTextCursor sourceSpacerCursor;
+				QTextCursor sourceTextCursor;
 				if (bubbleTable)
 				{
 					const QTextTableCell messageCell = bubbleTable->cellAt(markerCursor);
@@ -303,8 +305,9 @@ bool SimpleMessageStyle::appendContent(QWidget *AWidget, const QString &AHtml, c
 					{
 						view->document()->documentLayout()->documentSize();
 						sourceAnchorRect = view->document()->documentLayout()->frameBoundingRect(bubbleTable);
-						sourceSpacerCursor = DecorationHelper::replaceSourceMessageWithSpacer(
-							messageCell, sourceAnchorRect.height());
+						sourceTextCursor = messageCell.firstCursorPosition();
+						sourceTextCursor.setPosition(messageCell.lastCursorPosition().position(),
+							QTextCursor::KeepAnchor);
 					}
 				}
 				QColor fill(AOptions.textBGColor);
@@ -313,7 +316,7 @@ bool SimpleMessageStyle::appendContent(QWidget *AWidget, const QString &AHtml, c
 						? QColor(QStringLiteral("#e8f1ff")) : QColor(QStringLiteral("#f1f2f4"));
 				view->addMessageBubble(bubbleTable, AOptions.messageId, preparedMessage, fill,
 					AOptions.direction == IMessageContentOptions::DirectionOut,
-					sourceAnchorRect, sourceSpacerCursor);
+					sourceAnchorRect, sourceTextCursor);
 			}
 		}
 

@@ -89,10 +89,31 @@ bool checkLastBubbleFrame(StyleViewer *view, const QColor &fill, const QString &
 
     QTextBrowser *content = frame->findChild<QTextBrowser *>(QStringLiteral("modernChatBubbleContent"));
     const bool containsText = content && content->toPlainText().contains(messageText);
+    bool paintsText = false;
+    if (content && !content->viewport()->size().isEmpty())
+    {
+        QImage contentImage(content->viewport()->size(), QImage::Format_ARGB32_Premultiplied);
+        contentImage.fill(Qt::transparent);
+        QPainter contentPainter(&contentImage);
+        content->viewport()->render(&contentPainter);
+        contentPainter.end();
+        for (int y = 0; y < contentImage.height() && !paintsText; ++y)
+            for (int x = 0; x < contentImage.width(); ++x)
+            {
+                const QColor pixel = contentImage.pixelColor(x, y);
+                if (pixel.alpha() > 0 && pixel.red() < 160 && pixel.green() < 160 &&
+                    pixel.blue() < 160)
+                {
+                    paintsText = true;
+                    break;
+                }
+            }
+    }
     const bool transparentContent = content && !content->viewport()->autoFillBackground() &&
         image.pixelColor(bubbleRect.right() - 7, centerY) == fill;
     bool passed = check(rounded, description);
     passed = check(containsText, "QFrame rich-text child preserves message text") && passed;
+    passed = check(paintsText, "QFrame rich-text child paints visible message glyphs") && passed;
     passed = check(transparentContent, "QFrame rich-text child background is transparent") && passed;
     if (content)
     {
@@ -679,7 +700,56 @@ int main(int argc, char **argv)
         "a one-line Matrix formatted body does not create empty QTextDocument blocks");
     passed &= check(matrixContent && matrixContent->document()->size().height() <= 60.0,
         "a one-line Matrix formatted body does not create an over-height bubble");
+
+    IMessageContentOptions meshCoreOptions = outgoingOptions;
+    meshCoreOptions.messageId = QStringLiteral("meshcore-padded-body");
+    meshCoreOptions.senderId = QStringLiteral("meshcore-peer");
+    meshCoreOptions.senderName = QStringLiteral("MeshCore Peer");
+    const QString paddedMeshCoreHtml = QString(QChar::Null) +
+        QStringLiteral("MeshCore body") + QChar::Null;
+    avatarStyle.appendContent(avatarView, paddedMeshCoreHtml, meshCoreOptions);
+    application.processEvents();
+    const QList<QFrame *> meshCoreFrames = avatarView->findChildren<QFrame *>(
+        QStringLiteral("modernChatBubbleFrame"));
+    QTextBrowser *meshCoreContent = meshCoreFrames.isEmpty() ? nullptr :
+        meshCoreFrames.constLast()->findChild<QTextBrowser *>(
+            QStringLiteral("modernChatBubbleContent"));
+    passed &= check(meshCoreContent && meshCoreContent->toPlainText().trimmed() ==
+        QStringLiteral("MeshCore body"),
+        "QFrame bubble renders MeshCore text surrounded by NUL padding");
+    passed &= checkLastBubbleFrame(avatarView, QColor(QStringLiteral("#e8f1ff")),
+        QStringLiteral("MeshCore body"),
+        "QFrame bubble paints MeshCore text after removing NUL padding");
     delete avatarView;
+
+    StyleViewer *deferredView = qobject_cast<StyleViewer *>(
+        avatarStyle.createWidget(avatarStyleOptions, nullptr));
+    if (!deferredView)
+    {
+        std::cerr << "deferred-layout Modern Chat widget was not created\n";
+        delete view;
+        return 2;
+    }
+    deferredView->resize(0, 0);
+    IMessageContentOptions deferredOptions = avatarOptions;
+    deferredOptions.messageId = QStringLiteral("deferred-first-bubble");
+    avatarStyle.appendContent(deferredView, QStringLiteral("deferred first message"), deferredOptions);
+    application.processEvents();
+    passed &= check(deferredView->toPlainText().contains(QStringLiteral("deferred first message")),
+        "source message remains available while the QFrame has no usable width");
+    deferredView->resize(480, 240);
+    deferredView->show();
+    application.processEvents();
+    waitForTimeout(180);
+    const QList<QFrame *> deferredFrames = deferredView->findChildren<QFrame *>(
+        QStringLiteral("modernChatBubbleFrame"));
+    QTextBrowser *deferredContent = deferredFrames.isEmpty() ? nullptr :
+        deferredFrames.constFirst()->findChild<QTextBrowser *>(
+            QStringLiteral("modernChatBubbleContent"));
+    passed &= check(deferredContent && deferredContent->toPlainText().contains(
+        QStringLiteral("deferred first message")) && !deferredFrames.constFirst()->isHidden(),
+        "a Modern Chat bubble appended before the view is shown becomes visible on show");
+    delete deferredView;
 
     StyleViewer lifetimeView(nullptr);
     lifetimeView.resize(320, 200);

@@ -12,6 +12,7 @@
 #include <QRegularExpression>
 #include <QResizeEvent>
 #include <QScrollBar>
+#include <QShowEvent>
 #include <QTextBlock>
 #include <QTextBrowser>
 #include <QTextCharFormat>
@@ -134,7 +135,7 @@ void StyleViewer::addMessageBubble(QTextTable *ATable, const QString &AHtml, con
 
 void StyleViewer::addMessageBubble(QTextTable *ATable, const QString &AMessageId,
 	const QString &AHtml, const QColor &AFill, bool AOutgoing,
-	const QRectF &ASourceAnchorRect, const QTextCursor &ASourceSpacerCursor)
+	const QRectF &ASourceAnchorRect, const QTextCursor &ASourceTextCursor)
 {
 	if (!ATable)
 		return;
@@ -213,7 +214,7 @@ void StyleViewer::addMessageBubble(QTextTable *ATable, const QString &AMessageId
 	overlay.html = AHtml;
 	overlay.renderedHtml = AHtml;
 	overlay.sourceAnchorRect = ASourceAnchorRect;
-	overlay.sourceSpacerCursor = ASourceSpacerCursor;
+	overlay.sourceTextCursor = ASourceTextCursor;
 	overlay.outgoing = AOutgoing;
 	overlay.imageResources = bubbleImageResources;
 	FBubbleOverlays.append(overlay);
@@ -597,6 +598,13 @@ void StyleViewer::updateMessageBubbleGeometry()
 				++i;
 				continue;
 			}
+			if (overlay.sourceTextCursor.hasSelection())
+			{
+				const QTextTableCell messageCell = overlay.table->cellAt(overlay.sourceTextCursor);
+				overlay.sourceSpacerCursor = DecorationHelper::replaceSourceMessageWithSpacer(
+					messageCell, overlay.geometry.documentRect.height());
+				overlay.sourceTextCursor = QTextCursor();
+			}
 			overlay.contentSizeDirty = false;
 			const qreal reactionHeight = overlay.reactionContent &&
 				!overlay.reactionContent->isHidden()
@@ -694,6 +702,12 @@ void StyleViewer::keyPressEvent(QKeyEvent *AEvent)
 void StyleViewer::resizeEvent(QResizeEvent *AEvent)
 {
 	AnimatedTextBrowser::resizeEvent(AEvent);
+	scheduleMessageBubbleGeometryUpdate();
+}
+
+void StyleViewer::showEvent(QShowEvent *AEvent)
+{
+	AnimatedTextBrowser::showEvent(AEvent);
 	scheduleMessageBubbleGeometryUpdate();
 }
 
