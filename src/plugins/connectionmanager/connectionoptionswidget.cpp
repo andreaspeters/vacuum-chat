@@ -3,6 +3,8 @@
 ConnectionOptionsWidget::ConnectionOptionsWidget(IConnectionManager *AManager, const OptionsNode &ANode, QWidget *AParent) : QWidget(AParent)
 {
 	ui.setupUi(this);
+	setMaximumWidth(400);
+	setObjectName(QStringLiteral("accountConnectionOptions"));
 	FManager = AManager;
 
 	FOptions = ANode;
@@ -23,6 +25,9 @@ ConnectionOptionsWidget::~ConnectionOptionsWidget()
 
 void ConnectionOptionsWidget::apply()
 {
+	if (isHidden())
+		return;
+
 	IConnectionPlugin *plugin = FManager->pluginById(FPluginId);
 	if (plugin)
 	{

@@ -4,6 +4,7 @@
 - ADD:    [ui] notification notice.
 - FIX:    [matrix] own messages moving from right to left.
 - FIX:    [ui,matrix] stop to refresh whole chat after matrix sync.
+- FIX:    [ui] widget size in the account options.
 
 ## v2.1.0
 

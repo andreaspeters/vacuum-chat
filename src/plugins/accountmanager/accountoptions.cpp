@@ -16,7 +16,7 @@
 AccountOptions::AccountOptions(IAccountManager *AManager, IPluginManager *APluginManager, const QUuid &AAccountId, QWidget *AParent) : QWidget(AParent)
 {
 	ui.setupUi(this);
-	setMinimumWidth(590);
+	setMaximumWidth(400);
 	FAccountType = new QComboBox(this);
 	FAccountType->addItem(tr("Jabber / XMPP"), QStringLiteral("jabber"));
 	FAccountType->addItem(tr("Matrix"), QStringLiteral("matrix"));
@@ -28,6 +28,7 @@ AccountOptions::AccountOptions(IAccountManager *AManager, IPluginManager *APlugi
 	// Setup Matrix fields
 	FMatrixFields = new QWidget(this);
 	QFormLayout *matrixLayout = new QFormLayout(FMatrixFields);
+	matrixLayout->setRowWrapPolicy(QFormLayout::WrapLongRows);
 	FMatrixInstance = new QLineEdit(FMatrixFields);
 	FMatrixUsername = new QLineEdit(FMatrixFields);
 	FMatrixPassword = new QLineEdit(FMatrixFields);
@@ -88,22 +89,24 @@ AccountOptions::AccountOptions(IAccountManager *AManager, IPluginManager *APlugi
 	// Setup MeshCore fields
 	FMeshCoreFields = new QWidget(this);
 	QFormLayout *meshcoreLayout = new QFormLayout(FMeshCoreFields);
+	meshcoreLayout->setRowWrapPolicy(QFormLayout::WrapLongRows);
 	FMeshCoreTransport = new QComboBox(FMeshCoreFields);
 	FMeshCoreTransport->addItem(tr("BLE"), QStringLiteral("ble"));
 	FMeshCoreTransport->addItem(tr("USB"), QStringLiteral("usb"));
 	FMeshCorePort = new QLineEdit(FMeshCoreFields);
 	FMeshCoreBleDevices = new QComboBox(FMeshCoreFields);
 	FMeshCoreBleDevices->setObjectName(QStringLiteral("meshcoreBleDevices"));
-	FMeshCoreScanBle = new QPushButton(tr("Search for MeshCore Bluetooth devices"), FMeshCoreFields);
+	FMeshCoreScanBle = new QPushButton(tr("Search"), FMeshCoreFields);
 	FMeshCoreScanBle->setObjectName(QStringLiteral("meshcoreScanBleDevices"));
 	FMeshCoreBleStatus = new QLabel(tr("Search for nearby MeshCore BLE devices to select one."), FMeshCoreFields);
 	FMeshCoreBleStatus->setObjectName(QStringLiteral("meshcoreBleScanStatus"));
 	FMeshCoreBleStatus->setWordWrap(true);
 	QWidget *bleDeviceRow = new QWidget(FMeshCoreFields);
-	QHBoxLayout *bleDeviceLayout = new QHBoxLayout(bleDeviceRow);
+	QVBoxLayout *bleDeviceLayout = new QVBoxLayout(bleDeviceRow);
 	bleDeviceLayout->setContentsMargins(0, 0, 0, 0);
-	bleDeviceLayout->addWidget(FMeshCoreBleDevices, 1);
-	bleDeviceLayout->addWidget(FMeshCoreScanBle);
+	bleDeviceLayout->setSpacing(3);
+	bleDeviceLayout->addWidget(FMeshCoreBleDevices);
+	bleDeviceLayout->addWidget(FMeshCoreScanBle, 0, Qt::AlignLeft);
 
 	// Set default values
 	FMeshCorePort->setText(QStringLiteral("/dev/ttyACM0"));
@@ -135,7 +138,7 @@ AccountOptions::AccountOptions(IAccountManager *AManager, IPluginManager *APlugi
 		});
 	connect(FMeshCoreBleDiscoveryAgent, &QBluetoothDeviceDiscoveryAgent::finished,
 		this, [this]() {
-			FMeshCoreScanBle->setText(tr("Search for MeshCore Bluetooth devices"));
+			FMeshCoreScanBle->setText(tr("Search"));
 			FMeshCoreScanBle->setEnabled(true);
 			if (FMeshCoreBleScanFailed)
 				return;
@@ -150,7 +153,7 @@ AccountOptions::AccountOptions(IAccountManager *AManager, IPluginManager *APlugi
 				return;
 			FMeshCoreBleScanFailed = true;
 			FMeshCoreBleStatus->setText(FMeshCoreBleDiscoveryAgent->errorString());
-			FMeshCoreScanBle->setText(tr("Search for MeshCore Bluetooth devices"));
+			FMeshCoreScanBle->setText(tr("Search"));
 			FMeshCoreScanBle->setEnabled(true);
 		});
 	connect(FMeshCoreScanBle, &QPushButton::clicked, this, [this]() {
@@ -158,7 +161,7 @@ AccountOptions::AccountOptions(IAccountManager *AManager, IPluginManager *APlugi
 			return;
 		if (FMeshCoreBleDiscoveryAgent->isActive()) {
 			FMeshCoreBleDiscoveryAgent->stop();
-			FMeshCoreScanBle->setText(tr("Search for MeshCore Bluetooth devices"));
+			FMeshCoreScanBle->setText(tr("Search"));
 			FMeshCoreScanBle->setEnabled(true);
 			return;
 		}
@@ -173,7 +176,7 @@ AccountOptions::AccountOptions(IAccountManager *AManager, IPluginManager *APlugi
 			FMeshCoreBleDiscoveryAgent->error() != QBluetoothDeviceDiscoveryAgent::NoError) {
 			FMeshCoreBleScanFailed = true;
 			FMeshCoreBleStatus->setText(FMeshCoreBleDiscoveryAgent->errorString());
-			FMeshCoreScanBle->setText(tr("Search for MeshCore Bluetooth devices"));
+			FMeshCoreScanBle->setText(tr("Search"));
 		}
 	});
 #else
@@ -188,6 +191,7 @@ AccountOptions::AccountOptions(IAccountManager *AManager, IPluginManager *APlugi
 	// AX.25 KISS serial account configuration.
 	FAx25Fields = new QWidget(this);
 	QFormLayout *ax25Layout = new QFormLayout(FAx25Fields);
+	ax25Layout->setRowWrapPolicy(QFormLayout::WrapLongRows);
 	FAx25Callsign = new QLineEdit(FAx25Fields);
 	FAx25Callsign->setPlaceholderText(QStringLiteral("DL1AAA-7"));
 	FAx25Port = new QLineEdit(FAx25Fields);
@@ -207,6 +211,8 @@ AccountOptions::AccountOptions(IAccountManager *AManager, IPluginManager *APlugi
 		const bool matrix = FAccountType->itemData(AIndex).toString() == QStringLiteral("matrix");
 		const bool meshcore = FAccountType->itemData(AIndex).toString() == QStringLiteral("meshcore");
 		const bool ax25 = FAccountType->itemData(AIndex).toString() == QStringLiteral("ax25");
+		if (QWidget *connectionOptions = parentWidget()->findChild<QWidget *>(QStringLiteral("accountConnectionOptions")))
+			connectionOptions->setVisible(!matrix && !meshcore && !ax25);
 		ui.grbAccount->setVisible(!matrix && !meshcore && !ax25);
 		FMatrixFields->setVisible(matrix);
 		FMatrixFields->setEnabled(matrix);
