@@ -2,6 +2,7 @@
 
 #include "ax25kisscodec.h"
 #include "ax25kissserialtransport.h"
+#include "ax25chatmessagerouting.h"
 #include "axcp_reliable_engine.h"
 
 #include <interfaces/iaccountmanager.h>
@@ -239,11 +240,19 @@ bool Ax25ChatPlugin::sendMessage(const BasicMessage &message)
         return false;
 
     const QString destination = canonicalCallsign(message.conversationId());
-    if (destination.isEmpty() || !addContactCallsign(destination))
+    const QString localCallsign = canonicalCallsign(m_selectedAccount->optionsNode()
+        .value(kAccountCallsignKey).toString());
+    if (destination.isEmpty() || localCallsign.isEmpty() ||
+        destination == localCallsign || !addContactCallsign(destination))
         return false;
 
-    QString error;
-    return m_engine->sendMessage(destination, message.body(), m_clock.elapsed(), nullptr, &error);
+    quint32 messageId = 0;
+    if (!m_engine->sendMessage(destination, message.body(), m_clock.elapsed(), &messageId))
+        return false;
+
+    emit protocolMessageReceived(Ax25ChatMessageRouting::createOutgoingMessage(
+        destination, localCallsign, message.body(), messageId, QDateTime::currentDateTimeUtc()));
+    return true;
 }
 
 int Ax25ChatPlugin::show() const
@@ -356,12 +365,15 @@ void Ax25ChatPlugin::onIncomingMessage(const QString &source, quint32 messageId,
                                        const QString &text)
 {
     const QString sender = canonicalCallsign(source);
-    if (sender.isEmpty() || !m_selectedAccount)
+    if (!m_selectedAccount)
+        return;
+
+    const QString localCallsign = canonicalCallsign(m_selectedAccount->optionsNode()
+        .value(kAccountCallsignKey).toString());
+    if (!Ax25ChatMessageRouting::isRemoteCallsign(sender, localCallsign))
         return;
 
     addContactCallsign(sender);
-    const QString localCallsign = canonicalCallsign(m_selectedAccount->optionsNode()
-        .value(kAccountCallsignKey).toString());
     const QString id = QStringLiteral("ax25:%1:%2")
         .arg(sender, QString::number(messageId, 16).rightJustified(8, QLatin1Char('0')));
     const BasicMessage message(id, sender, sender, localCallsign, text,
@@ -458,10 +470,13 @@ QStringList Ax25ChatPlugin::contactCallsigns() const
     settings.beginGroup(accountGroup(accountId()));
     const QStringList stored = settings.value(QStringLiteral("contacts")).toStringList();
     settings.endGroup();
+    const QString localCallsign = canonicalCallsign(m_selectedAccount->optionsNode()
+        .value(kAccountCallsignKey).toString());
 
     for (const QString &value : stored) {
         const QString callsign = canonicalCallsign(value);
-        if (!callsign.isEmpty() && !result.contains(callsign))
+        if (Ax25ChatMessageRouting::isRemoteCallsign(callsign, localCallsign) &&
+            !result.contains(callsign))
             result.append(callsign);
     }
     std::sort(result.begin(), result.end());
@@ -473,8 +488,11 @@ bool Ax25ChatPlugin::addContactCallsign(const QString &value)
     if (!m_selectedAccount || !m_selectedAccount->isActive())
         return false;
     const QString callsign = canonicalCallsign(value);
+    const QString localCallsign = m_selectedAccount
+        ? canonicalCallsign(m_selectedAccount->optionsNode().value(kAccountCallsignKey).toString())
+        : QString();
     const QString path = settingsFilePath();
-    if (callsign.isEmpty() || path.isEmpty())
+    if (!Ax25ChatMessageRouting::isRemoteCallsign(callsign, localCallsign) || path.isEmpty())
         return false;
 
     QStringList contacts = contactCallsigns();

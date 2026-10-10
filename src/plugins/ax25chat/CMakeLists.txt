@@ -12,6 +12,7 @@ set(SOURCES
     ax25chatplugin.cpp
     ax25kisscodec.cpp
     ax25kissserialtransport.cpp
+    ax25chatmessagerouting.cpp
     axcpcodec.cpp
     axcp_reliable_engine.cpp)
 set(HEADERS
@@ -19,6 +20,7 @@ set(HEADERS
     ax25chat.json
     ax25kisscodec.h
     ax25kissserialtransport.h
+    ax25chatmessagerouting.h
     axcpcodec.h
     axcp_reliable_engine.h)
 
@@ -71,4 +73,12 @@ if (BUILD_TESTING)
     target_compile_features(ax25chat_plugin_tests PRIVATE cxx_std_11)
     target_link_libraries(ax25chat_plugin_tests PRIVATE
         ${VACUUM_UTILS_NAME} Qt6::Core Qt6::Widgets Qt6::SerialPort Qt6::Xml)
+
+    add_executable(ax25chat_message_routing_tests EXCLUDE_FROM_ALL
+        ax25chatmessagerouting_test.cpp
+        ax25chatmessagerouting.cpp)
+    target_include_directories(ax25chat_message_routing_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_SOURCE_DIR}/src")
+    target_compile_features(ax25chat_message_routing_tests PRIVATE cxx_std_11)
+    target_link_libraries(ax25chat_message_routing_tests PRIVATE Qt6::Core)
 endif()
