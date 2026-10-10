@@ -33,6 +33,16 @@ int main(int argc, char *argv[])
     passed &= check(conversationId == QStringLiteral("DL1AAA-7"),
                     "conversation identity must be the canonical remote callsign");
 
+    ConversationId ssidOne;
+    ConversationId ssidTwo;
+    passed &= check(plugin.conversationIdForAddress(
+                        Jid::fromUserInput(QStringLiteral("DC6AP-1@ax25.invalid")), ssidOne) &&
+                    plugin.conversationIdForAddress(
+                        Jid::fromUserInput(QStringLiteral("DC6AP-2@ax25.invalid")), ssidTwo) &&
+                    ssidOne == QStringLiteral("DC6AP-1") &&
+                    ssidTwo == QStringLiteral("DC6AP-2") && ssidOne != ssidTwo,
+                    "the same AX.25 callsign with different SSIDs maps to distinct contacts");
+
     const Jid address = plugin.addressForConversation(conversationId);
     passed &= check(address.isValid() && address.node() == QStringLiteral("DL1AAA-7") &&
                         address.domain() == QStringLiteral("ax25.invalid"),

@@ -8,7 +8,8 @@ int main()
 {
     const QStringList validCallsigns = {
         QStringLiteral("DL1AAA"), QStringLiteral("dl1aaa-7"),
-        QStringLiteral("N0CALL-15"), QStringLiteral("A-0")
+        QStringLiteral("N0CALL-15"), QStringLiteral("A-0"),
+        QStringLiteral("123456"), QStringLiteral("123456-15")
     };
     for (const QString &callsign : validCallsigns) {
         if (!Ax25AccountConfig::isValidCallsign(callsign)) {

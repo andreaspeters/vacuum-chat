@@ -140,6 +140,24 @@ bool testAx25UiFrameRejectsInvalidAddressesAndFrames()
     return check(!Ax25Kiss::Ax25UiFrameCodec::decodeUiFrame(withRepeater, &ignored),
                  "direct-only AX.25 decoder rejects repeater address paths");
 }
+
+bool testAx25NumericCallsignAndSsidRoundTrip()
+{
+    QByteArray frame;
+    if (!check(Ax25Kiss::Ax25UiFrameCodec::encodeUiFrame(
+                   QStringLiteral("123456-15"), QStringLiteral("654321-1"),
+                   QByteArray("x"), &frame),
+               "AX.25 addresses may use a numeric-leading alphanumeric identifier"))
+        return false;
+
+    Ax25Kiss::Ax25UiFrame decoded;
+    if (!check(Ax25Kiss::Ax25UiFrameCodec::decodeUiFrame(frame, &decoded),
+               "numeric-leading AX.25 address decodes"))
+        return false;
+    return check(decoded.source == QStringLiteral("123456-15") &&
+                     decoded.destination == QStringLiteral("654321-1"),
+                 "AX.25 address round-trip preserves distinct nonzero SSIDs");
+}
 }
 
 int main()
@@ -148,7 +166,8 @@ int main()
                    testKissMultipleFramesAndFiltering() &&
                    testKissMalformedAndOversizedFrames() &&
                    testAx25UiFrameKnownVectorAndRoundTrip() &&
-                   testAx25UiFrameRejectsInvalidAddressesAndFrames()
+                   testAx25UiFrameRejectsInvalidAddressesAndFrames() &&
+                   testAx25NumericCallsignAndSsidRoundTrip()
                ? 0
                : 1;
 }

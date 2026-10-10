@@ -41,9 +41,8 @@ bool parseCallsign(const QString &input, QString *base, quint8 *ssid, QString *e
             return fail(QStringLiteral("SSID must be between 0 and 15"));
     }
 
-    if (call.isEmpty() || call.size() > 6 ||
-        call.at(0) < QLatin1Char('A') || call.at(0) > QLatin1Char('Z'))
-        return fail(QStringLiteral("Callsign base must start with a letter and be at most six characters"));
+    if (call.isEmpty() || call.size() > 6)
+        return fail(QStringLiteral("AX.25 address identifier must contain one to six characters"));
     for (const QChar character : call) {
         const bool letter = character >= QLatin1Char('A') && character <= QLatin1Char('Z');
         const bool digit = character >= QLatin1Char('0') && character <= QLatin1Char('9');
@@ -110,8 +109,8 @@ bool decodeAddress(const QByteArray &frame, int offset, bool mustBeLast,
             return fail(QStringLiteral("AX.25 callsign is malformed"));
         base.append(QLatin1Char(character));
     }
-    if (base.isEmpty() || base.at(0) < QLatin1Char('A') || base.at(0) > QLatin1Char('Z'))
-        return fail(QStringLiteral("AX.25 callsign base must start with a letter"));
+    if (base.isEmpty())
+        return fail(QStringLiteral("AX.25 address identifier is empty"));
 
     const quint8 ssidField = static_cast<quint8>(static_cast<unsigned char>(frame.at(offset + 6)));
     if ((ssidField & 0x60) != 0x60)

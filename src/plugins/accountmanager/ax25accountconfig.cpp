@@ -10,7 +10,7 @@ bool isValidCallsign(const QString &callsign)
         return false;
 
     static const QRegularExpression expression(
-        QStringLiteral("^[A-Z][A-Z0-9]{0,5}(?:-(?:[0-9]|1[0-5]))?$"),
+        QStringLiteral("^[A-Z0-9]{1,6}(?:-(?:[0-9]|1[0-5]))?$"),
         QRegularExpression::CaseInsensitiveOption);
     return expression.match(callsign).hasMatch();
 }
