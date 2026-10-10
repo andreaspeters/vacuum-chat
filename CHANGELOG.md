@@ -6,6 +6,7 @@
 - FIX:    [ui,matrix] stop to refresh whole chat after matrix sync.
 - FIX:    [ui] widget size in the account options.
 - ADD:    [ui,matrix] show user avatar of the account in the roaster.
+- ADD:    [ui,matrix,xmpp] send images via copy'n paste.
 
 ## v2.1.0
 

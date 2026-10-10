@@ -270,6 +270,14 @@
         <translation>Send</translation>
     </message>
     <message>
+        <source>Send image</source>
+        <translation>Send image</translation>
+    </message>
+    <message>
+        <source>Send at original size</source>
+        <translation>Send at original size</translation>
+    </message>
+    <message>
         <source>Next</source>
         <translation>Next</translation>
     </message>

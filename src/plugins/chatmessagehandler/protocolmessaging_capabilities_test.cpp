@@ -33,7 +33,7 @@ public:
         if (accountId != QStringLiteral("account-1") ||
             (!targetId.isEmpty() && targetId != QStringLiteral("room-1")))
             return CapabilityNone;
-        return CapabilityAddContact | CapabilitySetPresence;
+        return CapabilityAddContact | CapabilitySetPresence | CapabilitySendImage;
     }
 };
 }
@@ -76,8 +76,13 @@ int main()
     const auto addContact = IProtocolCapabilities::CapabilityAddContact;
     const auto setPresence = IProtocolCapabilities::CapabilitySetPresence;
     const auto editProfile = IProtocolCapabilities::CapabilityEditProfile;
+    const auto sendImage = IProtocolCapabilities::CapabilitySendImage;
     passed &= check(scoped.hasCapabilities(QStringLiteral("account-1"), addContact),
         "supported capability is available for the matching account");
+    passed &= check(scoped.hasCapabilities(QStringLiteral("account-1"), sendImage,
+        QStringLiteral("room-1")), "image sending is capability-gated for the matching conversation");
+    passed &= check(!unsupported.hasCapabilities(QStringLiteral("account-1"), sendImage),
+        "image sending defaults to unsupported unless advertised");
     passed &= check(scoped.hasCapabilities(QStringLiteral("account-1"), addContact | setPresence,
         QStringLiteral("room-1")), "combined request requires and receives every requested flag");
     passed &= check(!scoped.hasCapabilities(QStringLiteral("account-1"), addContact | editProfile),

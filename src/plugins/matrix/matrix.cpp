@@ -18,6 +18,7 @@
 #include <definitions/rosterindextyperole.h>
 
 #include <QByteArray>
+#include <QDebug>
 #include <QNetworkRequest>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -595,10 +596,11 @@ bool Matrix::initConnections(IPluginManager *APluginManager, int &AInitOrder)
 IProtocolCapabilities::Capabilities Matrix::capabilitiesForAccount(
 	const AccountId &accountId, const ConversationId &targetId) const
 {
-	if (accountId != this->accountId() || !FMatrixAccount || !FMatrixAccount->isActive() ||
-		!FMatrixAccount->isValid() || !FMatrixNetwork)
+	if ((accountId != this->accountId() && accountId != streamId()) || !FMatrixAccount ||
+		!FMatrixAccount->isActive() || !FMatrixAccount->isValid() || !FMatrixNetwork)
 		return IProtocolCapabilities::Capabilities();
 	IProtocolCapabilities::Capabilities capabilities(IProtocolCapabilities::CapabilitySetPresence);
+	capabilities |= IProtocolCapabilities::CapabilitySendImage;
 	if (!FNetworkLoggedIn)
 		return capabilities;
 	capabilities |= IProtocolCapabilities::CapabilityEditProfile;
@@ -1200,8 +1202,8 @@ bool Matrix::sendMessage(const BasicMessage &message)
 	QVariantMap metadata = message.metadata();
 	metadata.insert(QStringLiteral("txn_id"), transactionId);
 	metadata.insert(QStringLiteral("delivery_status"), QStringLiteral("sending"));
-	const QString messageType = metadata.value(QStringLiteral("msgtype"),
-		QStringLiteral("m.text")).toString();
+	const QString messageType = matrixMessageTypeForMetadata(metadata);
+	metadata.insert(QStringLiteral("msgtype"), messageType);
 	QString body = message.body();
 	MatrixTextMessagePayload textPayload;
 	if (messageType == QStringLiteral("m.text")) {

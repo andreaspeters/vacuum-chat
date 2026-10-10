@@ -21,7 +21,8 @@ public:
         CapabilityShowProfile = 1 << 7,
         CapabilityEditProfile = 1 << 8,
         CapabilitySendZeroHopAdvert = 1 << 9,
-        CapabilitySendFloodAdvert = 1 << 10
+        CapabilitySendFloodAdvert = 1 << 10,
+        CapabilitySendImage = 1 << 11
     };
     Q_DECLARE_FLAGS(Capabilities, Capability)
 
