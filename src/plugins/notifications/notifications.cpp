@@ -292,6 +292,12 @@ void Notifications::synchronizeProtocolNotifications()
 			bridged.data.insert(NDR_ROSTER_ICON,
 				IconStorage::staticStorage(RSR_STORAGE_MENUICONS)->getIcon(MNI_CHAT_MHANDLER_MESSAGE));
 			bridged.data.insert(NDR_ROSTER_CREATE_INDEX,false);
+			if (notification.kind == ProtocolNotification::Message ||
+				notification.kind == ProtocolNotification::Mention) {
+				const int rosterFlags = IRostersNotify::Blink | IRostersNotify::AllwaysVisible |
+					IRostersNotify::HookClicks | IRostersNotify::BlinkStatusIcon;
+				bridged.data.insert(NDR_ROSTER_FLAGS,rosterFlags);
+			}
 			const int notifyId = appendNotification(bridged);
 			FProtocolNotificationIds.insert(key,notifyId);
 			FProtocolNotificationKeys.insert(notifyId,key);

@@ -959,10 +959,15 @@ def test_matrix_cached_history_merges_pending_live_messages_by_full_timestamp():
         "void Matrix::emitCachedHistoryBatch(", 1)[0]
     assert "queueOrEmitHistoryMessage(message)" in network_message, \
         "live Matrix events must wait while cached history is being loaded"
-    assert "queueOrEmitHistoryMessage(event.toBasicMessage())" in history_changed, \
+    assert "enqueueProtocolEventBatch(events, roomId)" in history_changed, \
         "timeline refresh events must use the same pending-history path"
     assert "mergeHistoryMessagesChronologically" in cached_history, \
         "cached and pending events must be merged before they are rendered"
+    batch_start = matrix_source.index("void Matrix::processNextProtocolEventBatch(")
+    batch_end = matrix_source.index("\nvoid Matrix::onCachedHistoryLoadFailed(", batch_start)
+    event_batch = matrix_source[batch_start:batch_end]
+    assert "if (fromHistorySnapshot)" in event_batch
+    assert "queueOrEmitHistoryMessage(message)" in event_batch
     database_start = database_source.index(
         "QList<MatrixTimelineEvent> MatrixDatabase::getEvents(")
     database_end = database_source.index("\nQStringList MatrixDatabase::roomIds", database_start)
@@ -1061,8 +1066,9 @@ def test_matrix_live_event_waits_for_cached_history_before_chat_render():
     failed = matrix.split("void Matrix::onCachedHistoryLoadFailed(", 1)[1].split(
         "void Matrix::queueOrEmitHistoryMessage(", 1)[0]
     assert "finishHistoryLoad(roomId)" in cached and "finishHistoryLoad(roomId)" in failed
-    assert "finishHistoryLoad(roomId)" in batch and "FHistoryQueuedRooms" in batch, \
-        "the barrier must remain closed through all cached batches and then release pending events"
+    assert "finishHistoryLoad(roomId)" in batch
+    assert "FCachedHistoryRemainingByRoom.find(message.conversationId())" in batch
+    assert "--roomIt.value() == 0" in batch
     assert "FProtocolHistoryLoading" in received and "FPendingProtocolHistoryMessages" in received
     assert "FProtocolHistoryLoading" in history_render, \
         "opening a conversation must mark it loading before requesting asynchronous history"
@@ -1427,12 +1433,14 @@ def test_roster_notification_blink_and_muted_lamp_contract():
     status_icons = (root / "src/plugins/statusicons/statusicons.cpp").read_text()
 
     assert "BlinkStatusIcon = 0x10" in roster_interface
-    protocol_bridge = notifications.split("void Notifications::onProtocolNotificationsChanged", 1)[1].split(
+    protocol_bridge = notifications.split("void Notifications::synchronizeProtocolNotifications()", 1)[1].split(
         "void Notifications::onProtocolNotificationActivated", 1)[0]
     assert "ProtocolNotification::Message" in protocol_bridge
     assert "ProtocolNotification::Mention" in protocol_bridge
     assert "NDR_ROSTER_FLAGS" in protocol_bridge and "IRostersNotify::BlinkStatusIcon" in protocol_bridge
-    assert "rnotify.icon = (rnotify.flags & IRostersNotify::BlinkStatusIcon) > 0 ? QIcon() : icon;" in notifications
+    assert "rnotify.flags = record.notification.data.value(NDR_ROSTER_FLAGS).toInt();" in notifications
+    assert "record.notification.data.contains(NDR_ROSTER_ICON)" in notifications
+    assert "IRostersNotify::BlinkStatusIcon" in notifications
 
     roster_labels = roster_view.split("QList<quint32> RostersView::rosterLabels", 1)[1].split(
         "AdvancedDelegateItem RostersView::rosterLabel", 1)[0]
@@ -1455,7 +1463,7 @@ def test_roster_notification_blink_and_muted_lamp_contract():
     live_message = matrix.split("void Matrix::onNetworkMessageReceived", 1)[1].split(
         "void Matrix::onAvatarDataReceived", 1)[0]
     assert "FActiveConversationId = conversationId" in active_conversation
-    assert "message.conversationId() != FActiveConversationId" in live_message
+    assert "normalizedMessage.conversationId() != FActiveConversationId" in live_message
 
     assert "messageNotificationMuted" in status_icons
     assert "QPoint(2, pixmap.height() - 2), QPoint(pixmap.width() - 2, 2)" in status_icons

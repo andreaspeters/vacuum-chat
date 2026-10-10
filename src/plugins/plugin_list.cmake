@@ -1,4 +1,5 @@
 add_subdirectory(accountmanager)
+add_subdirectory(ax25chat)
 
 add_subdirectory(annotations)
 add_subdirectory(autostatus)

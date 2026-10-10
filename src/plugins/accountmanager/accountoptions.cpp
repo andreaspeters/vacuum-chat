@@ -21,6 +21,7 @@ AccountOptions::AccountOptions(IAccountManager *AManager, IPluginManager *APlugi
 	FAccountType->addItem(tr("Jabber / XMPP"), QStringLiteral("jabber"));
 	FAccountType->addItem(tr("Matrix"), QStringLiteral("matrix"));
 	FAccountType->addItem(tr("MeshCore"), QStringLiteral("meshcore"));
+	FAccountType->addItem(tr("AX.25 Chat"), QStringLiteral("ax25"));
 	if (QVBoxLayout *root = qobject_cast<QVBoxLayout *>(layout()))
 		root->insertWidget(0, FAccountType);
 
@@ -184,14 +185,35 @@ AccountOptions::AccountOptions(IAccountManager *AManager, IPluginManager *APlugi
 		root->insertWidget(2, FMeshCoreFields);
 	FMeshCoreFields->hide();
 
+	// AX.25 KISS serial account configuration.
+	FAx25Fields = new QWidget(this);
+	QFormLayout *ax25Layout = new QFormLayout(FAx25Fields);
+	FAx25Callsign = new QLineEdit(FAx25Fields);
+	FAx25Callsign->setPlaceholderText(QStringLiteral("DL1AAA-7"));
+	FAx25Port = new QLineEdit(FAx25Fields);
+	FAx25Port->setPlaceholderText(tr("e.g. /dev/ttyUSB0 or COM3"));
+	FAx25BaudRate = new QComboBox(FAx25Fields);
+	for (const int baudRate : {1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200})
+		FAx25BaudRate->addItem(QString::number(baudRate), baudRate);
+	FAx25BaudRate->setCurrentIndex(FAx25BaudRate->findData(115200));
+	ax25Layout->addRow(tr("Station callsign:"), FAx25Callsign);
+	ax25Layout->addRow(tr("KISS serial port:"), FAx25Port);
+	ax25Layout->addRow(tr("Baud rate:"), FAx25BaudRate);
+	if (QVBoxLayout *root = qobject_cast<QVBoxLayout *>(layout()))
+		root->insertWidget(3, FAx25Fields);
+	FAx25Fields->hide();
+
 	const auto updateAccountTypeUi = [this](int AIndex) {
 		const bool matrix = FAccountType->itemData(AIndex).toString() == QStringLiteral("matrix");
 		const bool meshcore = FAccountType->itemData(AIndex).toString() == QStringLiteral("meshcore");
-		ui.grbAccount->setVisible(!matrix && !meshcore);
+		const bool ax25 = FAccountType->itemData(AIndex).toString() == QStringLiteral("ax25");
+		ui.grbAccount->setVisible(!matrix && !meshcore && !ax25);
 		FMatrixFields->setVisible(matrix);
 		FMatrixFields->setEnabled(matrix);
 		FMeshCoreFields->setVisible(meshcore);
 		FMeshCoreFields->setEnabled(meshcore);
+		FAx25Fields->setVisible(ax25);
+		FAx25Fields->setEnabled(ax25);
 	};
 	connect(FAccountType, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
 		[this, updateAccountTypeUi](int AIndex) {
@@ -242,6 +264,10 @@ AccountOptions::AccountOptions(IAccountManager *AManager, IPluginManager *APlugi
 	connect(FMeshCoreTransport, QOverload<int>::of(&QComboBox::currentIndexChanged),
 		this, [this](int){ emit modified(); });
 	connect(FMeshCorePort,&QLineEdit::textChanged,this,[this](const QString &){ emit modified(); });
+	connect(FAx25Callsign, &QLineEdit::textChanged, this, [this](const QString &){ emit modified(); });
+	connect(FAx25Port, &QLineEdit::textChanged, this, [this](const QString &){ emit modified(); });
+	connect(FAx25BaudRate, QOverload<int>::of(&QComboBox::currentIndexChanged),
+		this, [this](int){ emit modified(); });
 
 	reset();
 }
@@ -265,15 +291,19 @@ void AccountOptions::apply()
 	{
 		const bool matrix = FAccountType->currentData().toString() == QStringLiteral("matrix");
 		const bool meshcore = FAccountType->currentData().toString() == QStringLiteral("meshcore");
+		const bool ax25 = FAccountType->currentData().toString() == QStringLiteral("ax25");
 		QString name = ui.lneName->text().trimmed();
 		if (name.isEmpty())
-			name = matrix ? FMatrixUsername->text().trimmed() : (meshcore ? QStringLiteral("@Meshcore") : ui.lneJabberId->text().trimmed());
+			name = matrix ? FMatrixUsername->text().trimmed() :
+				(meshcore ? QStringLiteral("@Meshcore") :
+				(ax25 ? FAx25Callsign->text().trimmed() : ui.lneJabberId->text().trimmed()));
 		if (name.isEmpty())
 			name = tr("New Account");
 
 		FAccount->setName(name);
 		OptionsNode accountOptions = FAccount->optionsNode();
-		accountOptions.setValue(matrix ? QStringLiteral("matrix") : (meshcore ? QStringLiteral("meshcore") : QStringLiteral("jabber")), "type");
+		accountOptions.setValue(matrix ? QStringLiteral("matrix") :
+			(meshcore ? QStringLiteral("meshcore") : (ax25 ? QStringLiteral("ax25") : QStringLiteral("jabber"))), "type");
 
 		bool changedJid = false;
 		if (matrix)
@@ -292,6 +322,14 @@ void AccountOptions::apply()
 			accountOptions.setValue(FMeshCorePort->text().trimmed(), "meshcore.port");
 			FAccount->setPassword(QString()); // Empty password for meshcore
 		}
+		else if (ax25)
+		{
+			accountOptions.setValue(QStringLiteral("kiss-serial"), "ax25.transport");
+			accountOptions.setValue(FAx25Callsign->text().trimmed().toUpper(), "ax25.callsign");
+			accountOptions.setValue(FAx25Port->text().trimmed(), "ax25.port");
+			accountOptions.setValue(FAx25BaudRate->currentData().toInt(), "ax25.baud-rate");
+			FAccount->setPassword(QString());
+		}
 		else
 		{
 			Jid jabberId = Jid::fromUserInput(ui.lneJabberId->text());
@@ -303,7 +341,10 @@ void AccountOptions::apply()
 
 		if (matrix && (FMatrixInstance->text().trimmed().isEmpty() || FMatrixUsername->text().trimmed().isEmpty()))
 			QMessageBox::warning(this,tr("Invalid Matrix Account"),tr("Account '%1' requires a Matrix instance and username").arg(name));
-		else if (!matrix && !meshcore && !FAccount->isValid())
+		else if (ax25 && !FAccount->isValid())
+			QMessageBox::warning(this, tr("Invalid AX.25 Account"),
+				tr("Account '%1' requires a valid station callsign, serial port, and baud rate.").arg(name));
+		else if (!matrix && !meshcore && !ax25 && !FAccount->isValid())
 			QMessageBox::warning(this,tr("Invalid Account"),tr("Account '%1' is not valid, change its Jabber ID").arg(name));
 		else if (changedJid && FAccount->isActive() && FAccount->xmppStream()->isConnected())
 			QMessageBox::information(NULL,tr("Delayed Apply"),tr("Some options of account '%1' will be applied after disconnect").arg(name));
@@ -346,6 +387,11 @@ void AccountOptions::reset()
 		const QString meshcorePort = FAccount->optionsNode().value("meshcore.port").toString();
 		FMeshCorePort->setText(meshcorePort.isEmpty()
 			? QStringLiteral("/dev/ttyACM0") : meshcorePort);
+		FAx25Callsign->setText(FAccount->optionsNode().value("ax25.callsign").toString());
+		FAx25Port->setText(FAccount->optionsNode().value("ax25.port").toString());
+		const int ax25BaudRate = FAccount->optionsNode().value("ax25.baud-rate").toInt();
+		const int ax25BaudIndex = FAx25BaudRate->findData(ax25BaudRate > 0 ? ax25BaudRate : 115200);
+		FAx25BaudRate->setCurrentIndex(ax25BaudIndex >= 0 ? ax25BaudIndex : 0);
 	}
 	emit childReset();
 }

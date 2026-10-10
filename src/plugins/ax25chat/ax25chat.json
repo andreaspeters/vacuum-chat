@@ -1,0 +1,6 @@
+{
+    "name": "AX.25 Chat",
+    "description": "Packet-radio chat over AX.25/KISS",
+    "version": "0.1.0",
+    "author": "Vacuum Chat contributors"
+}
