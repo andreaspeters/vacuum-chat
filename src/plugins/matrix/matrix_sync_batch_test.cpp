@@ -1,4 +1,5 @@
 #include "matrix.h"
+#include "matrixavatarkeypolicy.h"
 #include "matrixdatabase.h"
 #include "matrixnetwork.h"
 
@@ -51,6 +52,10 @@ public:
 	{
 		matrix.FNetworkUserId = userId;
 	}
+	static void setProtocolRooms(Matrix &matrix, const QList<ProtocolRoom> &rooms)
+	{
+		matrix.FProtocolRooms = rooms;
+	}
 	static QString latestConversationEventId(const Matrix &matrix, const QString &roomId)
 	{
 		return matrix.FLatestConversationEventIds.value(roomId);
@@ -101,6 +106,24 @@ int main(int argc, char **argv)
     QCoreApplication application(argc, argv);
     Matrix matrix;
     MatrixNetwork network;
+
+    const QString selfUserId = QStringLiteral("@self:example.org");
+    const QString selfAvatarUrl = QStringLiteral("mxc://example.org/self-avatar");
+    ProtocolRoom avatarRoom;
+    avatarRoom.id = QStringLiteral("!avatar-room:example.org");
+    ProtocolRosterEntry selfMember;
+    selfMember.id = selfUserId;
+    selfMember.avatarUrl = selfAvatarUrl;
+    avatarRoom.members.append(selfMember);
+    MatrixSyncBatchTestAccess::setNetworkUserId(matrix, selfUserId);
+    MatrixSyncBatchTestAccess::setProtocolRooms(matrix, {avatarRoom});
+    const QString expectedAvatarKey = MatrixAvatarKeyPolicy::userAvatarKey(
+        matrix.accountId(), selfUserId, selfAvatarUrl);
+    if (!check(matrix.accountAvatarKey() == expectedAvatarKey,
+            "account avatar key comes from the logged-in user's room profile"))
+        return 1;
+    MatrixSyncBatchTestAccess::setNetworkUserId(matrix, QString());
+    MatrixSyncBatchTestAccess::setProtocolRooms(matrix, {});
 
     QList<MatrixTextEvent> events;
     QStringList expectedIds;
