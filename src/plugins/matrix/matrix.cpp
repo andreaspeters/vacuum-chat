@@ -1560,20 +1560,43 @@ QString Matrix::userAvatarPath(const QString &conversationId, const QString &use
 	return QString();
 }
 
+QString Matrix::avatarUrlForUser(const QString &userId) const
+{
+	for (const ProtocolRoom &room : FProtocolRooms)
+		for (const ProtocolRosterEntry &member : room.members)
+			if (member.id == userId && !member.avatarUrl.isEmpty())
+				return member.avatarUrl;
+	return QString();
+}
+
 QString Matrix::userAvatarKey(const QString &conversationId, const QString &userId) const
 {
 	Q_UNUSED(conversationId);
-	QString avatarUrl;
-	for (const ProtocolRoom &room : FProtocolRooms) {
-		for (const ProtocolRosterEntry &member : room.members)
-			if (member.id == userId && !member.avatarUrl.isEmpty()) {
-				avatarUrl = member.avatarUrl;
-				break;
-			}
-		if (!avatarUrl.isEmpty())
-			break;
+	return MatrixAvatarKeyPolicy::userAvatarKey(accountId(), userId,
+		avatarUrlForUser(userId));
+}
+
+QString Matrix::accountAvatarKey() const
+{
+	if (FNetworkUserId.isEmpty())
+		return QString();
+	const QString avatarUrl = avatarUrlForUser(FNetworkUserId);
+	return avatarUrl.isEmpty() ? QString()
+		: MatrixAvatarKeyPolicy::userAvatarKey(accountId(), FNetworkUserId, avatarUrl);
+}
+
+void Matrix::loadAccountAvatar() const
+{
+	if (FNetworkUserId.isEmpty())
+		return;
+	const QString avatarUrl = avatarUrlForUser(FNetworkUserId);
+	if (avatarUrl.isEmpty())
+		return;
+	enqueueAvatarLoad(accountAvatarKey(), avatarUrl);
+	if (!FAvatarLoadScheduled && !FAvatarLoadQueue.isEmpty()) {
+		FAvatarLoadScheduled = true;
+		QTimer::singleShot(0, const_cast<Matrix *>(this), &Matrix::loadNextAvatar);
 	}
-	return MatrixAvatarKeyPolicy::userAvatarKey(accountId(), userId, avatarUrl);
 }
 
 bool Matrix::markConversationRead(const QString &conversationId, const QString &eventId)

@@ -534,10 +534,11 @@ IProtocolCapabilities::Capabilities MeshCorePlugin::capabilitiesForAccount(
         return capabilities;
 
     capabilities |= IProtocolCapabilities::CapabilityAddContact;
-    if (FProtocol->canSendSelfAdvert()) {
-        capabilities |= IProtocolCapabilities::CapabilitySendZeroHopAdvert;
-        capabilities |= IProtocolCapabilities::CapabilitySendFloodAdvert;
-    }
+    // Advert support is a connected-session capability, not an indication that
+    // the management channel is idle at this exact instant. The command path
+    // rechecks readiness when the user invokes the action.
+    capabilities |= IProtocolCapabilities::CapabilitySendZeroHopAdvert;
+    capabilities |= IProtocolCapabilities::CapabilitySendFloodAdvert;
     if (!targetId.isEmpty())
         capabilities |= IProtocolCapabilities::CapabilityViewHistory;
     return capabilities;

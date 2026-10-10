@@ -114,6 +114,8 @@ public:
 	virtual ProtocolRosterEntry entry(const QString &AId) const;
 	virtual ProtocolRoom room(const QString &AId) const;
 	virtual void loadRoomAvatar(const QString &roomId) const override;
+	QString accountAvatarKey() const override;
+	void loadAccountAvatar() const override;
 	virtual int show() const { return FShow; }
 	virtual QString status() const { return FStatus; }
 	Q_INVOKABLE void requestCurrentSync(const QString &accountId);
@@ -233,6 +235,7 @@ private:
 		const QList<BasicMessage> &cached, const QList<BasicMessage> &pending) const;
 	void loadNextAvatar();
 	void enqueueAvatarLoad(const QString &key, const QString &url) const;
+	QString avatarUrlForUser(const QString &userId) const;
 	void onCompleteCrossSigningKeysChecked(const QString &userId, bool complete);
 
 

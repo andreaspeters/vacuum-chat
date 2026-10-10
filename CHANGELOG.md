@@ -5,6 +5,7 @@
 - FIX:    [matrix] own messages moving from right to left.
 - FIX:    [ui,matrix] stop to refresh whole chat after matrix sync.
 - FIX:    [ui] widget size in the account options.
+- ADD:    [ui,matrix] show user avatar of the account in the roaster.
 
 ## v2.1.0
 

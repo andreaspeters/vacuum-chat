@@ -72,6 +72,8 @@ public:
 	virtual ProtocolRosterEntry entry(const QString &AId) const = 0;
 	virtual ProtocolRoom room(const QString &AId) const = 0;
 	virtual void loadRoomAvatar(const QString &roomId) const { (void)roomId; }
+	virtual QString accountAvatarKey() const { return {}; }
+	virtual void loadAccountAvatar() const {}
 	virtual ProtocolAccountIdentifier accountIdentifier() const { return {}; }
 };
 
