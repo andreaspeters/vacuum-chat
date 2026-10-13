@@ -140,7 +140,7 @@ bool DecorationHelper::updateImageFormatForResource(QTextDocument &document,
         return false;
 
     const bool matrixImage = resourceUrl.scheme() == QStringLiteral("vacuum-matrix-image");
-    const int widthLimit = matrixImage ? 400 :
+    const int widthLimit = matrixImage ? 200 :
         (availableWidth > 0 ? qMin(300, qMax(1, availableWidth / 2)) : 300);
     const qreal scale = matrixImage
         ? qreal(widthLimit) / sourceImageSize.width()
@@ -236,6 +236,13 @@ QRectF DecorationHelper::bubbleRectForContentWidth(const QRectF &currentRect,
     else
         result.setWidth(targetWidth);
     return result;
+}
+
+QRectF DecorationHelper::bubbleRectForDocumentContent(const QRectF &currentRect,
+    const QTextDocument &contentDocument, qreal horizontalInsets, bool outgoing)
+{
+    return bubbleRectForContentWidth(currentRect,
+        maximumImageDisplayWidth(contentDocument), horizontalInsets, outgoing);
 }
 
 qreal DecorationHelper::overlayHeightForContent(qreal contentHeight, qreal verticalInsets)

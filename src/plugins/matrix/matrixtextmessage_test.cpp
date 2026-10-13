@@ -61,5 +61,12 @@ int main(int argc, char **argv)
 		suppliedPayload.content.value(QStringLiteral("formatted_body")).toString(),
 		"local echo uses the normalized formatted_body");
 
+	QVariantMap imageMetadata;
+	imageMetadata.insert(QStringLiteral("media_type"), QStringLiteral("image"));
+	passed &= check(matrixMessageTypeForMetadata(imageMetadata) == QStringLiteral("m.image"),
+		"generic image attachment metadata maps to the Matrix image wire type");
+	passed &= check(matrixMessageTypeForMetadata(QVariantMap()) == QStringLiteral("m.text"),
+		"ordinary messages without a media type remain Matrix text messages");
+
 	return passed ? 0 : 1;
 }

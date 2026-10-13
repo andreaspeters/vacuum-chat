@@ -4,6 +4,11 @@
 - ADD:    [ui] notification notice.
 - FIX:    [matrix] own messages moving from right to left.
 - FIX:    [ui,matrix] stop to refresh whole chat after matrix sync.
+- FIX:    [ui] widget size in the account options.
+- ADD:    [ui,matrix] show user avatar of the account in the roaster.
+- ADD:    [ui,matrix,xmpp] send images via copy'n paste.
+- FIX:    [tools] Spellchecker
+- FIX:    [matrix] Chat history backfill didn't synced messages.
 
 ## v2.1.0
 

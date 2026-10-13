@@ -1,7 +1,9 @@
 #include "messagewidgets.h"
+#include "imagepastepolicy.h"
 
 #include <QPair>
 #include <QBuffer>
+#include <QDebug>
 #include <QMimeData>
 #include <QClipboard>
 #include <QTextBlock>
@@ -9,8 +11,46 @@
 #include <QTextDocument>
 #include <QTextDocumentWriter>
 #include <QUrlQuery>
+#include <QCheckBox>
+#include <QDir>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QImage>
+#include <QLabel>
+#include <QTemporaryDir>
+#include <QVBoxLayout>
+#include <interfaces/iprotocolcapabilities.h>
+#include <interfaces/ifiletransfer.h>
 
 #define ADR_CONTEXT_DATA        Action::DR_Parametr1
+
+static IProtocolMessaging *imagePasteMessaging(IPluginManager *pluginManager,
+	IChatWindow *window)
+{
+	if (!pluginManager || !window)
+		return NULL;
+	foreach (IPlugin *plugin, pluginManager->pluginInterface("IProtocolMessaging"))
+	{
+		IProtocolMessaging *messaging = qobject_cast<IProtocolMessaging *>(plugin->instance());
+		if (messaging && messaging->streamId() == window->accountId())
+			return messaging;
+	}
+	return NULL;
+}
+
+static bool canSendPastedImage(IPluginManager *pluginManager, IChatWindow *window)
+{
+	if (!pluginManager || !window)
+		return false;
+	foreach (IPlugin *plugin, pluginManager->pluginInterface("IProtocolCapabilities"))
+	{
+		IProtocolCapabilities *capabilities = qobject_cast<IProtocolCapabilities *>(plugin->instance());
+		if (capabilities && capabilities->hasCapabilities(window->accountId(),
+			IProtocolCapabilities::CapabilitySendImage, window->conversationId()))
+			return true;
+	}
+	return false;
+}
 
 MessageWidgets::MessageWidgets()
 {
@@ -22,7 +62,8 @@ MessageWidgets::MessageWidgets()
 
 MessageWidgets::~MessageWidgets()
 {
-
+	while (!FImageUploadDirs.isEmpty())
+		delete FImageUploadDirs.takeFirst();
 }
 
 void MessageWidgets::pluginInfo(IPluginInfo *APluginInfo)
@@ -192,10 +233,64 @@ bool MessageWidgets::editContentsCreate(int AOrder, IEditWidget *AWidget, QMimeD
 
 bool MessageWidgets::editContentsCanInsert(int AOrder, IEditWidget *AWidget, const QMimeData *AData)
 {
-	Q_UNUSED(AWidget);
 	if (AOrder == ECHO_MESSAGEWIDGETS_COPY_INSERT)
 	{
-		return AData->hasText() || AData->hasHtml();
+		if (AData->hasImage())
+		{
+			IChatWindow *chatWindow = NULL;
+			foreach (IChatWindow *window, FChatWindows)
+				if (window && window->editWidget() == AWidget)
+				{
+					chatWindow = window;
+					break;
+				}
+			const QList<IPlugin *> capabilityPlugins = FPluginManager
+				? FPluginManager->pluginInterface("IProtocolCapabilities") : QList<IPlugin *>();
+			const bool capabilityAllowed = canSendPastedImage(FPluginManager, chatWindow);
+			QStringList capabilityResults;
+			if (chatWindow)
+				foreach (IPlugin *plugin, capabilityPlugins)
+				{
+					IProtocolCapabilities *capabilities = qobject_cast<IProtocolCapabilities *>(plugin->instance());
+					if (capabilities)
+					{
+						const bool allowed = capabilities->hasCapabilities(chatWindow->accountId(),
+							IProtocolCapabilities::CapabilitySendImage, chatWindow->conversationId());
+						capabilityResults.append(QString("%1=%2")
+							.arg(plugin->instance()->metaObject()->className())
+							.arg(allowed ? "yes" : "no"));
+					}
+				}
+			qWarning() << "[IMAGE-PASTE-DIAG] hasImage=true"
+				<< "hasText=" << AData->hasText() << "hasHtml=" << AData->hasHtml()
+				<< "mimeFormats=" << AData->formats()
+				<< "matchingChatWindow=" << (chatWindow != NULL)
+				<< "capabilityPluginCount=" << capabilityPlugins.size()
+				<< "capabilityAllowed=" << capabilityAllowed
+				<< "capabilityResults=" << capabilityResults;
+			return capabilityAllowed;
+		}
+		const bool hasText = AData->hasText();
+		const bool hasHtml = AData->hasHtml();
+		if (!hasText && !hasHtml)
+		{
+			IChatWindow *chatWindow = NULL;
+			foreach (IChatWindow *window, FChatWindows)
+				if (window && window->editWidget() == AWidget)
+				{
+					chatWindow = window;
+					break;
+				}
+			const QList<IPlugin *> capabilityPlugins = FPluginManager
+				? FPluginManager->pluginInterface("IProtocolCapabilities") : QList<IPlugin *>();
+			const bool capabilityAllowed = canSendPastedImage(FPluginManager, chatWindow);
+			qWarning() << "[IMAGE-PASTE-DIAG] hasImage=false hasText=false hasHtml=false"
+				<< "mimeFormats=" << AData->formats()
+				<< "matchingChatWindow=" << (chatWindow != NULL)
+				<< "capabilityPluginCount=" << capabilityPlugins.size()
+				<< "capabilityAllowed=" << capabilityAllowed;
+		}
+		return hasText || hasHtml;
 	}
 	return false;
 }
@@ -204,6 +299,81 @@ bool MessageWidgets::editContentsInsert(int AOrder, IEditWidget *AWidget, const 
 {
 	if (AOrder == ECHO_MESSAGEWIDGETS_COPY_INSERT)
 	{
+		if (AData->hasImage())
+		{
+			IChatWindow *chatWindow = NULL;
+			foreach (IChatWindow *window, FChatWindows)
+				if (window && window->editWidget() == AWidget)
+				{
+					chatWindow = window;
+					break;
+				}
+			if (!canSendPastedImage(FPluginManager, chatWindow))
+				return false;
+			IProtocolMessaging *messaging = imagePasteMessaging(FPluginManager, chatWindow);
+
+			QImage image = qvariant_cast<QImage>(AData->imageData());
+			if (image.isNull())
+				return true;
+			QDialog dialog(AWidget->instance());
+			dialog.setWindowTitle(tr("Send image"));
+			QVBoxLayout *layout = new QVBoxLayout(&dialog);
+			QLabel *preview = new QLabel(&dialog);
+			preview->setAlignment(Qt::AlignCenter);
+			preview->setPixmap(QPixmap::fromImage(image).scaled(480, 360,
+				Qt::KeepAspectRatio, Qt::SmoothTransformation));
+			layout->addWidget(preview);
+			QCheckBox *originalSize = new QCheckBox(tr("Send at original size"), &dialog);
+			layout->addWidget(originalSize);
+			QDialogButtonBox *buttons = new QDialogButtonBox(
+				QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+			buttons->button(QDialogButtonBox::Ok)->setText(tr("Send"));
+			layout->addWidget(buttons);
+			connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+			connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+			if (dialog.exec() != QDialog::Accepted)
+				return true;
+
+			image = prepareImageForUpload(image, originalSize->isChecked());
+			QTemporaryDir *imageDirectory = new QTemporaryDir(
+				QDir::tempPath() + QStringLiteral("/vacuum-paste-XXXXXX"));
+			const QString filePath = imageDirectory->filePath(QStringLiteral("image.png"));
+			if (!imageDirectory->isValid() || !image.save(filePath, "PNG"))
+			{
+				delete imageDirectory;
+				return true;
+			}
+			bool sent = false;
+			if (messaging)
+			{
+				const QString fileName = QStringLiteral("image.png");
+				BasicMessage message(QString(), chatWindow->conversationId(), QString(), QString(),
+					fileName, QDateTime::currentDateTimeUtc(), messaging->protocol(), BasicMessage::Outgoing);
+				QVariantMap metadata;
+				metadata.insert(QStringLiteral("file_path"), filePath);
+				metadata.insert(QStringLiteral("mimetype"), QStringLiteral("image/png"));
+				metadata.insert(QStringLiteral("media_type"), QStringLiteral("image"));
+				message.setMetadata(metadata);
+				sent = messaging->sendMessage(message);
+			}
+			else
+			{
+				IPlugin *transferPlugin = FPluginManager->pluginInterface("IFileTransfer").value(0, NULL);
+				IFileTransfer *transfer = transferPlugin
+					? qobject_cast<IFileTransfer *>(transferPlugin->instance()) : NULL;
+				sent = transfer && transfer->isSupported(chatWindow->streamJid(), chatWindow->contactJid()) &&
+					transfer->sendFile(chatWindow->streamJid(), chatWindow->contactJid(), filePath) != NULL;
+			}
+			if (!sent)
+			{
+				delete imageDirectory;
+			}
+			else
+			{
+				FImageUploadDirs.append(imageDirectory);
+			}
+			return true;
+		}
 		if (editContentsCanInsert(AOrder,AWidget,AData))
 		{
 			QTextDocumentFragment fragment;

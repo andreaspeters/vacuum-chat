@@ -11,6 +11,8 @@ struct MatrixTextMessagePayload
 	QVariantMap localEchoMetadata;
 };
 
+QString matrixMessageTypeForMetadata(const QVariantMap &metadata);
+
 MatrixTextMessagePayload createMatrixTextMessagePayload(
 	const QString &body, const QVariantMap &metadata);
 

@@ -60,5 +60,9 @@
         <source>Failed to load history: %1</source>
         <translation type="unfinished"></translation>
     </message>
+    <message><source>Image</source><translation>Bild</translation></message>
+    <message><source>Save image</source><translation>Bild speichern</translation></message>
+    <message><source>Close</source><translation>Schließen</translation></message>
+    <message><source>The image could not be saved.</source><translation>Das Bild konnte nicht gespeichert werden.</translation></message>
 </context>
 </TS>

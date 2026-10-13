@@ -15,7 +15,8 @@ public:
 		ProtocolUnknown,
 		ProtocolXmpp,
 		ProtocolMatrix,
-		ProtocolMeshCore
+		ProtocolMeshCore,
+		ProtocolAx25
 	};
 
 	static ProtocolKind protocolKindForType(const QString &type)
@@ -27,6 +28,8 @@ public:
 			return ProtocolMatrix;
 		if (type.compare(QStringLiteral("meshcore"), Qt::CaseInsensitive) == 0)
 			return ProtocolMeshCore;
+		if (type.compare(QStringLiteral("ax25"), Qt::CaseInsensitive) == 0)
+			return ProtocolAx25;
 		return ProtocolUnknown;
 	}
 

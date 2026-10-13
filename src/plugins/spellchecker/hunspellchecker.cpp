@@ -75,7 +75,8 @@ QList<QString> HunspellChecker::dictionaries()
 
 void HunspellChecker::setCustomDictPath(const QString &APath)
 {
-	Q_UNUSED(APath);
+	if (!APath.isEmpty() && !FDictsPaths.contains(APath))
+		FDictsPaths.prepend(APath);
 }
 
 void HunspellChecker::setPersonalDictPath(const QString &APath)

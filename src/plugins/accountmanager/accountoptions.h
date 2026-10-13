@@ -75,6 +75,14 @@ private:
 	QBluetoothDeviceDiscoveryAgent *FMeshCoreBleDiscoveryAgent = nullptr;
 	bool FMeshCoreBleScanFailed = false;
 	MeshCoreBleDeviceCatalog FMeshCoreBleDeviceCatalog;
+
+	// AX.25 KISS serial fields
+	QWidget *FAx25Fields;
+	QComboBox *FAx25Transport;
+	QLineEdit *FAx25Callsign;
+	QLineEdit *FAx25Port;
+	QComboBox *FAx25BaudRate;
+	QComboBox *FAx25FlexPacketChannel;
 };
 
 #endif // ACCOUNTOPTIONS_H

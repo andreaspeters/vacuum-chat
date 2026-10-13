@@ -572,9 +572,8 @@ void StyleViewer::updateMessageBubbleGeometry()
 
 			const qreal frameInsets = qMax(0, overlay.frame->width() -
 				overlay.content->viewport()->width());
-			bubbleAnchorRect = DecorationHelper::bubbleRectForContentWidth(bubbleAnchorRect,
-				DecorationHelper::maximumImageDisplayWidth(*overlay.content->document()),
-				frameInsets, overlay.outgoing);
+			bubbleAnchorRect = DecorationHelper::bubbleRectForDocumentContent(bubbleAnchorRect,
+				*overlay.content->document(), frameInsets, overlay.outgoing);
 			if (bubbleAnchorRect.width() > overlay.frame->width())
 			{
 				overlay.frame->setGeometry(bubbleAnchorRect.translated(-scrollOffset).toAlignedRect());
@@ -617,14 +616,26 @@ void StyleViewer::updateMessageBubbleGeometry()
 			if (overlay.contentSizeDirty && overlay.content && overlay.content->document() &&
 				overlay.content->document()->documentLayout())
 			{
+				const QRectF currentRect = overlay.geometry.documentRect;
+				const qreal frameInsets = qMax(0, overlay.frame->width() -
+					overlay.content->viewport()->width());
+				const QRectF expandedRect = DecorationHelper::bubbleRectForDocumentContent(
+					currentRect, *overlay.content->document(), frameInsets, overlay.outgoing);
+				if (expandedRect.width() > currentRect.width())
+				{
+					overlay.geometry.documentRect = expandedRect;
+					overlay.frame->setGeometry(expandedRect.translated(-scrollOffset).toAlignedRect());
+					if (QLayout *layout = overlay.frame->layout())
+						layout->activate();
+				}
 				const int textWidth = overlay.content->viewport()->width();
 				if (textWidth > 0)
 					overlay.content->document()->setTextWidth(textWidth);
 				const qreal contentHeight = overlay.content->document()->documentLayout()->documentSize().height();
 				const QMargins margins = overlay.frame->layout()
 					? overlay.frame->layout()->contentsMargins() : QMargins();
-				const QRectF currentRect = overlay.geometry.documentRect;
-				DecorationHelper::initializeBubbleGeometry(overlay.geometry, currentRect,
+				DecorationHelper::initializeBubbleGeometry(overlay.geometry,
+					overlay.geometry.documentRect,
 					contentHeight, margins.top() + margins.bottom());
 				overlay.contentSizeDirty = false;
 				const qreal reactionHeight = overlay.reactionContent &&

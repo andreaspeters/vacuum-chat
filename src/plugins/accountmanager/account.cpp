@@ -1,4 +1,5 @@
 #include "account.h"
+#include "ax25accountconfig.h"
 
 #include <QUrl>
 
@@ -22,6 +23,7 @@ bool Account::isValid() const
 	const QString type = FOptionsNode.value("type").toString();
 	const bool matrix = type.compare("matrix", Qt::CaseInsensitive) == 0;
 	const bool meshcore = type.compare("meshcore", Qt::CaseInsensitive) == 0;
+	const bool ax25 = type.compare("ax25", Qt::CaseInsensitive) == 0;
 
 	if (matrix)
 	{
@@ -49,6 +51,19 @@ bool Account::isValid() const
 			return !FOptionsNode.value("meshcore.mac").toString().trimmed().isEmpty();
 		return !FOptionsNode.value("meshcore.port").toString().trimmed().isEmpty();
 	}
+	else if (ax25)
+	{
+		const QString transport = FOptionsNode.value("ax25.transport").toString();
+		const QString callsign = FOptionsNode.value("ax25.callsign").toString();
+		if (transport == QStringLiteral("kiss-serial"))
+			return Ax25AccountConfig::isValidSerialSettings(callsign,
+				FOptionsNode.value("ax25.port").toString(),
+				FOptionsNode.value("ax25.baud-rate").toInt());
+		if (transport == QStringLiteral("flexpacket-pipe"))
+			return Ax25AccountConfig::isValidFlexPacketSettings(callsign,
+				FOptionsNode.value("ax25.flexpacket-channel").toInt());
+		return false;
+	}
 	else
 	{
 		Jid sJid = streamJid();
@@ -74,8 +89,9 @@ void Account::setActive(bool AActive)
 {
 	const bool matrix = protocolKind() == ProtocolMatrix;
 	const bool meshcore = protocolKind() == ProtocolMeshCore;
+	const bool ax25 = protocolKind() == ProtocolAx25;
 
-	if (matrix || meshcore)
+	if (matrix || meshcore || ax25)
 	{
 		if (AActive && !FActive && isValid())
 		{

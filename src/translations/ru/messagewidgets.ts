@@ -270,6 +270,14 @@
         <translation>Отправить</translation>
     </message>
     <message>
+        <source>Send image</source>
+        <translation>Отправить изображение</translation>
+    </message>
+    <message>
+        <source>Send at original size</source>
+        <translation>Отправить в исходном размере</translation>
+    </message>
+    <message>
         <source>Next</source>
         <translation>Следующее</translation>
     </message>

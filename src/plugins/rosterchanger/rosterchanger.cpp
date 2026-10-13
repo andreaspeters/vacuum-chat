@@ -1,5 +1,6 @@
 #include "rosterchanger.h"
 #include "protocolcontactactionpolicy.h"
+#include "protocolroomactionpolicy.h"
 
 #include <QMap>
 #include <QDropEvent>
@@ -836,6 +837,62 @@ bool RosterChanger::showProtocolAddContactDialog(const QString &AAccountId)
 	return false;
 }
 
+bool RosterChanger::showProtocolJoinRoomDialog(const QString &AAccountId)
+{
+	if (!FPluginManager || AAccountId.isEmpty())
+		return false;
+
+	IPlugin *accountPlugin = FPluginManager->pluginInterface("IAccountManager").value(0, NULL);
+	IAccountManager *accountManager = accountPlugin
+		? qobject_cast<IAccountManager *>(accountPlugin->instance()) : NULL;
+	const QUuid persistentAccountId = QUuid::fromString(AAccountId);
+	IAccount *account = accountManager && !persistentAccountId.isNull()
+		? accountManager->accountById(persistentAccountId) : NULL;
+	if (!account || !account->isActive() || account->accountId() != persistentAccountId)
+		return false;
+
+	for (IPlugin *plugin : FPluginManager->pluginInterface("IProtocolCapabilities"))
+	{
+		QObject *instance = plugin ? plugin->instance() : NULL;
+		IProtocolCapabilities *capabilities = instance
+			? qobject_cast<IProtocolCapabilities *>(instance) : NULL;
+		IProtocolRoomActions *actions = instance
+			? qobject_cast<IProtocolRoomActions *>(instance) : NULL;
+		if (dispatchJoinRoomAction(capabilities, actions, AAccountId))
+			return true;
+	}
+	return false;
+}
+
+bool RosterChanger::leaveProtocolRoom(const QString &AAccountId,
+	const QString &AStreamId, const QString &ARoomId)
+{
+	if (!FPluginManager || AAccountId.isEmpty() || AStreamId.isEmpty() || ARoomId.isEmpty())
+		return false;
+
+	IPlugin *accountPlugin = FPluginManager->pluginInterface("IAccountManager").value(0, NULL);
+	IAccountManager *accountManager = accountPlugin
+		? qobject_cast<IAccountManager *>(accountPlugin->instance()) : NULL;
+	const QUuid persistentAccountId = QUuid::fromString(AAccountId);
+	IAccount *account = accountManager && !persistentAccountId.isNull()
+		? accountManager->accountById(persistentAccountId) : NULL;
+	if (!account || !account->isActive() || account->accountId() != persistentAccountId)
+		return false;
+
+	for (IPlugin *plugin : FPluginManager->pluginInterface("IProtocolRoster"))
+	{
+		QObject *instance = plugin ? plugin->instance() : NULL;
+		IProtocolRoster *roster = instance
+			? qobject_cast<IProtocolRoster *>(instance) : NULL;
+		if (!roster || roster->streamId() != AStreamId || roster->accountId() != AAccountId)
+			continue;
+		IProtocolCapabilities *capabilities = qobject_cast<IProtocolCapabilities *>(instance);
+		IProtocolRoomActions *actions = qobject_cast<IProtocolRoomActions *>(instance);
+		return dispatchLeaveRoomAction(capabilities, actions, AAccountId, ARoomId);
+	}
+	return false;
+}
+
 bool RosterChanger::sendProtocolSelfAdvert(const QString &AAccountId,
 	const QString &AStreamId, IProtocolAdvertActions::AdvertType AType)
 {
@@ -871,6 +928,23 @@ void RosterChanger::onShowProtocolAddContactDialog(bool)
 	Action *action = qobject_cast<Action *>(sender());
 	if (action)
 		showProtocolAddContactDialog(action->data(Action::DR_Parametr1).toString());
+}
+
+void RosterChanger::onShowProtocolJoinRoomDialog(bool)
+{
+	Action *action = qobject_cast<Action *>(sender());
+	if (action)
+		showProtocolJoinRoomDialog(action->data(Action::DR_Parametr1).toString());
+}
+
+void RosterChanger::onLeaveProtocolRoom(bool)
+{
+	Action *action = qobject_cast<Action *>(sender());
+	if (!action)
+		return;
+	leaveProtocolRoom(action->data(Action::DR_Parametr1).toString(),
+		action->data(Action::DR_Parametr2).toString(),
+		action->data(Action::DR_Parametr3).toString());
 }
 
 void RosterChanger::onSendProtocolAdvert(bool)
@@ -979,6 +1053,23 @@ void RosterChanger::onRosterIndexContextMenu(const QList<IRosterIndex *> &AIndex
 			if (!accountId.isEmpty() && FPluginManager)
 			{
 				const QString protocolStreamId = AIndexes.first()->data(RDR_ACCOUNT_ID).toString();
+				for (IPlugin *plugin : FPluginManager->pluginInterface("IProtocolCapabilities"))
+				{
+					QObject *instance = plugin ? plugin->instance() : NULL;
+					IProtocolCapabilities *capabilities = instance
+						? qobject_cast<IProtocolCapabilities *>(instance) : NULL;
+					IProtocolRoomActions *roomActions = instance
+						? qobject_cast<IProtocolRoomActions *>(instance) : NULL;
+					if (!canOfferJoinRoomAction(capabilities, roomActions, accountId))
+						continue;
+					Action *joinAction = new Action(AMenu);
+					joinAction->setText(tr("Join room..."));
+					joinAction->setData(Action::DR_Parametr1, accountId);
+					connect(joinAction, SIGNAL(triggered(bool)),
+						SLOT(onShowProtocolJoinRoomDialog(bool)));
+					AMenu->addAction(joinAction, AG_RVCM_RCHANGER);
+					break;
+				}
 				for (IPlugin *plugin : FPluginManager->pluginInterface("IProtocolRoster"))
 				{
 					QObject *instance = plugin ? plugin->instance() : NULL;
@@ -1041,6 +1132,36 @@ void RosterChanger::onRosterIndexContextMenu(const QList<IRosterIndex *> &AIndex
 					action->setShortcutId(SCT_ROSTERVIEW_ADDCONTACT);
 					connect(action,SIGNAL(triggered(bool)),SLOT(onShowProtocolAddContactDialog(bool)));
 					AMenu->addAction(action,AG_RVCM_RCHANGER_ADD_CONTACT,true);
+					break;
+				}
+			}
+		}
+		if ((indexType == RIT_CONTACT || indexType == RIT_AGENT) &&
+			AIndexes.count() == 1 && FPluginManager)
+		{
+			IRosterIndex *index = AIndexes.first();
+			const QString roomId = index->data(RDR_CONVERSATION_ID).toString();
+			const QString protocolStreamId = index->data(RDR_ACCOUNT_ID).toString();
+			const QString accountId = protocolAccountIdForRoot(index);
+			if (!roomId.isEmpty() && !protocolStreamId.isEmpty() && !accountId.isEmpty())
+			{
+				for (IPlugin *plugin : FPluginManager->pluginInterface("IProtocolCapabilities"))
+				{
+					QObject *instance = plugin ? plugin->instance() : NULL;
+					IProtocolCapabilities *capabilities = instance
+						? qobject_cast<IProtocolCapabilities *>(instance) : NULL;
+					IProtocolRoomActions *roomActions = instance
+						? qobject_cast<IProtocolRoomActions *>(instance) : NULL;
+					if (!canOfferLeaveRoomAction(capabilities, roomActions, accountId, roomId))
+						continue;
+					Action *leaveAction = new Action(AMenu);
+					leaveAction->setText(tr("Leave room"));
+					leaveAction->setData(Action::DR_Parametr1, accountId);
+					leaveAction->setData(Action::DR_Parametr2, protocolStreamId);
+					leaveAction->setData(Action::DR_Parametr3, roomId);
+					connect(leaveAction, SIGNAL(triggered(bool)),
+						SLOT(onLeaveProtocolRoom(bool)));
+					AMenu->addAction(leaveAction, AG_RVCM_RCHANGER);
 					break;
 				}
 			}

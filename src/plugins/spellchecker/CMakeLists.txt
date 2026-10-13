@@ -35,4 +35,14 @@ else (SPELLCHECKER_BACKEND STREQUAL "ASPELL")
 	message(FATAL_ERROR "Please specify correct backend name, only aspell, enchant, hunspell, macspell supported")
 endif (SPELLCHECKER_BACKEND STREQUAL "ASPELL")
 
+if (BUILD_TESTING AND SPELLCHECKER_BACKEND STREQUAL "HUNSPELL")
+	add_executable(hunspellchecker_highlighting_tests EXCLUDE_FROM_ALL
+		hunspellchecker_highlighting_test.cpp
+		hunspellchecker.cpp
+		spellbackend.cpp
+		spellhighlighter.cpp)
+	target_include_directories(hunspellchecker_highlighting_tests PRIVATE "${CMAKE_SOURCE_DIR}/src")
+	target_link_libraries(hunspellchecker_highlighting_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Xml ${ADD_LIBS})
+endif ()
+
 include("${CMAKE_SOURCE_DIR}/src/plugins/plugins.cmake")

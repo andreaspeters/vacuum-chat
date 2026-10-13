@@ -104,6 +104,8 @@ public:
     { (void)conversationId; (void)eventId; return false; }
     virtual MessageId latestConversationEventId(const ConversationId &conversationId) const
     { (void)conversationId; return QString(); }
+    virtual bool requestConversationHistorySync(const ConversationId &conversationId) const
+    { (void)conversationId; return false; }
 };
 
 Q_DECLARE_INTERFACE(IProtocolMessaging, "Vacuum.Plugin.IProtocolMessaging/1.0")

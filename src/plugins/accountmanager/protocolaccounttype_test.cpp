@@ -12,6 +12,7 @@ int main()
         {QStringLiteral("xmpp"), IProtocolAccount::ProtocolXmpp},
         {QStringLiteral("matrix"), IProtocolAccount::ProtocolMatrix},
         {QStringLiteral("meshcore"), IProtocolAccount::ProtocolMeshCore},
+        {QStringLiteral("ax25"), IProtocolAccount::ProtocolAx25},
         {QStringLiteral("future-protocol"), IProtocolAccount::ProtocolUnknown}
     };
     for (const Case &test : cases) {

@@ -2137,6 +2137,16 @@ void MatrixNetwork::sendRoomEvent(const QString &roomId, const QString &eventTyp
 	pending.content = content.value(QStringLiteral("body")).toString();
 	pending.metadata.insert(QStringLiteral("txn_id"), txId);
 	pending.metadata.insert(QStringLiteral("event_type"), eventType);
+	if (eventType == QStringLiteral("m.room.message") && !pending.messageType.isEmpty()) {
+		pending.metadata.insert(QStringLiteral("msgtype"), pending.messageType);
+		if (pending.messageType == QStringLiteral("m.image") ||
+			pending.messageType == QStringLiteral("m.file")) {
+			for (const QString &field : {QStringLiteral("url"), QStringLiteral("file"),
+				QStringLiteral("info")})
+				if (content.contains(field))
+					pending.metadata.insert(field, content.value(field).toVariant());
+		}
+	}
 	const QJsonObject relation = content.value(QStringLiteral("m.relates_to")).toObject();
 	if (!relation.isEmpty()) {
 		pending.metadata.insert(QStringLiteral("relation_type"), relation.value(QStringLiteral("rel_type")).toString());
@@ -3648,6 +3658,7 @@ void MatrixNetwork::onSyncFinished(QNetworkReply *reply)
 	}
 	QString nextBatch = obj.value("next_batch").toString();
 	QList<MatrixTextEvent> events;
+	QSet<QString> limitedTimelineRooms;
 	const QJsonObject rooms = obj.value("rooms").toObject();
 	const QJsonObject joined = rooms.value("join").toObject();
 
@@ -4836,11 +4847,14 @@ void MatrixNetwork::onSyncFinished(QNetworkReply *reply)
 		}
 
 		// Parse timeline events
-		const QJsonObject timeline = roomData.value("timeline").toObject();
+		const QJsonObject timeline = roomData.value(QStringLiteral("timeline")).toObject();
 		if (timeline.value(QStringLiteral("limited")).toBool())
 			FLimitedRooms.insert(roomId);
 		else
 			FLimitedRooms.remove(roomId);
+		if (timeline.value(QStringLiteral("limited")).toBool() &&
+			!timeline.value(QStringLiteral("events")).toArray().isEmpty())
+			limitedTimelineRooms.insert(roomId);
 		const QString prevBatch = timeline.value(QStringLiteral("prev_batch")).toString();
 		if (!prevBatch.isEmpty())
 			FRoomPrevBatch.insert(roomId, prevBatch);
@@ -5271,6 +5285,16 @@ void MatrixNetwork::onSyncFinished(QNetworkReply *reply)
 		}
 		FSyncToken = nextBatch;
 	}
+	// A limited /sync timeline means the server omitted an older part of this
+	// room's timeline. Start Matrix /messages recovery independently of whether
+	// the user has already opened that conversation (startup can race UI setup).
+	for (const QString &roomId : limitedTimelineRooms) {
+		if (FRoomPrevBatch.value(roomId).isEmpty())
+			continue;
+		QMetaObject::invokeMethod(this, [this, roomId]() {
+			historyBackfill(roomId, 50);
+		}, Qt::QueuedConnection);
+	}
 	FInitialSyncComplete = true;
 	if (wasInitialSync) {
 		emit initialSyncCompleted();
@@ -5460,31 +5484,47 @@ QList<MatrixTextEvent> MatrixNetwork::historyBackfill(const QString &roomId, int
 	request.setRawHeader("Authorization", QByteArray("Bearer ").append(FAccesToken.toUtf8()));
 
 	QNetworkReply *reply = FNetworkAccessManager->get(request);
+	QPointer<MatrixNetwork> networkGuard(this);
+	QPointer<QNetworkReply> replyGuard(reply);
 	QEventLoop loop;
 	QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
 	loop.exec();
 
-	if (reply->error() != QNetworkReply::NoError) {
-		qWarning() << "Backfill error:" << reply->errorString();
+	// The nested event loop can run shutdown/deferred-delete callbacks. Do not
+	// dereference the worker or reply if either was destroyed while it ran.
+	if (!networkGuard || !replyGuard)
 		return QList<MatrixTextEvent>();
-	}
 	if (FRoomPrevBatch.value(roomId) != prevBatch) {
 		qWarning() << "Discarding stale backfill response for room" << roomId;
+		replyGuard->deleteLater();
 		return QList<MatrixTextEvent>();
 	}
 
-	QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+	if (replyGuard->error() != QNetworkReply::NoError) {
+		const QString errorString = replyGuard->errorString();
+		replyGuard->deleteLater();
+		qWarning() << "Backfill error:" << errorString;
+		return QList<MatrixTextEvent>();
+	}
+
+	const QByteArray responseBody = replyGuard->readAll();
+	replyGuard->deleteLater();
+	QJsonDocument doc = QJsonDocument::fromJson(responseBody);
 	QJsonObject root = doc.object();
 	QJsonArray events = root.value(QStringLiteral("chunk")).toArray();
 
 	QList<MatrixTextEvent> result;
 	QList<MatrixTimelineEvent> persistedEvents;
+	bool reachedExistingEvent = false;
 	for (const QJsonValue &val : events) {
 		const QJsonObject obj = val.toObject();
 		MatrixTextEvent evt;
 		evt.roomId = roomId;
 		evt.eventId = obj.value(QStringLiteral("event_id")).toString();
 		evt.userId = obj.value(QStringLiteral("sender")).toString();
+		evt.metadata.insert(QStringLiteral("sender_is_self"),
+			evt.userId == FUserId);
+		evt.metadata.insert(QStringLiteral("sender_id"), evt.userId);
 
 		const QJsonObject contentObj = obj.value(QStringLiteral("content")).toObject();
 		evt.eventType = obj.value(QStringLiteral("type")).toString();
@@ -5492,6 +5532,9 @@ QList<MatrixTextEvent> MatrixNetwork::historyBackfill(const QString &roomId, int
 		if (evt.eventType == QStringLiteral("m.room.message")) {
 			const QString messageType = contentObj.value(QStringLiteral("msgtype")).toString();
 			evt.messageType = messageType;
+			evt.metadata.insert(QStringLiteral("msgtype"), messageType);
+			evt.metadata.insert(QStringLiteral("event_type"), evt.eventType);
+			evt.metadata.insert(QStringLiteral("body"), contentObj.value(QStringLiteral("body")).toString());
 			if (messageType == QStringLiteral("m.text")) {
 				evt.content = contentObj.value(QStringLiteral("body")).toString();
 			} else if (messageType == QStringLiteral("m.emote")) {
@@ -5508,6 +5551,7 @@ QList<MatrixTextEvent> MatrixNetwork::historyBackfill(const QString &roomId, int
 
 		const qint64 timestamp = obj.value(QStringLiteral("origin_server_ts")).toVariant().toLongLong();
 		evt.timestamp = QString::number(timestamp);
+		evt.metadata.insert(QStringLiteral("message_type"), evt.messageType);
 		MatrixTimelineEvent stored;
 		stored.roomId = roomId;
 		stored.eventId = evt.eventId;
@@ -5521,33 +5565,41 @@ QList<MatrixTextEvent> MatrixNetwork::historyBackfill(const QString &roomId, int
 		if (mergeMessageEvent(evt, true)) {
 			persistedEvents.append(stored);
 			result.append(evt);
+		} else if (!evt.eventId.isEmpty()) {
+			reachedExistingEvent = true;
 		}
 	}
-	if (!persistedEvents.isEmpty()) {
-		bool backfillSaved = false;
-		runDatabase([&](MatrixDatabase &database) {
-			backfillSaved = database.appendTimelineEvents(roomId, persistedEvents);
-		});
-		if (!backfillSaved)
-			qWarning() << "Failed to persist Matrix backfill events" << roomId;
-	}
 
-	// Update token if available
-	QString nextToken = root.value(QStringLiteral("end")).toString();
-	if (!nextToken.isEmpty()) {
-		FRoomPrevBatch[roomId] = nextToken;
-		bool boundarySaved = false;
-		runDatabase([&](MatrixDatabase &database) {
-			boundarySaved = database.saveRoomTimelineBoundary(roomId, nextToken,
-				FLimitedRooms.contains(roomId));
-		});
-		if (!boundarySaved)
-			qWarning() << "Failed to persist Matrix backfill boundary" << roomId;
+	// Persist each page and its cursor together. Advancing only after a durable
+	// page write prevents a failed insert from permanently skipping events.
+	const QString nextToken = root.value(QStringLiteral("end")).toString();
+	bool backfillSaved = false;
+	runDatabase([&](MatrixDatabase &database) {
+		backfillSaved = database.persistHistoryBackfillPage(roomId, persistedEvents,
+			nextToken, FLimitedRooms.contains(roomId));
+	});
+	if (!backfillSaved) {
+		qWarning() << "Failed to persist Matrix backfill page" << roomId;
+		return result;
 	}
+	if (nextToken.isEmpty())
+		FRoomPrevBatch.remove(roomId);
+	else
+		FRoomPrevBatch[roomId] = nextToken;
 
 	if (!result.isEmpty())
 		saveMessageHistory();
 	emit messageHistoryChanged(roomId, FMessageHistory.value(roomId));
+
+	// Continue from the next opaque Matrix token until reaching an event already
+	// cached locally or exhausting the server cursor. Queue one page at a time so
+	// sync and other network work can run between requests.
+	if (!reachedExistingEvent && !nextToken.isEmpty() && nextToken != prevBatch &&
+		FRoomPrevBatch.value(roomId) == nextToken) {
+		QMetaObject::invokeMethod(this, [this, roomId, limit]() {
+			historyBackfill(roomId, limit);
+		}, Qt::QueuedConnection);
+	}
 	return result;
 }
 

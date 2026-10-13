@@ -18,6 +18,7 @@
 #include <definitions/rosterindextyperole.h>
 
 #include <QByteArray>
+#include <QDebug>
 #include <QNetworkRequest>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -595,10 +596,11 @@ bool Matrix::initConnections(IPluginManager *APluginManager, int &AInitOrder)
 IProtocolCapabilities::Capabilities Matrix::capabilitiesForAccount(
 	const AccountId &accountId, const ConversationId &targetId) const
 {
-	if (accountId != this->accountId() || !FMatrixAccount || !FMatrixAccount->isActive() ||
-		!FMatrixAccount->isValid() || !FMatrixNetwork)
+	if ((accountId != this->accountId() && accountId != streamId()) || !FMatrixAccount ||
+		!FMatrixAccount->isActive() || !FMatrixAccount->isValid() || !FMatrixNetwork)
 		return IProtocolCapabilities::Capabilities();
 	IProtocolCapabilities::Capabilities capabilities(IProtocolCapabilities::CapabilitySetPresence);
+	capabilities |= IProtocolCapabilities::CapabilitySendImage;
 	if (!FNetworkLoggedIn)
 		return capabilities;
 	capabilities |= IProtocolCapabilities::CapabilityEditProfile;
@@ -1200,8 +1202,8 @@ bool Matrix::sendMessage(const BasicMessage &message)
 	QVariantMap metadata = message.metadata();
 	metadata.insert(QStringLiteral("txn_id"), transactionId);
 	metadata.insert(QStringLiteral("delivery_status"), QStringLiteral("sending"));
-	const QString messageType = metadata.value(QStringLiteral("msgtype"),
-		QStringLiteral("m.text")).toString();
+	const QString messageType = matrixMessageTypeForMetadata(metadata);
+	metadata.insert(QStringLiteral("msgtype"), messageType);
 	QString body = message.body();
 	MatrixTextMessagePayload textPayload;
 	if (messageType == QStringLiteral("m.text")) {
@@ -1376,6 +1378,19 @@ bool Matrix::supportsOlderHistory(const ConversationId &conversationId) const
 	return !conversationId.isEmpty() && FDatabaseWorker &&
 		!FDatabaseProfileDirectory.isEmpty() && !FDatabaseServerUrl.isEmpty() &&
 		!FDatabaseUserId.isEmpty();
+}
+
+bool Matrix::requestConversationHistorySync(const ConversationId &conversationId) const
+{
+	if (conversationId.isEmpty() || !FNetworkLoggedIn || !FMatrixNetwork ||
+		room(conversationId).id.isEmpty())
+		return false;
+
+	MatrixNetwork *network = FMatrixNetwork;
+	const QString roomId = conversationId;
+	return QMetaObject::invokeMethod(network, [network, roomId]() {
+		network->historyBackfill(roomId, 50);
+	}, Qt::QueuedConnection);
 }
 
 bool Matrix::requestOlderHistoryPage(const ConversationId &conversationId,
@@ -1560,20 +1575,43 @@ QString Matrix::userAvatarPath(const QString &conversationId, const QString &use
 	return QString();
 }
 
+QString Matrix::avatarUrlForUser(const QString &userId) const
+{
+	for (const ProtocolRoom &room : FProtocolRooms)
+		for (const ProtocolRosterEntry &member : room.members)
+			if (member.id == userId && !member.avatarUrl.isEmpty())
+				return member.avatarUrl;
+	return QString();
+}
+
 QString Matrix::userAvatarKey(const QString &conversationId, const QString &userId) const
 {
 	Q_UNUSED(conversationId);
-	QString avatarUrl;
-	for (const ProtocolRoom &room : FProtocolRooms) {
-		for (const ProtocolRosterEntry &member : room.members)
-			if (member.id == userId && !member.avatarUrl.isEmpty()) {
-				avatarUrl = member.avatarUrl;
-				break;
-			}
-		if (!avatarUrl.isEmpty())
-			break;
+	return MatrixAvatarKeyPolicy::userAvatarKey(accountId(), userId,
+		avatarUrlForUser(userId));
+}
+
+QString Matrix::accountAvatarKey() const
+{
+	if (FNetworkUserId.isEmpty())
+		return QString();
+	const QString avatarUrl = avatarUrlForUser(FNetworkUserId);
+	return avatarUrl.isEmpty() ? QString()
+		: MatrixAvatarKeyPolicy::userAvatarKey(accountId(), FNetworkUserId, avatarUrl);
+}
+
+void Matrix::loadAccountAvatar() const
+{
+	if (FNetworkUserId.isEmpty())
+		return;
+	const QString avatarUrl = avatarUrlForUser(FNetworkUserId);
+	if (avatarUrl.isEmpty())
+		return;
+	enqueueAvatarLoad(accountAvatarKey(), avatarUrl);
+	if (!FAvatarLoadScheduled && !FAvatarLoadQueue.isEmpty()) {
+		FAvatarLoadScheduled = true;
+		QTimer::singleShot(0, const_cast<Matrix *>(this), &Matrix::loadNextAvatar);
 	}
-	return MatrixAvatarKeyPolicy::userAvatarKey(accountId(), userId, avatarUrl);
 }
 
 bool Matrix::markConversationRead(const QString &conversationId, const QString &eventId)

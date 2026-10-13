@@ -84,9 +84,9 @@ int main(int argc, char *argv[])
     const bool resizedLateImage = DecorationHelper::updateImageFormatForResource(
         lateImageDocument, lateImageUrl, QSize(1600, 900), 800);
     const QTextImageFormat resizedImageFormat = findImageFormat(lateImageDocument, lateImageUrl);
-    passed &= check(resizedLateImage && resizedImageFormat.width() == 400.0 &&
-        resizedImageFormat.height() == 225.0,
-        "late Matrix image resource receives the fixed width and aspect-preserving height in its existing document");
+    passed &= check(resizedLateImage && resizedImageFormat.width() == 200.0 &&
+        resizedImageFormat.height() == 113.0,
+        "late Matrix image resource receives the fixed 200 px width and aspect-preserving height in its existing document");
 
     lateImageDocument.setDocumentMargin(0.0);
     lateImageDocument.setTextWidth(293.0);
@@ -110,10 +110,10 @@ int main(int argc, char *argv[])
             }
         }
     }
-    passed &= check(lastRedX - firstRedX + 1 == 400,
-        "Qt paints the Matrix image at 400 px even when document text width is 293 px");
-    passed &= check(DecorationHelper::maximumImageDisplayWidth(lateImageDocument) == 400.0,
-        "bubble sizing reads the explicit 400 px width from its inline image format");
+    passed &= check(lastRedX - firstRedX + 1 == 200,
+        "Qt paints the Matrix image at 200 px even when document text width is 293 px");
+    passed &= check(DecorationHelper::maximumImageDisplayWidth(lateImageDocument) == 200.0,
+        "bubble sizing reads the explicit 200 px width from its inline image format");
 
     const QUrl oldSizeUrl(QStringLiteral("vacuum-matrix-image:/old-size"));
     QTextDocument oldSizeDocument;
@@ -122,9 +122,9 @@ int main(int argc, char *argv[])
     const bool upgradedOldSize = DecorationHelper::updateImageFormatForResource(
         oldSizeDocument, oldSizeUrl, QSize(1600, 900), 800);
     const QTextImageFormat upgradedFormat = findImageFormat(oldSizeDocument, oldSizeUrl);
-    passed &= check(upgradedOldSize && upgradedFormat.width() == 400.0 &&
-        upgradedFormat.height() == 225.0,
-        "already-rendered Matrix images are upgraded to 400 px after resource arrival");
+    passed &= check(upgradedOldSize && upgradedFormat.width() == 200.0 &&
+        upgradedFormat.height() == 113.0,
+        "already-rendered Matrix images are upgraded to 200 px after resource arrival");
 
     const QUrl iconUrl(QStringLiteral("vacuum-avatar:/small"));
     QTextDocument iconDocument;
@@ -146,8 +146,8 @@ int main(int argc, char *argv[])
     const bool correctedAspectRatio = DecorationHelper::updateImageFormatForResource(
         distortedDocument, distortedUrl, QSize(1600, 900), 800);
     const QTextImageFormat correctedFormat = findImageFormat(distortedDocument, distortedUrl);
-    passed &= check(correctedAspectRatio && correctedFormat.width() == 400.0 &&
-        correctedFormat.height() == 225.0,
+    passed &= check(correctedAspectRatio && correctedFormat.width() == 200.0 &&
+        correctedFormat.height() == 113.0,
         "a stretched inline image is corrected to the loaded image aspect ratio");
 
     passed &= check(DecorationHelper::overlayHeightForContent(18.0, 4.0) == 22.0,
@@ -167,16 +167,28 @@ int main(int argc, char *argv[])
         bubbleGeometry.documentRect == QRectF(12.0, 24.0, 180.0, 100.0),
         "late image content grows the existing bubble height");
     const QRectF expandedIncoming = DecorationHelper::bubbleRectForContentWidth(
-        bubbleGeometry.documentRect, 400.0, 7.0, false);
-    passed &= check(expandedIncoming == QRectF(12.0, 24.0, 407.0, 100.0),
-        "incoming bubble expands to show a 400 px image plus its measured frame insets");
+        bubbleGeometry.documentRect, 200.0, 7.0, false);
+    passed &= check(expandedIncoming == QRectF(12.0, 24.0, 207.0, 100.0),
+        "incoming bubble expands to show a 200 px image plus its measured frame insets");
     const QRectF expandedOutgoing = DecorationHelper::bubbleRectForContentWidth(
-        QRectF(300.0, 24.0, 180.0, 100.0), 400.0, 7.0, true);
-    passed &= check(expandedOutgoing == QRectF(73.0, 24.0, 407.0, 100.0),
+        QRectF(300.0, 24.0, 180.0, 100.0), 200.0, 7.0, true);
+    passed &= check(expandedOutgoing == QRectF(273.0, 24.0, 207.0, 100.0),
         "outgoing bubble expands leftward while preserving its right alignment");
     passed &= check(DecorationHelper::bubbleRectForContentWidth(
         bubbleGeometry.documentRect, 16.0, 7.0, false) == bubbleGeometry.documentRect,
         "a small inline image does not shrink or inflate the existing bubble");
+
+    QTextDocument lateImageBubbleDocument;
+    lateImageBubbleDocument.setHtml(QStringLiteral(
+        "<img src=\"vacuum-matrix-image:/late-width\" width=\"200\" height=\"113\" />"));
+    const QRectF lateImageBubbleRect = DecorationHelper::bubbleRectForDocumentContent(
+        QRectF(12.0, 24.0, 180.0, 100.0), lateImageBubbleDocument, 7.0, false);
+    passed &= check(lateImageBubbleRect == QRectF(12.0, 24.0, 207.0, 100.0),
+        "a late-loaded 200 px image expands the existing incoming bubble to prevent clipping");
+    const QRectF lateOutgoingImageBubbleRect = DecorationHelper::bubbleRectForDocumentContent(
+        QRectF(300.0, 24.0, 180.0, 100.0), lateImageBubbleDocument, 7.0, true);
+    passed &= check(lateOutgoingImageBubbleRect == QRectF(273.0, 24.0, 207.0, 100.0),
+        "a late-loaded image expands the outgoing bubble leftward without moving its right edge");
 
     const QString markerHtml = DecorationHelper::bubbleMarkerHtml(QStringLiteral("marker"));
     passed &= check(markerHtml.contains(QStringLiteral("font-size:1px")) &&

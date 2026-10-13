@@ -13,6 +13,14 @@ QString withoutTrailingLineEndings(QString html)
 }
 }
 
+QString matrixMessageTypeForMetadata(const QVariantMap &metadata)
+{
+	if (metadata.value(QStringLiteral("media_type")).toString() == QStringLiteral("image"))
+		return QStringLiteral("m.image");
+	const QString messageType = metadata.value(QStringLiteral("msgtype")).toString();
+	return messageType.isEmpty() ? QStringLiteral("m.text") : messageType;
+}
+
 MatrixTextMessagePayload createMatrixTextMessagePayload(
 	const QString &body, const QVariantMap &metadata)
 {

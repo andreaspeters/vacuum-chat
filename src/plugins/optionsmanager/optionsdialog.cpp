@@ -1,5 +1,7 @@
 #include "optionsdialog.h"
 
+#include <definitions/optionnodes.h>
+
 #include <QLabel>
 #include <QPushButton>
 #include <QVBoxLayout>
@@ -77,6 +79,7 @@ void OptionsDialog::showNode(const QString &ANodeId)
 QWidget *OptionsDialog::createNodeWidget(const QString &ANodeId)
 {
 	QWidget *nodeWidget = new QWidget(ui.scaScroll);
+	const bool accountOptionsNode = ANodeId.startsWith(OPN_ACCOUNTS) && ANodeId.count(QLatin1Char('.')) == 1;
 	nodeWidget->setLayout(new QVBoxLayout);
 	nodeWidget->layout()->setContentsMargins(5,5,5,5);
 
@@ -96,7 +99,12 @@ QWidget *OptionsDialog::createNodeWidget(const QString &ANodeId)
 	if (!orderedWidgets.isEmpty())
 	{
 		foreach(IOptionsWidget *widget, orderedWidgets)
-			nodeWidget->layout()->addWidget(widget->instance());
+		{
+			QWidget *instance = widget->instance();
+			if (accountOptionsNode)
+				instance->setMaximumWidth(400);
+			nodeWidget->layout()->addWidget(instance);
+		}
 		if (!canExpandVertically(nodeWidget))
 			nodeWidget->setMaximumHeight(nodeWidget->sizeHint().height());
 	}
@@ -150,7 +158,8 @@ QStandardItem *OptionsDialog::createNodeItem(const QString &ANodeID)
 
 bool OptionsDialog::canExpandVertically(const QWidget *AWidget) const
 {
-	bool expanding = AWidget->sizePolicy().verticalPolicy() == QSizePolicy::Expanding;
+	bool expanding = AWidget->sizePolicy().verticalPolicy() == QSizePolicy::Expanding ||
+		AWidget->hasHeightForWidth();
 	if (!expanding)
 	{
 		QObjectList childs = AWidget->children();

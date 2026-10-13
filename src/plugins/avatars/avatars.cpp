@@ -338,13 +338,16 @@ QVariant Avatars::rosterData(const IRosterIndex *AIndex, int ARole) const
 		if (avatar.isNull() && FPluginManager) {
 			const QString accountId = AIndex->data(RDR_ACCOUNT_ID).toString();
 			const QString conversationId = AIndex->data(RDR_CONVERSATION_ID).toString();
-			if (!accountId.isEmpty() && !conversationId.isEmpty())
+			if (!accountId.isEmpty())
 				for (IPlugin *plugin : FPluginManager->pluginInterface("IProtocolRoster")) {
 					IProtocolRoster *roster = qobject_cast<IProtocolRoster *>(plugin->instance());
-					if (roster && roster->streamId() == accountId) {
+					if (!roster || roster->streamId() != accountId)
+						continue;
+					if (AIndex->type() == RIT_STREAM_ROOT)
+						roster->loadAccountAvatar();
+					else if (!conversationId.isEmpty())
 						roster->loadRoomAvatar(conversationId);
-						break;
-					}
+					break;
 				}
 		}
 		if (avatar.isNull() && FShowEmptyAvatars)

@@ -522,6 +522,9 @@ MatrixTimelineCursor MatrixDatabase::loadTimeline(const QString &roomId, qint64 
                 }
             }
         }
+        if (!event.messageType.isEmpty() &&
+            !event.metadata.contains(QStringLiteral("msgtype")))
+            event.metadata.insert(QStringLiteral("msgtype"), event.messageType);
         
         cursor.events.append(event);
         
@@ -997,6 +1000,9 @@ QList<MatrixTimelineEvent> MatrixDatabase::getEvents(const QString &roomId, int 
                 }
             }
         }
+        if (!event.messageType.isEmpty() &&
+            !event.metadata.contains(QStringLiteral("msgtype")))
+            event.metadata.insert(QStringLiteral("msgtype"), event.messageType);
         
         events.append(event);
     }
@@ -1064,6 +1070,9 @@ MatrixHistoryPageResult MatrixDatabase::loadHistoryPage(const QString &roomId, i
                     event.metadata.insert(it.key(), it.value().toVariant());
             }
         }
+        if (!event.messageType.isEmpty() &&
+            !event.metadata.contains(QStringLiteral("msgtype")))
+            event.metadata.insert(QStringLiteral("msgtype"), event.messageType);
 
         // Rows are queried newest-first; prepend to return a chronological page.
         result.events.prepend(event);

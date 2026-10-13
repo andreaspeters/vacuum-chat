@@ -81,6 +81,23 @@ inline int findMessageIndex(const QList<BasicMessage> &AHistory, const QString &
 	return it == AHistory.cend() ? -1 : static_cast<int>(std::distance(AHistory.cbegin(), it));
 }
 
+inline int findMessageIndexByIdOrTransactionAlias(const QList<BasicMessage> &AHistory,
+	const QString &AMessageId)
+{
+	if (AMessageId.isEmpty())
+		return -1;
+	for (int index = 0; index < AHistory.size(); ++index) {
+		const BasicMessage &message = AHistory.at(index);
+		if (message.messageId() == AMessageId)
+			return index;
+		const QVariantMap metadata = message.metadata();
+		if (metadata.value(QStringLiteral("txn_id")).toString() == AMessageId ||
+			metadata.value(QStringLiteral("replaces_txn_id")).toString() == AMessageId)
+			return index;
+	}
+	return -1;
+}
+
 inline int replaceExistingMessage(QList<BasicMessage> &AHistory, const BasicMessage &AMessage)
 {
 	const int index = findMessageIndex(AHistory, AMessage.messageId());
@@ -99,6 +116,22 @@ inline bool hasMediaPayload(const BasicMessage &AMessage)
 	}
 	return messageType == QStringLiteral("m.file") &&
 		!metadata.value(QStringLiteral("file_path")).toString().isEmpty();
+}
+
+inline bool isImageCachePathUpdate(const BasicMessage &AExisting, const BasicMessage &AUpdated)
+{
+	if (AExisting.protocol() != QStringLiteral("matrix") ||
+		AUpdated.protocol() != QStringLiteral("matrix") ||
+		AExisting.messageId().isEmpty() || AExisting.messageId() != AUpdated.messageId() ||
+		AExisting.conversationId() != AUpdated.conversationId())
+		return false;
+	const QVariantMap oldMetadata = AExisting.metadata();
+	const QVariantMap newMetadata = AUpdated.metadata();
+	return oldMetadata.value(QStringLiteral("msgtype")).toString() == QStringLiteral("m.image") &&
+		newMetadata.value(QStringLiteral("msgtype")).toString() == QStringLiteral("m.image") &&
+		oldMetadata.value(QStringLiteral("file_path")).toString() !=
+			newMetadata.value(QStringLiteral("file_path")).toString() &&
+		!newMetadata.value(QStringLiteral("file_path")).toString().isEmpty();
 }
 
 inline bool isMediaHydrationUpdate(const BasicMessage &AExisting, const BasicMessage &AUpdated)

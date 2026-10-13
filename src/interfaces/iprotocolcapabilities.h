@@ -21,7 +21,10 @@ public:
         CapabilityShowProfile = 1 << 7,
         CapabilityEditProfile = 1 << 8,
         CapabilitySendZeroHopAdvert = 1 << 9,
-        CapabilitySendFloodAdvert = 1 << 10
+        CapabilitySendFloodAdvert = 1 << 10,
+        CapabilitySendImage = 1 << 11,
+        CapabilityJoinRoom = 1 << 12,
+        CapabilityLeaveRoom = 1 << 13
     };
     Q_DECLARE_FLAGS(Capabilities, Capability)
 

@@ -81,6 +81,10 @@ bool SpellChecker::initSettings()
 
 bool SpellChecker::startPlugin()
 {
+	// Apply persisted/default settings before the first editor is created. The
+	// options dialog also invokes this path, but spellchecking must not depend
+	// on the user opening that dialog first.
+	onOptionsOpened();
 	return true;
 }
 

@@ -100,6 +100,12 @@ int main(int argc, char **argv)
 		"server echo replaces the local echo by transaction ID");
 	passed &= check(history.size() == 1 && history.first().messageId() == QStringLiteral("$server-event"),
 		"replacement leaves one canonical event in conversation history");
+	passed &= check(ProtocolMessageHistory::findMessageIndexByIdOrTransactionAlias(
+		history, transactionId) == 0,
+		"an image link using a local transaction ID resolves to its canonical server event");
+	passed &= check(ProtocolMessageHistory::findMessageIndexByIdOrTransactionAlias(
+		history, serverEcho.messageId()) == 0,
+		"image links also resolve directly by canonical Matrix event ID");
 
 	QList<BasicMessage> reverseOrder;
 	reverseOrder.append(serverEcho);
@@ -204,6 +210,10 @@ int main(int argc, char **argv)
 	cachedImageWithFilePath.setMetadata({{QStringLiteral("msgtype"), QStringLiteral("m.image")},
 		{QStringLiteral("historical"), true}, {QStringLiteral("file_path"), QStringLiteral("/cache/photo.bin")},
 		{QStringLiteral("url"), QStringLiteral("mxc://media.example.org/photo")}});
+	passed &= check(ProtocolMessageHistory::isImageCachePathUpdate(imagePlaceholder, cachedImageWithFilePath),
+		"a newly cached local path triggers asynchronous image rendering without claiming hydration is complete");
+	passed &= check(!ProtocolMessageHistory::isImageCachePathUpdate(cachedImageWithFilePath, cachedImageWithFilePath),
+		"an unchanged cached path does not re-trigger image rendering");
 	passed &= check(ProtocolMessageHistory::isMediaHydrationUpdate(cachedImageWithFilePath, hydratedImage),
 		"cached file path alone must not suppress decoded-image hydration");
 	passed &= check(ProtocolMessageHistory::isMediaHydrationUpdate(imagePlaceholder, hydratedImage),

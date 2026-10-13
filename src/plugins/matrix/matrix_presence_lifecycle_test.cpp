@@ -195,6 +195,12 @@ int main(int argc, char **argv)
     const bool cannotEditProfileBeforeLogin = check(
         !matrix.hasCapabilities(matrix.accountId(), IProtocolCapabilities::CapabilityEditProfile),
         "Matrix does not expose profile editing before authentication");
+    const bool canSendImageWhileDisconnected = check(
+        matrix.hasCapabilities(matrix.accountId(), IProtocolCapabilities::CapabilitySendImage),
+        "Matrix advertises image support for an active account even before login");
+    const bool canSendImageForChatWindowStreamId = check(
+        matrix.hasCapabilities(matrix.streamId(), IProtocolCapabilities::CapabilitySendImage),
+        "Matrix accepts its messaging stream ID used by generic chat windows");
     const bool profileActionsExposed = check(profileActions != nullptr,
         "Matrix exposes the protocol-neutral profile action interface");
     const bool profileEditRejectedBeforeLogin = check(!profileActions ||
@@ -228,6 +234,9 @@ int main(int argc, char **argv)
     const bool canEditProfileDuringInitialSync = check(
         matrix.hasCapabilities(matrix.accountId(), IProtocolCapabilities::CapabilityEditProfile),
         "authenticated Matrix account can edit its profile before initial sync completes");
+    const bool canSendImageDuringInitialSync = check(
+        matrix.hasCapabilities(matrix.accountId(), IProtocolCapabilities::CapabilitySendImage),
+        "authenticated Matrix account can send images before initial sync completes");
     bool profileEditAccepted = false;
     bool profileUpdateDispatched = false;
     if (profileActions) {
@@ -298,8 +307,9 @@ int main(int argc, char **argv)
         "the current account can still complete its own login after a stale response");
 
     MatrixPresenceLifecycleTestAccess::detachNetwork(matrix);
-    return initialOfflinePresenceAnnounced && noImplicitLogin && canSetPresenceWhileDisconnected && cannotEditProfileBeforeLogin &&
+    return initialOfflinePresenceAnnounced && noImplicitLogin && canSetPresenceWhileDisconnected && cannotEditProfileBeforeLogin && canSendImageWhileDisconnected && canSendImageForChatWindowStreamId &&
         profileActionsExposed && profileEditRejectedBeforeLogin && canEditProfileDuringInitialSync &&
+        canSendImageDuringInitialSync &&
         profileEditAccepted && profileUpdateDispatched && onlineRequestAccepted &&
         repeatedRequestAccepted && loginStarted &&
         remainsOfflineUntilLoginSuccess && reportsOnlineAfterLoginSuccess && remotePresenceUpdated &&

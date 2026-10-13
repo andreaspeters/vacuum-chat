@@ -54,11 +54,106 @@
 #include <QThreadPool>
 #include <QRunnable>
 #include <QScrollBar>
+#include <QResizeEvent>
+#include <QSizePolicy>
 
 static void notifyImageResourceUpdated(QTextEdit *view, const QUrl &resourceUrl)
 {
 	if (AnimatedTextBrowser *browser = qobject_cast<AnimatedTextBrowser *>(view))
 		emit browser->resourceUpdated(resourceUrl);
+}
+
+class ScaledImageLabel final : public QLabel
+{
+public:
+	explicit ScaledImageLabel(QWidget *parent = nullptr) : QLabel(parent)
+	{
+		setAlignment(Qt::AlignCenter);
+		setMinimumSize(1, 1);
+		setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
+	}
+
+	void setSourceImage(const QImage &image)
+	{
+		FSourceImage = image;
+		updatePixmap();
+	}
+
+protected:
+	void resizeEvent(QResizeEvent *event) override
+	{
+		QLabel::resizeEvent(event);
+		updatePixmap();
+	}
+
+private:
+	void updatePixmap()
+	{
+		if (FSourceImage.isNull() || width() <= 0 || height() <= 0)
+			return;
+		const QSize scaledSize = MatrixImageDisplay::sizeForViewer(FSourceImage.size(), contentsRect().size());
+		if (!scaledSize.isEmpty())
+			setPixmap(QPixmap::fromImage(FSourceImage.scaled(scaledSize,
+				Qt::KeepAspectRatio, Qt::SmoothTransformation)));
+	}
+
+	QImage FSourceImage;
+};
+
+class ProtocolImageViewerDialog final : public QDialog
+{
+public:
+	ProtocolImageViewerDialog(const QImage &image, const QString &sourcePath, QWidget *parent)
+		: QDialog(parent), FImage(image), FSourcePath(sourcePath)
+	{
+		setWindowFlag(Qt::Window, true);
+		setAttribute(Qt::WA_DeleteOnClose, true);
+		setWindowTitle(QCoreApplication::translate("ChatMessageHandler", "Image"));
+		auto *layout = new QVBoxLayout(this);
+		FImageLabel = new ScaledImageLabel(this);
+		FImageLabel->setSourceImage(FImage);
+		layout->addWidget(FImageLabel, 1);
+		auto *buttons = new QHBoxLayout();
+		buttons->addStretch();
+		auto *saveButton = new QPushButton(QCoreApplication::translate("ChatMessageHandler", "Save image"), this);
+		auto *closeButton = new QPushButton(QCoreApplication::translate("ChatMessageHandler", "Close"), this);
+		buttons->addWidget(saveButton);
+		buttons->addWidget(closeButton);
+		layout->addLayout(buttons);
+		QObject::connect(saveButton, &QPushButton::clicked, this, [this]() { saveImage(); });
+		QObject::connect(closeButton, &QPushButton::clicked, this, &QDialog::close);
+		resize(MatrixImageDisplay::initialViewerSize(FImage.size()));
+	}
+
+private:
+	void saveImage()
+	{
+		QString suggestedName = QFileInfo(FSourcePath).fileName();
+		if (suggestedName.isEmpty())
+			suggestedName = QStringLiteral("image.png");
+		const QString destination = QFileDialog::getSaveFileName(this,
+			QCoreApplication::translate("ChatMessageHandler", "Save image"), suggestedName,
+			QStringLiteral("Images (*.png *.jpg *.jpeg *.webp *.bmp);;All files (*)"));
+		if (!destination.isEmpty() && !FImage.save(destination))
+			QMessageBox::warning(this, QCoreApplication::translate("ChatMessageHandler", "Save image"),
+				QCoreApplication::translate("ChatMessageHandler", "The image could not be saved."));
+	}
+
+	QImage FImage;
+	QString FSourcePath;
+	ScaledImageLabel *FImageLabel = nullptr;
+};
+
+static QString protocolImageResourceUrl(const QString &streamId, const QString &conversationId,
+	const QString &messageId, const QString &filePath)
+{
+	const QByteArray identity = streamId.toUtf8() + '\n' + conversationId.toUtf8() + '\n' +
+		messageId.toUtf8() + '\n' + filePath.toUtf8();
+	QUrl resourceUrl;
+	resourceUrl.setScheme(QStringLiteral("vacuum-local-image"));
+	resourceUrl.setPath(QString::fromLatin1(QCryptographicHash::hash(identity,
+		QCryptographicHash::Sha256).toHex()));
+	return resourceUrl.toString(QUrl::FullyEncoded);
 }
 
 #define HISTORY_MESSAGES          10
@@ -145,6 +240,7 @@ ChatMessageHandler::ChatMessageHandler()
 	FProtocolRoster = NULL;
 	FReplyEscFilter = NULL;
 	FRoomInviteTarget.clear();
+	FProtocolHistorySyncClock.start();
 }
 
 ChatMessageHandler::~ChatMessageHandler()
@@ -393,6 +489,7 @@ bool ChatMessageHandler::rosterIndexDoubleClicked(int AOrder, IRosterIndex *AInd
 				selectedMessaging->streamId(), conversationId);
 			if (window)
 			{
+				requestProtocolConversationHistorySync(selectedMessaging, conversationId);
 				setupProtocolWindow(window, selectedMessaging);
 				renderProtocolHistory(window, selectedMessaging);
 				window->showTabPage();
@@ -657,6 +754,8 @@ void ChatMessageHandler::onProtocolMessageReceived(const BasicMessage &AMessage)
 			AMessage.messageId());
 		const bool mediaHydration = existingIndex >= 0 &&
 			ProtocolMessageHistory::isMediaHydrationUpdate(history.at(existingIndex), AMessage);
+		const bool imageCachePathUpdate = existingIndex >= 0 &&
+			ProtocolMessageHistory::isImageCachePathUpdate(history.at(existingIndex), AMessage);
 		const int duplicateIndex = ProtocolMessageHistory::replaceExistingMessage(history, AMessage);
 		if (duplicateIndex >= 0) {
 			const QString prefix = messaging->streamId() + QChar('\n') +
@@ -665,7 +764,7 @@ void ChatMessageHandler::onProtocolMessageReceived(const BasicMessage &AMessage)
 			const bool alreadyRendered = FProtocolRenderedMessages.contains(messageKey) ||
 				FProtocolRenderedMessages.contains(messageKey + QStringLiteral("|image"));
 			sortProtocolMessagesChronologically(history);
-			if (mediaHydration) {
+			if (mediaHydration || imageCachePathUpdate) {
 				// Hydrate the existing event in place; appending is only a fallback when it
 				// has not reached this window yet.
 				renderProtocolMessage(window, messaging, AMessage, true);
@@ -864,6 +963,19 @@ void ChatMessageHandler::queueOlderProtocolHistoryPage(QObject *AScrollBarObject
 		if (protocolObject)
 			requestOlderProtocolHistoryPage(historyKey, protocolObject);
 	});
+}
+
+void ChatMessageHandler::requestProtocolConversationHistorySync(
+	IProtocolMessaging *AMessaging, const ConversationId &AConversationId)
+{
+	if (!AMessaging || AConversationId.isEmpty())
+		return;
+	const QString streamId = AMessaging->streamId();
+	const qint64 now = FProtocolHistorySyncClock.elapsed();
+	if (!FProtocolHistorySyncThrottle.shouldRequest(streamId, AConversationId, now))
+		return;
+	if (AMessaging->requestConversationHistorySync(AConversationId))
+		FProtocolHistorySyncThrottle.recordAccepted(streamId, AConversationId, now);
 }
 
 void ChatMessageHandler::requestOlderProtocolHistoryPage(const QString &AHistoryKey,
@@ -1081,20 +1193,30 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 	if (!AMessage.metadata().value(QStringLiteral("decoded_image")).value<QImage>().isNull())
 		messageKey += QStringLiteral("|image");
 	const QString replacementKey = prefix + AMessage.metadata().value(QStringLiteral("replaces_txn_id")).toString();
+	QString existingBubbleId;
 	if (!replacementKey.endsWith(QChar('\n')) && FProtocolRenderedMessages.contains(replacementKey)) {
 		FProtocolEventMessageIds.insert(eventKey,
 			AMessage.metadata().value(QStringLiteral("replaces_txn_id")).toString());
 		FProtocolMessageDirections.insert(eventKey, FProtocolMessageDirections.value(replacementKey, false));
 		FProtocolMessageRelationTypes.insert(eventKey,
 			AMessage.metadata().value(QStringLiteral("relation_type")).toString());
-		updateProtocolReactionDecoration(AWindow, eventKey, AMessage.messageId());
-		return;
+		const QVariantMap mediaMetadata = AMessage.metadata();
+		const bool hasImagePayload = mediaMetadata.value(QStringLiteral("msgtype")).toString() ==
+			QStringLiteral("m.image") &&
+			(!mediaMetadata.value(QStringLiteral("decoded_image")).value<QImage>().isNull() ||
+			 !mediaMetadata.value(QStringLiteral("file_path")).toString().isEmpty());
+		if (hasImagePayload)
+			existingBubbleId = mediaMetadata.value(QStringLiteral("replaces_txn_id")).toString();
+		else {
+			updateProtocolReactionDecoration(AWindow, eventKey, AMessage.messageId());
+			return;
+		}
 	}
-	if (!AReplaceExisting && FProtocolRenderedMessages.contains(messageKey))
+	if (!AReplaceExisting && existingBubbleId.isEmpty() && FProtocolRenderedMessages.contains(messageKey))
 		return;
 	IMessageContentOptions options;
 	options.kind = IMessageContentOptions::KindMessage;
-	options.messageId = AMessage.messageId();
+	options.messageId = existingBubbleId.isEmpty() ? AMessage.messageId() : existingBubbleId;
 	const bool isVacuumUser = AMessage.direction() == BasicMessage::Outgoing ||
 		AMessage.metadata().value(QStringLiteral("sender_is_self")).toBool();
 	options.direction = isVacuumUser ? IMessageContentOptions::DirectionOut : IMessageContentOptions::DirectionIn;
@@ -1139,9 +1261,10 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 		? AMessaging->stripReplyFallback(body, QStringLiteral("text/plain")) : body;
 	const QString formattedBodyForDisplay = !replyHtml.isEmpty()
 		? AMessaging->stripReplyFallback(formattedBody, QStringLiteral("text/html")) : formattedBody;
-	const auto appendOrReplace = [AWindow, &options, AReplaceExisting](const QString &html) {
+	const bool replaceExistingContent = AReplaceExisting || !existingBubbleId.isEmpty();
+	const auto appendOrReplace = [AWindow, &options, replaceExistingContent](const QString &html) {
 		IViewWidget *viewWidget = AWindow->viewWidget();
-		if (!AReplaceExisting || !viewWidget->replaceMessage(options.messageId, html))
+		if (!replaceExistingContent || !viewWidget->replaceMessage(options.messageId, html))
 			viewWidget->appendHtml(html, options);
 	};
 
@@ -1149,25 +1272,98 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 		messageFormat == QStringLiteral("org.matrix.custom.html") && !formattedBodyForDisplay.isEmpty())
 		appendOrReplace(replyHtml + AMessaging->highlightMentions(AMessaging->sanitizeHtml(
 			AMessaging->formatEmoticonsForDisplay(formattedBodyForDisplay))));
-	else if (messageType == QStringLiteral("m.image") && !decodedImage.isNull() && !resourceUrl.isEmpty())
+	else if (messageType == QStringLiteral("m.image"))
 	{
+		const QString filePath = AMessage.metadata().value(QStringLiteral("file_path")).toString();
+		const QString effectiveResourceUrl = resourceUrl.isEmpty()
+			? protocolImageResourceUrl(AMessaging->streamId(), AMessage.conversationId(),
+				AMessage.messageId(), filePath)
+			: resourceUrl;
+		const QUrl imageResource(effectiveResourceUrl);
+		const QUrl openUrl = MatrixImageDisplay::viewerUrl(AMessage.conversationId(), AMessage.messageId());
 		QTextEdit *view = qobject_cast<QTextEdit *>(AWindow->viewWidget()->styleWidget());
-		if (view) {
-			view->document()->addResource(QTextDocument::ImageResource, QUrl(resourceUrl), decodedImage);
-			notifyImageResourceUpdated(view, QUrl(resourceUrl));
+		if (!decodedImage.isNull()) {
+			if (view) {
+				view->document()->addResource(QTextDocument::ImageResource, imageResource, decodedImage);
+				view->document()->markContentsDirty(0, view->document()->characterCount());
+				view->viewport()->update();
+				notifyImageResourceUpdated(view, imageResource);
+			}
+			appendOrReplace(replyHtml + MatrixImageDisplay::previewHtml(openUrl, imageResource,
+				body, decodedImage.size()));
+		} else if (!filePath.isEmpty()) {
+			if (view && !view->document()->resource(QTextDocument::ImageResource, imageResource).isValid()) {
+				QImage placeholder(1, 1, QImage::Format_ARGB32_Premultiplied);
+				placeholder.fill(Qt::transparent);
+				view->document()->addResource(QTextDocument::ImageResource, imageResource, placeholder);
+			}
+			const QString loadKey = historyKey + QChar('\n') + AMessage.messageId() + QChar('\n') + filePath;
+			if (!FProtocolImageLoadsInFlight.contains(loadKey)) {
+				if (ImageLoadScheduler *scheduler = ImageLoadScheduler::instance()) {
+					FProtocolImageLoadsInFlight.insert(loadKey);
+					QPointer<ChatMessageHandler> guardedHandler(this);
+					QPointer<QObject> guardedWindow(AWindow->instance());
+					QPointer<QObject> guardedMessaging(dynamic_cast<QObject *>(AMessaging));
+					const BasicMessage pendingMessage = AMessage;
+					scheduler->loadFile(filePath, this,
+						[guardedHandler, guardedWindow, guardedMessaging, pendingMessage,
+							loadKey, effectiveResourceUrl](const QImage &image) {
+							if (!guardedHandler)
+								return;
+						guardedHandler->FProtocolImageLoadsInFlight.remove(loadKey);
+						if (image.isNull() || !guardedWindow || !guardedMessaging)
+							return;
+						IChatWindow *liveWindow = qobject_cast<IChatWindow *>(guardedWindow.data());
+						IProtocolMessaging *liveMessaging = qobject_cast<IProtocolMessaging *>(guardedMessaging.data());
+						if (!liveWindow || !liveMessaging)
+							return;
+						BasicMessage hydratedMessage = pendingMessage;
+						QVariantMap hydratedMetadata = hydratedMessage.metadata();
+						hydratedMetadata.insert(QStringLiteral("decoded_image"), image);
+						hydratedMetadata.insert(QStringLiteral("image_resource_url"), effectiveResourceUrl);
+						hydratedMessage.setMetadata(hydratedMetadata);
+						const QString hydratedHistoryKey = liveMessaging->streamId() + QChar('\n') +
+							hydratedMessage.conversationId();
+						QList<BasicMessage> &history = guardedHandler->FProtocolConversationMessages[hydratedHistoryKey];
+						int historyIndex = ProtocolMessageHistory::findMessageIndex(history,
+							hydratedMessage.messageId());
+						if (historyIndex < 0) {
+							const QString txnId = hydratedMetadata.value(QStringLiteral("txn_id")).toString();
+						for (int index = 0; index < history.size(); ++index)
+							if (!txnId.isEmpty() && history.at(index).metadata().value(
+								QStringLiteral("replaces_txn_id")).toString() == txnId) {
+								historyIndex = index;
+								break;
+							}
+					}
+					if (historyIndex >= 0) {
+						BasicMessage updatedMessage = history.at(historyIndex);
+						QVariantMap updatedMetadata = updatedMessage.metadata();
+						updatedMetadata.insert(QStringLiteral("decoded_image"), image);
+						updatedMetadata.insert(QStringLiteral("image_resource_url"), effectiveResourceUrl);
+						updatedMessage.setMetadata(updatedMetadata);
+						history[historyIndex] = updatedMessage;
+						hydratedMessage = updatedMessage;
+					} else {
+						history.append(hydratedMessage);
+					}
+					guardedHandler->renderProtocolMessage(liveWindow, liveMessaging, hydratedMessage, true);
+					}
+				);
+				}
+			}
+			const QString placeholderHtml = MatrixImageDisplay::previewHtml(openUrl, imageResource,
+				body, QSize(4, 3));
+			appendOrReplace(replyHtml + placeholderHtml);
+		} else {
+			const QUrl requestUrl = MatrixImageDisplay::mediaLoadUrl(AMessage.conversationId(),
+				AMessage.messageId(), imageUrl, messageType, body,
+				AMessage.metadata().value(QStringLiteral("historical")).toBool());
+			appendOrReplace(replyHtml + QStringLiteral("<a href=\"%1\">%2</a>")
+				.arg(requestUrl.toString(QUrl::FullyEncoded).toHtmlEscaped(), tr("Load image")));
 		}
-		const int availableWidth = view ? view->viewport()->width() : 0;
-		const QSize displaySize = MatrixImageDisplay::sizeForDisplay(decodedImage.size(), availableWidth);
-		const QString escapedUrl = resourceUrl.toHtmlEscaped();
-		const QString escapedAlt = body.toHtmlEscaped();
-		const QString imageHtml = QStringLiteral(
-			"<div><img src=\"%1\" alt=\"%2\" width=\"%3\" height=\"%4\" /></div>")
-			.arg(escapedUrl, escapedAlt)
-			.arg(displaySize.width())
-			.arg(displaySize.height());
-		appendOrReplace(replyHtml + imageHtml);
 	}
-	else if (messageType == QStringLiteral("m.image") || messageType == QStringLiteral("m.file"))
+	else if (messageType == QStringLiteral("m.file"))
 	{
 		const QString filePath = AMessage.metadata().value(QStringLiteral("file_path")).toString();
 		if (!filePath.isEmpty()) {
@@ -1175,23 +1371,11 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 			appendOrReplace(replyHtml + QStringLiteral("<a href=\"%1\">%2</a>")
 				.arg(href, body.isEmpty() ? tr("Open attachment") : body.toHtmlEscaped()));
 		} else {
-			QUrl requestUrl;
-			requestUrl.setScheme(QStringLiteral("vacuum-media"));
-			requestUrl.setHost(QStringLiteral("load"));
-			QUrlQuery query;
-			query.addQueryItem(QStringLiteral("room"), AMessage.conversationId());
-			query.addQueryItem(QStringLiteral("event"), AMessage.messageId());
-			query.addQueryItem(QStringLiteral("url"), imageUrl);
-			query.addQueryItem(QStringLiteral("msgtype"), messageType);
-			query.addQueryItem(QStringLiteral("body"), body);
-			query.addQueryItem(QStringLiteral("historical"),
-				AMessage.metadata().value(QStringLiteral("historical")).toBool()
-					? QStringLiteral("true") : QStringLiteral("false"));
-			requestUrl.setQuery(query);
-			const QString label = messageType == QStringLiteral("m.image")
-				? tr("Load image") : tr("Load attachment");
+			const QUrl requestUrl = MatrixImageDisplay::mediaLoadUrl(AMessage.conversationId(),
+				AMessage.messageId(), imageUrl, messageType, body,
+				AMessage.metadata().value(QStringLiteral("historical")).toBool());
 			appendOrReplace(replyHtml + QStringLiteral("<a href=\"%1\">%2</a>")
-				.arg(requestUrl.toString(QUrl::FullyEncoded).toHtmlEscaped(), label));
+				.arg(requestUrl.toString(QUrl::FullyEncoded).toHtmlEscaped(), tr("Load attachment")));
 		}
 	}
 	else
@@ -1476,7 +1660,16 @@ void ChatMessageHandler::updateProtocolReactionDecoration(IChatWindow *AWindow,
 	}
 	QString html;
 	if (!chips.isEmpty()) {
-		html = chips.join(QStringLiteral("&nbsp;&nbsp;"));
+		const bool alignRight = FProtocolMessageDirections.value(targetKey, false);
+		const QString reactionChips = chips.join(QStringLiteral("&nbsp;&nbsp;"));
+		if (alignRight)
+			html = QStringLiteral("<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\"><tr>"
+				"<td width=\"25%\"></td><td align=\"right\">%1</td><td width=\"5%\"></td></tr></table>")
+				.arg(reactionChips);
+		else
+			html = QStringLiteral("<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\"><tr>"
+				"<td width=\"36\"></td><td align=\"left\">%1</td><td width=\"20%\"></td></tr></table>")
+				.arg(reactionChips);
 	}
 	AWindow->viewWidget()->setMessageDecoration(displayMessageId,
 		QStringLiteral("protocol-message-reactions"), html);
@@ -2229,7 +2422,51 @@ void ChatMessageHandler::onProtocolUrlClicked(const QUrl &AUrl)
 		}
 	if (!window)
 		return;
-	if (AUrl.scheme() == QStringLiteral("vacuum-media")) {
+	if (AUrl.scheme() == QStringLiteral("vacuum-media") &&
+		AUrl.host() == QStringLiteral("open")) {
+		const QUrlQuery query(AUrl);
+		const QString roomId = query.queryItemValue(QStringLiteral("room"));
+		const QString eventId = query.queryItemValue(QStringLiteral("event"));
+		if (roomId != window->conversationId() || eventId.isEmpty())
+			return;
+		IProtocolMessaging *messaging = nullptr;
+		for (IProtocolMessaging *candidate : FProtocolMessaging)
+			if (candidate && candidate->streamId() == window->accountId()) {
+				messaging = candidate;
+				break;
+			}
+		if (!messaging)
+			return;
+		const QString historyKey = messaging->streamId() + QChar('\n') + roomId;
+		const QList<BasicMessage> history = FProtocolConversationMessages.value(historyKey);
+		const int messageIndex = ProtocolMessageHistory::findMessageIndexByIdOrTransactionAlias(history, eventId);
+		if (messageIndex < 0)
+			return;
+		const BasicMessage &message = history.at(messageIndex);
+		const QString sourcePath = message.metadata().value(QStringLiteral("file_path")).toString();
+		const QImage image = message.metadata().value(QStringLiteral("decoded_image")).value<QImage>();
+		if (!image.isNull()) {
+			auto *viewer = new ProtocolImageViewerDialog(image, sourcePath, window->instance());
+			viewer->show();
+			return;
+		}
+		if (sourcePath.isEmpty())
+			return;
+		ImageLoadScheduler *scheduler = ImageLoadScheduler::instance();
+		if (!scheduler)
+			return;
+		QPointer<QObject> guardedWindow(window->instance());
+		scheduler->loadFile(sourcePath, this, [guardedWindow, sourcePath](const QImage &loadedImage) {
+			if (!guardedWindow || loadedImage.isNull())
+				return;
+			auto *viewer = new ProtocolImageViewerDialog(loadedImage, sourcePath,
+				qobject_cast<QWidget *>(guardedWindow.data()));
+			viewer->show();
+		});
+		return;
+	}
+	if (AUrl.scheme() == QStringLiteral("vacuum-media") &&
+		AUrl.host() == QStringLiteral("load")) {
 		const QUrlQuery query(AUrl);
 		const QString roomId = query.queryItemValue(QStringLiteral("room"));
 		const QString eventId = query.queryItemValue(QStringLiteral("event"));

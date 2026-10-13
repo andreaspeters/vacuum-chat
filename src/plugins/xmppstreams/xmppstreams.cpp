@@ -4,6 +4,7 @@
 #include <interfaces/irosterchanger.h>
 #include <interfaces/iavatars.h>
 #include <interfaces/imessagearchiver.h>
+#include <interfaces/ifiletransfer.h>
 #include <interfaces/ivcard.h>
 #include "xmppprofileactionpolicy.h"
 
@@ -96,9 +97,16 @@ IProtocolCapabilities::Capabilities XmppStreams::capabilitiesForAccount(
 		? qobject_cast<IAvatars *>(avatarPlugin->instance()) : NULL;
 	if (account && avatars)
 		capabilities |= IProtocolCapabilities::CapabilitySetAccountAvatar;
+	IPlugin *fileTransferPlugin = FPluginManager
+		? FPluginManager->pluginInterface("IFileTransfer").value(0, NULL) : NULL;
+	IFileTransfer *fileTransfer = fileTransferPlugin
+		? qobject_cast<IFileTransfer *>(fileTransferPlugin->instance()) : NULL;
+	const Jid targetJid(targetId);
+	if (account && fileTransfer && targetJid.isValid() &&
+		fileTransfer->isSupported(account->streamJid(), targetJid))
+		capabilities |= IProtocolCapabilities::CapabilitySendImage;
 	IAccount *profileAccount = configuredXmppAccount(FPluginManager, accountId);
 	IVCardPlugin *vcard = vcardPlugin(FPluginManager);
-	const Jid targetJid(targetId);
 	capabilities |= XmppProfileActionPolicy::capabilities(account != NULL,
 		profileAccount != NULL && vcard != NULL, targetJid.isValid(),
 		targetJid.isValid() && vcard && vcard->hasVCard(targetJid.bare()));

@@ -90,6 +90,39 @@ int main(int argc, char **argv)
             QString()).success)
         return fail("incomplete keyset cursor must be rejected");
 
+    const QString legacyImageRoomId = QStringLiteral("!legacy-image-cache:example.org");
+    MatrixTimelineEvent legacyImage;
+    legacyImage.roomId = legacyImageRoomId;
+    legacyImage.eventId = QStringLiteral("$cached-image");
+    legacyImage.eventType = QStringLiteral("m.room.message");
+    legacyImage.sender = QStringLiteral("@sender:example.org");
+    legacyImage.originTs = 1700000000100LL;
+    legacyImage.messageType = QStringLiteral("m.image");
+    legacyImage.content = QStringLiteral("image.png");
+    const QString legacyImageUrl = QStringLiteral("mxc://media.example.org/cached-image");
+    legacyImage.metadata.insert(QStringLiteral("url"), legacyImageUrl);
+    if (!database.appendTimelineEvents(legacyImageRoomId, {legacyImage}))
+        return fail("could not seed a legacy cached image without duplicated msgtype metadata");
+    const MatrixHistoryPageResult cachedImagePage = database.loadHistoryPage(legacyImageRoomId, 30);
+    if (!cachedImagePage.success || cachedImagePage.events.size() != 1 ||
+        cachedImagePage.events.first().messageType != QStringLiteral("m.image") ||
+        cachedImagePage.events.first().metadata.value(QStringLiteral("msgtype")).toString() !=
+            QStringLiteral("m.image") ||
+        cachedImagePage.events.first().metadata.value(QStringLiteral("url")).toString() != legacyImageUrl)
+        return fail("legacy cached image page must restore both msgtype and media URL");
+    const MatrixTimelineCursor cachedImageTimeline = database.loadTimeline(legacyImageRoomId, 0, 30);
+    if (cachedImageTimeline.events.size() != 1 ||
+        cachedImageTimeline.events.first().metadata.value(QStringLiteral("msgtype")).toString() !=
+            QStringLiteral("m.image") ||
+        cachedImageTimeline.events.first().metadata.value(QStringLiteral("url")).toString() != legacyImageUrl)
+        return fail("initial cached history must restore image type and media URL");
+    const QList<MatrixTimelineEvent> cachedImageEvents = database.getEvents(legacyImageRoomId);
+    if (cachedImageEvents.size() != 1 ||
+        cachedImageEvents.first().metadata.value(QStringLiteral("msgtype")).toString() !=
+            QStringLiteral("m.image") ||
+        cachedImageEvents.first().metadata.value(QStringLiteral("url")).toString() != legacyImageUrl)
+        return fail("SQLite room-history replay must restore image type and URL before rendering");
+
     database.close();
     if (database.loadHistoryPage(roomId, 30).success)
         return fail("closed database must report a history-page failure");

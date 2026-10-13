@@ -5,6 +5,8 @@
 #include <QTextCursor>
 #include <QTextTable>
 
+class QTextDocument;
+
 class DecorationHelper
 {
 public:
@@ -43,6 +45,8 @@ public:
     static qreal maximumImageDisplayWidth(const QTextDocument &document);
     static QRectF bubbleRectForContentWidth(const QRectF &currentRect, qreal contentWidth,
         qreal horizontalInsets, bool outgoing);
+    static QRectF bubbleRectForDocumentContent(const QRectF &currentRect,
+        const QTextDocument &contentDocument, qreal horizontalInsets, bool outgoing);
 
 private:
     DecorationHelper() = default;

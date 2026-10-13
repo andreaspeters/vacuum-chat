@@ -39,6 +39,17 @@ finds `libolm`; OpenSSL enables the Matrix Secure Secret Storage (SSSS)
 functionality. Without these libraries, the corresponding Matrix cryptographic
 features are disabled.
 
+## Spell checking
+
+The Spell Checker plugin needs a Hunspell dictionary for the selected language;
+installing the Hunspell library alone is not enough. A dictionary consists of a
+matching `.dic` and `.aff` file. On Linux, dictionaries are searched in
+`/usr/share/hunspell` and `/usr/share/myspell`, as well as the plugin data
+folder's `spelldicts` directory. On OS/2 and Windows, place them in a `hunspell`
+folder next to the application. Enable the Spell Checker plugin and select an
+installed dictionary from the editor's context menu. Spell checking is
+unavailable when no matching dictionary is found.
+
 ## Build
 
 Configure and build the main application from the repository root:

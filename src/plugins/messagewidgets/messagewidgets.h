@@ -3,6 +3,7 @@
 
 #include <QDesktopServices>
 #include <QObjectCleanupHandler>
+#include <QTemporaryDir>
 #include <definitions/actiongroups.h>
 #include <definitions/optionvalues.h>
 #include <definitions/optionnodes.h>
@@ -172,6 +173,7 @@ private:
 	QList<IViewDropHandler *> FViewDropHandlers;
 	QMultiMap<int,IViewUrlHandler *> FViewUrlHandlers;
 	QMultiMap<int,IEditContentsHandler *> FEditContentsHandlers;
+	QList<QTemporaryDir *> FImageUploadDirs;
 };
 
 #endif // MESSAGEWIDGETS_H

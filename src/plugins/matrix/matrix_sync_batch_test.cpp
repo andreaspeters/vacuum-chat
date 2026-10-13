@@ -1,4 +1,5 @@
 #include "matrix.h"
+#include "matrixavatarkeypolicy.h"
 #include "matrixdatabase.h"
 #include "matrixnetwork.h"
 
@@ -19,6 +20,18 @@ public:
 		const QString &transactionId, const MatrixTextEvent &serverEvent)
 	{
 		return network.replacePendingEvent(roomId, transactionId, serverEvent);
+	}
+	static void configureLocalMessageSend(MatrixNetwork &network, const QString &roomId)
+	{
+		network.FAccesToken = QStringLiteral("synthetic-test-token");
+		network.FNormalizedServerUrl = QStringLiteral("http://127.0.0.1:1");
+		network.FRooms[roomId].isJoined = true;
+		network.FRooms[roomId].encryptionStateKnown = true;
+	}
+	static MatrixTextEvent pendingMessage(const MatrixNetwork &network, const QString &roomId)
+	{
+		const QList<MatrixTextEvent> events = network.FMessageHistory.value(roomId);
+		return events.isEmpty() ? MatrixTextEvent() : events.last();
 	}
 };
 
@@ -50,6 +63,10 @@ public:
 	static void setNetworkUserId(Matrix &matrix, const QString &userId)
 	{
 		matrix.FNetworkUserId = userId;
+	}
+	static void setProtocolRooms(Matrix &matrix, const QList<ProtocolRoom> &rooms)
+	{
+		matrix.FProtocolRooms = rooms;
 	}
 	static QString latestConversationEventId(const Matrix &matrix, const QString &roomId)
 	{
@@ -101,6 +118,24 @@ int main(int argc, char **argv)
     QCoreApplication application(argc, argv);
     Matrix matrix;
     MatrixNetwork network;
+
+    const QString selfUserId = QStringLiteral("@self:example.org");
+    const QString selfAvatarUrl = QStringLiteral("mxc://example.org/self-avatar");
+    ProtocolRoom avatarRoom;
+    avatarRoom.id = QStringLiteral("!avatar-room:example.org");
+    ProtocolRosterEntry selfMember;
+    selfMember.id = selfUserId;
+    selfMember.avatarUrl = selfAvatarUrl;
+    avatarRoom.members.append(selfMember);
+    MatrixSyncBatchTestAccess::setNetworkUserId(matrix, selfUserId);
+    MatrixSyncBatchTestAccess::setProtocolRooms(matrix, {avatarRoom});
+    const QString expectedAvatarKey = MatrixAvatarKeyPolicy::userAvatarKey(
+        matrix.accountId(), selfUserId, selfAvatarUrl);
+    if (!check(matrix.accountAvatarKey() == expectedAvatarKey,
+            "account avatar key comes from the logged-in user's room profile"))
+        return 1;
+    MatrixSyncBatchTestAccess::setNetworkUserId(matrix, QString());
+    MatrixSyncBatchTestAccess::setProtocolRooms(matrix, {});
 
     QList<MatrixTextEvent> events;
     QStringList expectedIds;
@@ -480,6 +515,28 @@ int main(int argc, char **argv)
             Qt::DirectConnection) && localEchoDeliveries.size() == 2 &&
             localEchoDeliveries.last().messageId() == incomingControl.eventId,
             "an unrelated incoming message still reaches the UI exactly once"))
+        return 1;
+
+    const QString imageRoom = QStringLiteral("!sent-image-cache:example.invalid");
+    MatrixNetwork outgoingImageNetwork;
+    MatrixNetworkTestAccess::configureLocalMessageSend(outgoingImageNetwork, imageRoom);
+    const QString imageMxcUrl = QStringLiteral("mxc://media.example.invalid/sent-image");
+    const QJsonObject imageInfo{{QStringLiteral("mimetype"), QStringLiteral("image/png")},
+        {QStringLiteral("w"), 320}, {QStringLiteral("h"), 240}};
+    const QJsonObject imageContent{{QStringLiteral("msgtype"), QStringLiteral("m.image")},
+        {QStringLiteral("body"), QStringLiteral("image.png")},
+        {QStringLiteral("url"), imageMxcUrl}, {QStringLiteral("info"), imageInfo}};
+    outgoingImageNetwork.sendMessageEvent(imageRoom, imageContent,
+        QStringLiteral("synthetic-image-txn"));
+    const MatrixTextEvent pendingImage = MatrixNetworkTestAccess::pendingMessage(
+        outgoingImageNetwork, imageRoom);
+    if (!check(pendingImage.messageType == QStringLiteral("m.image") &&
+            pendingImage.metadata.value(QStringLiteral("msgtype")).toString() ==
+                QStringLiteral("m.image") &&
+            pendingImage.metadata.value(QStringLiteral("url")).toString() == imageMxcUrl &&
+            pendingImage.metadata.value(QStringLiteral("info")).toMap()
+                .value(QStringLiteral("mimetype")).toString() == QStringLiteral("image/png"),
+            "a sent image's local pending event retains the media URL and image info for cache replay"))
         return 1;
 
     std::cout << "PASS: Matrix sync events are delivered in bounded ordered batches\n";

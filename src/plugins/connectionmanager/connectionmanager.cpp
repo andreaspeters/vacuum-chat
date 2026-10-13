@@ -113,9 +113,10 @@ QMultiMap<int, IOptionsWidget *> ConnectionManager::optionsWidgets(const QString
 	if (nodeTree.count()==2 && nodeTree.at(0)==OPN_ACCOUNTS)
 	{
 		const OptionsNode accountOptions = Options::node(OPV_ACCOUNT_ITEM,nodeTree.at(1));
-		if (IProtocolAccount::protocolKindForType(accountOptions.value("type").toString()) ==
-			IProtocolAccount::ProtocolXmpp)
-			widgets.insertMulti(OWO_ACCOUNT_CONNECTION, new ConnectionOptionsWidget(this,accountOptions,AParent));
+		ConnectionOptionsWidget *connectionOptions = new ConnectionOptionsWidget(this,accountOptions,AParent);
+		connectionOptions->setVisible(IProtocolAccount::protocolKindForType(accountOptions.value("type").toString()) ==
+			IProtocolAccount::ProtocolXmpp);
+		widgets.insertMulti(OWO_ACCOUNT_CONNECTION, connectionOptions);
 	}
 	return widgets;
 }

@@ -11,6 +11,11 @@ public:
         model.bindProtocolPresenceProvider(presence);
     }
 
+    static void bindRosterProvider(RostersModel &model, IProtocolRoster *roster)
+    {
+        model.FProtocolRosters.append(roster);
+    }
+
     static void rebuild(RostersModel &model, IProtocolRoster *roster)
     {
         model.rebuildProtocolRoster(roster);
@@ -58,6 +63,7 @@ public:
     QString accountId() const override { return QStringLiteral("stable-account-id"); }
     QString protocol() const override { return QStringLiteral("fixture"); }
     QString streamId() const override { return QStringLiteral("@user:example.org"); }
+    QString accountAvatarKey() const override { return QStringLiteral("matrix-self-avatar-key"); }
     QList<ProtocolRosterEntry> entries() const override { return {}; }
     QList<ProtocolRoom> rooms() const override
     {
@@ -86,6 +92,7 @@ int main(int argc, char **argv)
     FakePresence presence;
     FakeRoster roster;
     RostersModelPresenceTestAccess::bindPresenceProvider(model, &presence);
+    RostersModelPresenceTestAccess::bindRosterProvider(model, &roster);
     RostersModelPresenceTestAccess::rebuild(model, &roster);
 
     IRosterIndex *root = model.protocolStreamRoot(roster.streamId());
@@ -97,6 +104,9 @@ int main(int argc, char **argv)
     if (!root || !room)
         return 1;
 
+    passed &= check(root->data(RDR_AVATAR_KEY).toString() ==
+            QStringLiteral("matrix-self-avatar-key"),
+        "protocol account root exposes the provider's own avatar key");
     passed &= check(root->data(RDR_SHOW).toInt() == IPresence::Offline,
         "new protocol account root reflects the provider's offline state");
     passed &= check(room->data(RDR_SHOW).toInt() == IPresence::Offline,

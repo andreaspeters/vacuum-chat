@@ -9,6 +9,9 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QImage>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QSet>
 #include <QMetaObject>
 #include <QHostAddress>
@@ -17,8 +20,11 @@
 #include <QTcpSocket>
 #include <QThread>
 #include <QTimer>
+#include <QUrl>
+#include <QUrlQuery>
 
 #include <iostream>
+#include <memory>
 
 class MatrixNetworkTestAccess
 {
@@ -32,6 +38,30 @@ public:
     static void setAccessToken(MatrixNetwork &network, const QString &token)
     {
         network.FAccesToken = token;
+    }
+
+    static void setUserId(MatrixNetwork &network, const QString &userId)
+    {
+        network.FUserId = userId;
+    }
+
+    static void prepareBackfill(MatrixNetwork &network, const QString &roomId,
+                                const QString &cursor)
+    {
+        ProtocolRoom room;
+        room.id = roomId;
+        network.FRooms.insert(roomId, room);
+        network.FRoomPrevBatch.insert(roomId, cursor);
+    }
+
+    static void prepareSync(MatrixNetwork &network)
+    {
+        network.FFilterCreationAttempted = true;
+    }
+
+    static QList<MatrixTextEvent> history(const MatrixNetwork &network, const QString &roomId)
+    {
+        return network.FMessageHistory.value(roomId);
     }
 };
 
@@ -178,6 +208,96 @@ private:
     QByteArray FErrorCode;
     QStringList FRequestPaths;
     QList<QByteArray> FAuthorizationHeaders;
+};
+
+class HistoryBackfillServer : public QTcpServer
+{
+public:
+    explicit HistoryBackfillServer(QObject *parent = nullptr) : QTcpServer(parent)
+    {
+        connect(this, &QTcpServer::newConnection, this, [this]() {
+            while (hasPendingConnections()) {
+                QTcpSocket *socket = nextPendingConnection();
+                auto request = std::make_shared<QByteArray>();
+                connect(socket, &QTcpSocket::readyRead, this, [this, socket, request]() {
+                    *request += socket->readAll();
+                    const int headerEnd = request->indexOf("\r\n\r\n");
+                    if (headerEnd < 0 || socket->property("answered").toBool())
+                        return;
+                    const QList<QByteArray> parts = request->left(headerEnd).split('\n')
+                        .value(0).trimmed().split(' ');
+                    if (parts.size() < 2) {
+                        socket->abort();
+                        return;
+                    }
+                    const QString target = QString::fromLatin1(parts.at(1));
+                    FTargets.append(target);
+                    const QUrl url(QStringLiteral("http://localhost") + target);
+                    const QString cursor = QUrlQuery(url).queryItemValue(QStringLiteral("from"));
+                    const bool syncRequest = url.path().endsWith(QStringLiteral("/sync"));
+                    const QJsonObject syncRoom{
+                        {QStringLiteral("timeline"), QJsonObject{
+                            {QStringLiteral("limited"), true},
+                            {QStringLiteral("prev_batch"), QStringLiteral("cursor-0")},
+                            {QStringLiteral("events"), QJsonArray{message(
+                                QStringLiteral("$sync-recent"),
+                                QStringLiteral("@history-test:example.org"),
+                                QStringLiteral("recent message after restart"), 1000)}}}}};
+                    const QJsonObject syncResponse{
+                        {QStringLiteral("next_batch"), QStringLiteral("sync-next")},
+                        {QStringLiteral("device_one_time_keys_count"),
+                            QJsonObject{{QStringLiteral("signed_curve25519"), 100}}},
+                        {QStringLiteral("device_unused_fallback_key_types"),
+                            QJsonArray{QStringLiteral("signed_curve25519")}},
+                        {QStringLiteral("rooms"), QJsonObject{
+                            {QStringLiteral("join"), QJsonObject{
+                                {QStringLiteral("!history-backfill:example.org"), syncRoom}}}}}};
+                    const QJsonArray chunk = syncRequest ? QJsonArray()
+                        : cursor == QStringLiteral("cursor-0")
+                        ? QJsonArray{message(QStringLiteral("$self-backfilled"),
+                            QStringLiteral("@history-test:example.org"),
+                            QStringLiteral("sent on another client"), 900)}
+                        : QJsonArray{
+                            message(QStringLiteral("$older-backfilled"),
+                                QStringLiteral("@history-test:example.org"),
+                                QStringLiteral("older own message"), 800),
+                            message(QStringLiteral("$known-overlap"),
+                                QStringLiteral("@peer:example.org"),
+                                QStringLiteral("already cached"), 700)};
+                    const QByteArray endCursor = cursor == QStringLiteral("cursor-0")
+                        ? QByteArray("cursor-1") : QByteArray("cursor-2");
+                    const QByteArray body = QJsonDocument(syncRequest ? syncResponse : QJsonObject{
+                        {QStringLiteral("chunk"), chunk},
+                        {QStringLiteral("end"), QString::fromLatin1(endCursor)}})
+                        .toJson(QJsonDocument::Compact);
+                    socket->setProperty("answered", true);
+                    QByteArray response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n";
+                    response += "Content-Length: " + QByteArray::number(body.size()) + "\r\n";
+                    response += "Connection: close\r\n\r\n" + body;
+                    socket->write(response);
+                    socket->disconnectFromHost();
+                });
+                connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
+                if (socket->bytesAvailable() > 0)
+                    socket->readyRead();
+            }
+        });
+    }
+
+    QStringList targets() const { return FTargets; }
+
+private:
+    static QJsonObject message(const QString &eventId, const QString &sender,
+                               const QString &body, qint64 timestamp)
+    {
+        return {{QStringLiteral("event_id"), eventId}, {QStringLiteral("sender"), sender},
+            {QStringLiteral("type"), QStringLiteral("m.room.message")},
+            {QStringLiteral("content"), QJsonObject{{QStringLiteral("msgtype"),
+                QStringLiteral("m.text")}, {QStringLiteral("body"), body}}},
+            {QStringLiteral("origin_server_ts"), timestamp}};
+    }
+
+    QStringList FTargets;
 };
 
 bool testLegacyMediaFallback(MatrixNetwork &network, const QString &suffix,
@@ -341,6 +461,126 @@ int main(int argc, char **argv)
     if (!workerSet) {
         stopDatabaseWorker();
         return fail("could not configure Matrix database worker");
+    }
+
+    // A server history page is limited to 50 events. Verify the recovery call
+    // follows the opaque end cursor, includes our own events from another
+    // device, and stops as soon as the local timeline overlaps the server page.
+    const QString backfillRoom = QStringLiteral("!history-backfill:example.org");
+    MatrixNetwork backfillNetwork;
+    QMetaObject::invokeMethod(&backfillNetwork, "setDatabaseWorker", Qt::DirectConnection,
+        Q_ARG(QObject *, static_cast<QObject *>(databaseWorker)));
+    HistoryBackfillServer backfillServer;
+    if (!backfillServer.listen(QHostAddress::LocalHost, 0)) {
+        stopDatabaseWorker();
+        return fail("could not start local Matrix history fixture");
+    }
+    backfillNetwork.setServerUrl(QStringLiteral("http://127.0.0.1:%1")
+        .arg(backfillServer.serverPort()));
+    MatrixNetworkTestAccess::setAccessToken(backfillNetwork, QStringLiteral("synthetic-test-token"));
+    MatrixNetworkTestAccess::setUserId(backfillNetwork, QStringLiteral("@history-test:example.org"));
+    MatrixNetworkTestAccess::prepareSync(backfillNetwork);
+    MatrixTextEvent overlap;
+    overlap.roomId = backfillRoom;
+    overlap.eventId = QStringLiteral("$known-overlap");
+    overlap.userId = QStringLiteral("@peer:example.org");
+    overlap.timestamp = QStringLiteral("700");
+    overlap.eventType = QStringLiteral("m.room.message");
+    overlap.messageType = QStringLiteral("m.text");
+    if (!MatrixNetworkTestAccess::mergeMessageEvent(backfillNetwork, overlap, true)) {
+        stopDatabaseWorker();
+        return fail("could not seed the known Matrix history overlap");
+    }
+
+    int backfillSnapshots = 0;
+    QObject::connect(&backfillNetwork, &MatrixNetwork::messageHistoryChanged, &app,
+        [&](const QString &changedRoom, const QList<MatrixTextEvent> &) {
+            if (changedRoom == backfillRoom)
+                ++backfillSnapshots;
+        });
+    backfillNetwork.sync();
+    QEventLoop backfillLoop;
+    QTimer backfillTimeout;
+    backfillTimeout.setSingleShot(true);
+    QObject::connect(&backfillTimeout, &QTimer::timeout, &backfillLoop,
+        &QEventLoop::quit);
+    QObject::connect(&backfillNetwork, &MatrixNetwork::messageHistoryChanged, &backfillLoop,
+        [&](const QString &changedRoom, const QList<MatrixTextEvent> &) {
+            if (changedRoom == backfillRoom && backfillSnapshots >= 2)
+                backfillLoop.quit();
+        });
+    if (backfillSnapshots < 2) {
+        backfillTimeout.start(5000);
+        backfillLoop.exec();
+    }
+    const QList<MatrixTextEvent> backfilledHistory =
+        MatrixNetworkTestAccess::history(backfillNetwork, backfillRoom);
+    bool sawSelfSent = false;
+    bool selfSentMarked = false;
+    bool sawOlderSelfSent = false;
+    bool sawRecentSyncEvent = false;
+    int overlapCount = 0;
+    for (const MatrixTextEvent &event : backfilledHistory) {
+        sawSelfSent = sawSelfSent || event.eventId == QStringLiteral("$self-backfilled");
+        if (event.eventId == QStringLiteral("$self-backfilled"))
+            selfSentMarked = event.metadata.value(QStringLiteral("sender_is_self")).toBool();
+        sawOlderSelfSent = sawOlderSelfSent || event.eventId == QStringLiteral("$older-backfilled");
+        sawRecentSyncEvent = sawRecentSyncEvent || event.eventId == QStringLiteral("$sync-recent");
+        overlapCount += event.eventId == QStringLiteral("$known-overlap") ? 1 : 0;
+    }
+    const QStringList backfillTargets = backfillServer.targets();
+    QStringList messagePageTargets;
+    for (const QString &target : backfillTargets)
+        if (target.contains(QStringLiteral("/messages?")))
+            messagePageTargets.append(target);
+    if (backfillSnapshots < 2 || !sawSelfSent ||
+        !selfSentMarked ||
+        !sawOlderSelfSent || !sawRecentSyncEvent || overlapCount != 1 ||
+        messagePageTargets.size() != 2 ||
+        !QUrl(QStringLiteral("http://localhost") + backfillTargets.value(0))
+             .path().endsWith(QStringLiteral("/sync")) ||
+        QUrlQuery(QUrl(QStringLiteral("http://localhost") + messagePageTargets.value(0)))
+                .queryItemValue(QStringLiteral("from")) != QStringLiteral("cursor-0") ||
+        QUrlQuery(QUrl(QStringLiteral("http://localhost") + messagePageTargets.value(1)))
+                .queryItemValue(QStringLiteral("from")) != QStringLiteral("cursor-1")) {
+        stopDatabaseWorker();
+        return fail("Matrix backfill did not paginate missing self-sent events to the known overlap");
+    }
+    MatrixNetworkTestAccess::setAccessToken(backfillNetwork, QString());
+
+    // Destroy the network worker while historyBackfill is inside its nested
+    // wait loop. Shutdown aborts the pending reply; the backfill must return
+    // without dereferencing either destroyed QObject.
+    QTcpServer stalledBackfillServer;
+    if (!stalledBackfillServer.listen(QHostAddress::LocalHost, 0)) {
+        stopDatabaseWorker();
+        return fail("could not start stalled Matrix backfill fixture");
+    }
+    QObject::connect(&stalledBackfillServer, &QTcpServer::newConnection, &app,
+        [&stalledBackfillServer]() {
+            while (stalledBackfillServer.hasPendingConnections()) {
+                QTcpSocket *socket = stalledBackfillServer.nextPendingConnection();
+                QObject::connect(socket, &QTcpSocket::readyRead, socket,
+                    [socket]() { socket->readAll(); });
+            }
+        });
+    auto *cancelledBackfillNetwork = new MatrixNetwork;
+    cancelledBackfillNetwork->setServerUrl(QStringLiteral("http://127.0.0.1:%1")
+        .arg(stalledBackfillServer.serverPort()));
+    MatrixNetworkTestAccess::setAccessToken(*cancelledBackfillNetwork,
+        QStringLiteral("synthetic-test-token"));
+    MatrixNetworkTestAccess::prepareBackfill(*cancelledBackfillNetwork,
+        QStringLiteral("!cancelled-backfill:example.org"), QStringLiteral("cursor"));
+    QTimer::singleShot(0, &app, [cancelledBackfillNetwork]() {
+        cancelledBackfillNetwork->shutdown();
+        delete cancelledBackfillNetwork;
+    });
+    const QList<MatrixTextEvent> cancelledBackfill =
+        cancelledBackfillNetwork->historyBackfill(
+            QStringLiteral("!cancelled-backfill:example.org"), 50);
+    if (!cancelledBackfill.isEmpty()) {
+        stopDatabaseWorker();
+        return fail("cancelled Matrix backfill unexpectedly returned events");
     }
 
     if (!testLegacyMediaFallback(network, QStringLiteral("unrecognized"),

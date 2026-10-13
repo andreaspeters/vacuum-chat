@@ -145,6 +145,8 @@ protected slots:
 protected slots:
 	void onShowAddContactDialog(bool);
 	void onShowProtocolAddContactDialog(bool);
+	void onShowProtocolJoinRoomDialog(bool);
+	void onLeaveProtocolRoom(bool);
 	void onSendProtocolAdvert(bool);
 	void onRosterItemReceived(IRoster *ARoster, const IRosterItem &AItem, const IRosterItem &ABefore);
 	void onRosterClosed(IRoster *ARoster);
@@ -158,6 +160,9 @@ protected slots:
 private:
 	QString protocolAccountIdForRoot(IRosterIndex *AIndex) const;
 	bool showProtocolAddContactDialog(const QString &AAccountId);
+	bool showProtocolJoinRoomDialog(const QString &AAccountId);
+	bool leaveProtocolRoom(const QString &AAccountId, const QString &AStreamId,
+		const QString &ARoomId);
 	bool sendProtocolSelfAdvert(const QString &AAccountId, const QString &AStreamId,
 		IProtocolAdvertActions::AdvertType AType);
 

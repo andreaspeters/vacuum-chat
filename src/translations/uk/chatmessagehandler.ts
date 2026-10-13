@@ -60,5 +60,9 @@
         <source>Failed to load history: %1</source>
         <translation>Не вдалося завантажити історію: %1</translation>
     </message>
+    <message><source>Image</source><translation>Зображення</translation></message>
+    <message><source>Save image</source><translation>Зберегти зображення</translation></message>
+    <message><source>Close</source><translation>Закрити</translation></message>
+    <message><source>The image could not be saved.</source><translation>Не вдалося зберегти зображення.</translation></message>
 </context>
 </TS>

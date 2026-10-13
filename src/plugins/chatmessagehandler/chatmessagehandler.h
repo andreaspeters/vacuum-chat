@@ -3,10 +3,12 @@
 
 #include "protocolmessagehistory.h"
 #include "protocolmessagestatus.h"
+#include "protocolhistorysyncthrottle.h"
 
 #define CHATMESSAGEHANDLER_UUID QUuid("{b60cc0e4-8006-4909-b926-fcb3cbc506f0}")
 
 #include <QTimer>
+#include <QElapsedTimer>
 #include <QSet>
 #include <QPointer>
 #include <functional>
@@ -134,6 +136,8 @@ protected:
 		const QString &AHistoryKey, QObject *AProtocolObject);
 	void queueOlderProtocolHistoryPage(QObject *AScrollBarObject);
 	void requestOlderProtocolHistoryPage(const QString &AHistoryKey, QObject *AProtocolObject);
+	void requestProtocolConversationHistorySync(IProtocolMessaging *AMessaging,
+		const ConversationId &AConversationId);
 	void sortProtocolMessagesChronologically(QList<BasicMessage> &AMessages) const;
 	void addProtocolReaction(IChatWindow *AWindow, IProtocolMessaging *AMessaging,
 		const BasicMessage &AMessage);
@@ -221,6 +225,7 @@ private:
 	QMap<QString, bool> FProtocolMessageDirections;
 	QMap<QString, QString> FProtocolMessageRelationTypes;
 	QSet<QString> FProtocolRedactedMessages;
+	QSet<QString> FProtocolImageLoadsInFlight;
 	QSet<QString> FProtocolHistoryLoading;
 	QSet<QString> FProtocolHistoryLoaded;
 	QMap<QString, QList<BasicMessage>> FPendingProtocolHistoryMessages;
@@ -232,6 +237,8 @@ private:
 	QMap<QString, QList<std::function<void()>>> FProtocolRebuildBeforeCallbacks;
 	QMap<QString, QList<std::function<void()>>> FProtocolRebuildAfterCallbacks;
 	ProtocolMessageHistory::ConversationRebuildScheduler FProtocolRebuildScheduler;
+	QElapsedTimer FProtocolHistorySyncClock;
+	ProtocolHistorySyncThrottle FProtocolHistorySyncThrottle;
 private:
 	QMap<QString, IChatWindow *> FHistoryRequests;
 	QMap<IChatWindow *, QList<Message> > FPendingMessages;

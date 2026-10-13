@@ -255,6 +255,12 @@ IRosterIndex *RostersModel::addProtocolStream(const QString &AAccountId)
 		streamIndex->setData(RDR_SHOW, presence->show());
 		streamIndex->setData(RDR_STATUS, presence->status());
 	}
+	if (streamIndex)
+		for (IProtocolRoster *roster : FProtocolRosters)
+			if (roster && roster->streamId() == AAccountId) {
+				streamIndex->setData(RDR_AVATAR_KEY, roster->accountAvatarKey());
+				break;
+			}
 	return streamIndex;
 }
 

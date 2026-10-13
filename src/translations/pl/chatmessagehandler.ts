@@ -60,5 +60,9 @@
         <source>Failed to load history: %1</source>
         <translation>Nie udało się załadować historii: %1</translation>
     </message>
+    <message><source>Image</source><translation>Obraz</translation></message>
+    <message><source>Save image</source><translation>Zapisz obraz</translation></message>
+    <message><source>Close</source><translation>Zamknij</translation></message>
+    <message><source>The image could not be saved.</source><translation>Nie można zapisać obrazu.</translation></message>
 </context>
 </TS>
