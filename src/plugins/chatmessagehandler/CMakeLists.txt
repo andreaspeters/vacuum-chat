@@ -51,6 +51,12 @@ if (BUILD_TESTING)
 	target_include_directories(chatmessagehandler_protocol_capabilities_tests PRIVATE "${CMAKE_SOURCE_DIR}/src")
 	target_compile_features(chatmessagehandler_protocol_capabilities_tests PRIVATE cxx_std_11)
 	target_link_libraries(chatmessagehandler_protocol_capabilities_tests PRIVATE Qt6::Core)
+	add_executable(chatmessagehandler_room_member_actions_tests EXCLUDE_FROM_ALL
+		protocolroommemberactions_test.cpp)
+	target_include_directories(chatmessagehandler_room_member_actions_tests PRIVATE "${CMAKE_SOURCE_DIR}/src")
+	target_compile_features(chatmessagehandler_room_member_actions_tests PRIVATE cxx_std_11)
+	target_link_libraries(chatmessagehandler_room_member_actions_tests PRIVATE Qt6::Core)
+	add_test(NAME chatmessagehandler_room_member_actions_tests COMMAND chatmessagehandler_room_member_actions_tests)
 	add_executable(chatmessagehandler_history_policy_tests EXCLUDE_FROM_ALL
 		protocolhistoryactionpolicy_test.cpp)
 	target_include_directories(chatmessagehandler_history_policy_tests PRIVATE "${CMAKE_SOURCE_DIR}/src")

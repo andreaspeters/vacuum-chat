@@ -6,6 +6,7 @@
 #include "matriximagedisplay.h"
 #include <interfaces/iemoticons.h>
 #include <interfaces/iprotocolcapabilities.h>
+#include <interfaces/iprotocolroommemberactions.h>
 #include <interfaces/protocolhistoryactionpolicy.h>
 #include <utils/systemtimezonecache.h>
 #include <utils/imageloadscheduler.h>
@@ -17,6 +18,9 @@
 
 #include <QMouseEvent>
 #include <QApplication>
+#include <QClipboard>
+#include <QCheckBox>
+#include <QComboBox>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFile>
@@ -25,6 +29,7 @@
 #include <QMenu>
 #include <QLineEdit>
 #include <algorithm>
+#include <functional>
 #include <utility>
 #include <memory>
 
@@ -50,6 +55,7 @@
 #include <QUrl>
 #include <QUrlQuery>
 #include <QPointer>
+
 #include <QHash>
 #include <QThreadPool>
 #include <QRunnable>
@@ -1163,6 +1169,9 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 		addProtocolReaction(AWindow, AMessaging, AMessage);
 		return;
 	}
+	if (AMessage.direction() == BasicMessage::Incoming &&
+		messageNotificationIgnored(AMessaging->streamId(), AMessage.sender()))
+		return;
 	const QString eventKey = prefix + AMessage.messageId();
 	if (AMessage.metadata().value(QStringLiteral("redacted")).toBool()) {
 		FProtocolRedactedMessages.insert(eventKey);
@@ -1969,7 +1978,8 @@ void ChatMessageHandler::setupRoomSidebar(IChatWindow *AWindow, IProtocolMessagi
 	IProtocolRoster *roster = nullptr;
 	if (FPluginManager) {
 		for (IPlugin *plugin : FPluginManager->pluginInterface("IProtocolRoster")) {
-			IProtocolRoster *candidate = qobject_cast<IProtocolRoster *>(plugin->instance());
+			QObject *object = plugin ? plugin->instance() : nullptr;
+			IProtocolRoster *candidate = qobject_cast<IProtocolRoster *>(object);
 			if (candidate && candidate->streamId() == AMessaging->streamId()) {
 				roster = candidate;
 				break;
@@ -1984,6 +1994,19 @@ void ChatMessageHandler::setupRoomSidebar(IChatWindow *AWindow, IProtocolMessagi
 			AWindow->setSidebarWidget(nullptr);
 		}
 		return;
+	}
+	QObject *memberActionsObject = nullptr;
+	const AccountId persistentAccountId = roster->accountId();
+	if (FPluginManager && !persistentAccountId.isEmpty()) {
+		for (IPlugin *plugin : FPluginManager->pluginInterface("IProtocolRoomMemberActions")) {
+			QObject *object = plugin ? plugin->instance() : nullptr;
+			IProtocolRoomMemberActions *actions = qobject_cast<IProtocolRoomMemberActions *>(object);
+			if (actions && actions->accountId() == persistentAccountId &&
+				actions->streamId() == AMessaging->streamId()) {
+				memberActionsObject = object;
+				break;
+			}
+		}
 	}
 	AMessaging->loadConversationAvatars(AWindow->conversationId());
 	const ProtocolRoom currentRoom = roster->room(AWindow->conversationId());
@@ -2123,8 +2146,11 @@ void ChatMessageHandler::setupRoomSidebar(IChatWindow *AWindow, IProtocolMessagi
 		row->setAccessibleName(verificationLabel.isEmpty() ? name->text()
 			: name->text() + QStringLiteral(", ") + verificationLabel);
 		row->setStyleSheet(QStringLiteral("text-align:left; padding:4px;"));
-		connect(row, &QPushButton::clicked, sidebar, [this, AWindow, AMessaging, currentRoom, member]() {
-			showRoomMemberProfile(AWindow->instance(), AMessaging, currentRoom, member);
+		connect(row, &QPushButton::clicked, sidebar,
+			[this, AWindow, AMessaging, currentRoom, member,
+				persistentAccountId, memberActionsObject]() {
+			showRoomMemberProfile(AWindow->instance(), AMessaging, currentRoom, member,
+				persistentAccountId, memberActionsObject);
 		});
 		memberLayout->addWidget(row);
 	}
@@ -2179,38 +2205,180 @@ void ChatMessageHandler::setupRoomSidebar(IChatWindow *AWindow, IProtocolMessagi
 }
 
 void ChatMessageHandler::showRoomMemberProfile(QWidget *AParent, IProtocolMessaging *AMessaging,
-	const ProtocolRoom &ARoom, const ProtocolRosterEntry &AMember)
+	const ProtocolRoom &ARoom, const ProtocolRosterEntry &AMember,
+	const AccountId &AAccountId, QObject *AProtocolObject)
 {
+	if (!AParent || !AMessaging || AMember.id.isEmpty())
+		return;
 	AMessaging->loadUserAvatar(ARoom.id, AMember.id);
+	IProtocolRoomMemberActions *memberActions = qobject_cast<IProtocolRoomMemberActions *>(AProtocolObject);
+	const IProtocolRoomMemberActions::MemberActions availableActions = memberActions
+		? memberActions->actionsForMember(AAccountId, ARoom.id, AMember.id)
+		: IProtocolRoomMemberActions::MemberActions();
 	QDialog *dialog = new QDialog(AParent);
 	dialog->setAttribute(Qt::WA_DeleteOnClose);
-	dialog->setWindowTitle(tr("Show Profile"));
+	dialog->setWindowTitle(tr("Member details"));
 	QVBoxLayout *layout = new QVBoxLayout(dialog);
+	layout->setContentsMargins(24, 20, 24, 20);
+	layout->setSpacing(12);
+	QLabel *avatar = new QLabel(dialog);
+	avatar->setFixedSize(96, 96);
+	avatar->setObjectName(QStringLiteral("protocolMemberProfileAvatar"));
+	avatar->setProperty("avatarKey", AMessaging->userAvatarKey(ARoom.id, AMember.id));
+	avatar->setProperty("accountId", AMessaging->streamId());
+	avatar->setProperty("roomId", ARoom.id);
+	avatar->setProperty("userId", AMember.id);
+	avatar->setAlignment(Qt::AlignCenter);
+	const QString avatarPath = AMessaging->userAvatarPath(ARoom.id, AMember.id);
+	if (!avatarPath.isEmpty())
+		loadImagePixmapAsync(avatar, avatarPath, QSize(96, 96));
+	else {
+		QImage placeholder(96, 96, QImage::Format_ARGB32_Premultiplied);
+		placeholder.fill(QColor(QStringLiteral("#c8d0d9")));
+		avatar->setPixmap(QPixmap::fromImage(RoundedAvatar::roundImageScaled(placeholder, avatar->size())));
+	}
+	layout->addWidget(avatar, 0, Qt::AlignHCenter);
 	QLabel *name = new QLabel(AMember.name.isEmpty() ? AMember.id : AMember.name, dialog);
+	name->setAlignment(Qt::AlignCenter);
+	name->setWordWrap(true);
 	name->setStyleSheet(QStringLiteral("font-size:16px; font-weight:600;"));
 	layout->addWidget(name);
-	const QString avatarPath = AMessaging->userAvatarPath(ARoom.id, AMember.id);
-	if (!avatarPath.isEmpty()) {
-		QLabel *avatar = new QLabel(dialog);
-		avatar->setFixedSize(96, 96);
-		avatar->setObjectName(QStringLiteral("protocolMemberProfileAvatar"));
-		avatar->setProperty("avatarKey", AMessaging->userAvatarKey(ARoom.id, AMember.id));
-		avatar->setProperty("accountId", AMessaging->streamId());
-		avatar->setProperty("roomId", ARoom.id);
-		avatar->setProperty("userId", AMember.id);
-		loadImagePixmapAsync(avatar, avatarPath, QSize(96, 96));
-		avatar->setAlignment(Qt::AlignCenter);
-		layout->addWidget(avatar);
-	}
-	QLabel *id = new QLabel(tr("Matrix ID: %1").arg(AMember.id), dialog);
-	id->setTextInteractionFlags(Qt::TextSelectableByMouse);
-	layout->addWidget(id);
-	QLabel *presence = new QLabel(tr("Presence: %1").arg(AMember.presence), dialog);
+	QLabel *presence = new QLabel(AMember.presence.isEmpty()
+		? tr("Presence unavailable") : AMember.presence, dialog);
+	presence->setAlignment(Qt::AlignCenter);
 	layout->addWidget(presence);
+	QWidget *identifierRow = new QWidget(dialog);
+	QHBoxLayout *identifierLayout = new QHBoxLayout(identifierRow);
+	identifierLayout->setContentsMargins(0, 0, 0, 0);
+	QLabel *id = new QLabel(AMember.id, identifierRow);
+	id->setTextInteractionFlags(Qt::TextSelectableByMouse);
+	id->setWordWrap(true);
+	identifierLayout->addWidget(id, 1);
+	QPushButton *copyId = new QPushButton(tr("Copy"), identifierRow);
+	copyId->setToolTip(tr("Copy user ID"));
+	connect(copyId, &QPushButton::clicked, dialog, [userId = AMember.id]() {
+		QApplication::clipboard()->setText(userId);
+	});
+	identifierLayout->addWidget(copyId);
+	layout->addWidget(identifierRow);
+	if (AMember.hasVerificationState) {
+		QLabel *verification = new QLabel(AMember.isVerified ? tr("Verified") : tr("Unverified"), dialog);
+		verification->setAlignment(Qt::AlignCenter);
+		verification->setAccessibleName(verification->text());
+		layout->addWidget(verification);
+	}
+	QPointer<QObject> actionObject(AProtocolObject);
+	auto dispatchMemberAction = [actionObject, AAccountId, roomId = ARoom.id,
+		memberId = AMember.id](IProtocolRoomMemberActions::Action action,
+		const std::function<bool(IProtocolRoomMemberActions *)> &invoke) {
+		IProtocolRoomMemberActions *actions = actionObject
+			? qobject_cast<IProtocolRoomMemberActions *>(actionObject.data()) : nullptr;
+		return actions && actions->actionsForMember(AAccountId, roomId, memberId).testFlag(action)
+			&& invoke(actions);
+	};
+	if (memberActions && availableActions.testFlag(IProtocolRoomMemberActions::ActionSetRole)) {
+		const QList<ProtocolRoomMemberRole> roles = memberActions->memberRoles(AAccountId, ARoom.id, AMember.id);
+		if (!roles.isEmpty()) {
+			QWidget *roleRow = new QWidget(dialog);
+			QHBoxLayout *roleLayout = new QHBoxLayout(roleRow);
+			roleLayout->setContentsMargins(0, 0, 0, 0);
+			roleLayout->addWidget(new QLabel(tr("Room role"), roleRow));
+			QComboBox *roleSelector = new QComboBox(roleRow);
+			for (const ProtocolRoomMemberRole &role : roles)
+				roleSelector->addItem(role.label, role.id);
+			const int currentRoleIndex = roleSelector->findData(
+				memberActions->memberRole(AAccountId, ARoom.id, AMember.id));
+			if (currentRoleIndex >= 0)
+				roleSelector->setCurrentIndex(currentRoleIndex);
+			roleLayout->addWidget(roleSelector, 1);
+			QPushButton *applyRole = new QPushButton(tr("Apply"), roleRow);
+			roleLayout->addWidget(applyRole);
+			connect(applyRole, &QPushButton::clicked, dialog,
+				[dialog, dispatchMemberAction, roleSelector, AAccountId,
+					roomId = ARoom.id, memberId = AMember.id]() {
+					const QString roleId = roleSelector->currentData().toString();
+					if (roleId.isEmpty() || QMessageBox::question(dialog,
+						QObject::tr("Change room role"), QObject::tr("Apply this role to the member?"))
+						!= QMessageBox::Yes)
+						return;
+					if (!dispatchMemberAction(IProtocolRoomMemberActions::ActionSetRole,
+						[accountId = AAccountId, roomId, memberId, roleId]
+						(IProtocolRoomMemberActions *actions) {
+							return actions->setMemberRole(accountId, roomId, memberId, roleId);
+						}))
+						QMessageBox::warning(dialog, QObject::tr("Room role"),
+							QObject::tr("The room role could not be changed."));
+				});
+			layout->addWidget(roleRow);
+		}
+	}
+	auto addMemberActionButton = [dialog, layout, dispatchMemberAction](const QString &label,
+		IProtocolRoomMemberActions::Action action,
+		const std::function<bool(IProtocolRoomMemberActions *)> &invoke, bool confirm) {
+		QPushButton *button = new QPushButton(label, dialog);
+		connect(button, &QPushButton::clicked, dialog, [dialog, dispatchMemberAction,
+			label, action, invoke, confirm]() {
+			if (confirm && QMessageBox::question(dialog, label,
+				QObject::tr("Are you sure you want to continue?")) != QMessageBox::Yes)
+				return;
+			if (!dispatchMemberAction(action, invoke))
+				QMessageBox::warning(dialog, label, QObject::tr("This action is no longer available."));
+		});
+		layout->addWidget(button);
+	};
+	if (availableActions.testFlag(IProtocolRoomMemberActions::ActionOpenDirectConversation))
+		addMemberActionButton(tr("Send message"), IProtocolRoomMemberActions::ActionOpenDirectConversation,
+			[AAccountId, memberId = AMember.id](IProtocolRoomMemberActions *actions) {
+				return actions->openDirectConversation(AAccountId, memberId);
+			}, false);
+	if (availableActions.testFlag(IProtocolRoomMemberActions::ActionJumpToReadReceipt))
+		addMemberActionButton(tr("Jump to read receipt"), IProtocolRoomMemberActions::ActionJumpToReadReceipt,
+			[AAccountId, roomId = ARoom.id, memberId = AMember.id](IProtocolRoomMemberActions *actions) {
+				return actions->jumpToMemberReadReceipt(AAccountId, roomId, memberId);
+			}, false);
+	if (availableActions.testFlag(IProtocolRoomMemberActions::ActionShareProfile))
+		addMemberActionButton(tr("Share profile"), IProtocolRoomMemberActions::ActionShareProfile,
+			[AAccountId, memberId = AMember.id](IProtocolRoomMemberActions *actions) {
+				return actions->shareMemberProfile(AAccountId, memberId);
+			}, false);
+	if (availableActions.testFlag(IProtocolRoomMemberActions::ActionMentionMember))
+		addMemberActionButton(tr("Mention"), IProtocolRoomMemberActions::ActionMentionMember,
+			[AAccountId, roomId = ARoom.id, memberId = AMember.id](IProtocolRoomMemberActions *actions) {
+				return actions->mentionMember(AAccountId, roomId, memberId);
+			}, false);
+	QCheckBox *muteMember = new QCheckBox(tr("Mute notifications from this member"), dialog);
+	muteMember->setChecked(messageNotificationMuted(AMessaging->streamId(), AMember.id));
+	connect(muteMember, &QCheckBox::toggled, dialog,
+		[streamId = AMessaging->streamId(), memberId = AMember.id](bool muted) {
+			setMessageNotificationMuted(streamId, memberId, muted);
+		});
+	layout->addWidget(muteMember);
+	QCheckBox *ignoreMember = new QCheckBox(tr("Ignore this member"), dialog);
+	ignoreMember->setChecked(messageNotificationIgnored(AMessaging->streamId(), AMember.id));
+	connect(ignoreMember, &QCheckBox::toggled, dialog,
+		[streamId = AMessaging->streamId(), memberId = AMember.id](bool ignored) {
+			setMessageNotificationIgnored(streamId, memberId, ignored);
+		});
+	layout->addWidget(ignoreMember);
+	if (availableActions.testFlag(IProtocolRoomMemberActions::ActionRedactMessages))
+		addMemberActionButton(tr("Remove messages"), IProtocolRoomMemberActions::ActionRedactMessages,
+			[AAccountId, roomId = ARoom.id, memberId = AMember.id](IProtocolRoomMemberActions *actions) {
+				return actions->redactMemberMessages(AAccountId, roomId, memberId);
+			}, true);
+	if (availableActions.testFlag(IProtocolRoomMemberActions::ActionKick))
+		addMemberActionButton(tr("Remove from room"), IProtocolRoomMemberActions::ActionKick,
+			[AAccountId, roomId = ARoom.id, memberId = AMember.id](IProtocolRoomMemberActions *actions) {
+				return actions->kickMember(AAccountId, roomId, memberId);
+			}, true);
+	if (availableActions.testFlag(IProtocolRoomMemberActions::ActionBan))
+		addMemberActionButton(tr("Ban"), IProtocolRoomMemberActions::ActionBan,
+			[AAccountId, roomId = ARoom.id, memberId = AMember.id](IProtocolRoomMemberActions *actions) {
+				return actions->banMember(AAccountId, roomId, memberId);
+			}, true);
 	QDialogButtonBox *buttons = new QDialogButtonBox(QDialogButtonBox::Close, dialog);
 	connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
 	layout->addWidget(buttons);
-	dialog->resize(320, 260);
+	dialog->resize(360, 420);
 	dialog->show();
 }
 

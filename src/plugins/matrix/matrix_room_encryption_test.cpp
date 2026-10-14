@@ -228,6 +228,71 @@ bool testRoomEncryptionLookup(MatrixNetwork &network, const QString &roomId, boo
     return requestedState;
 }
 
+bool testRoomPowerLevelsLookup()
+{
+    QTcpServer server;
+    if (!server.listen(QHostAddress::LocalHost, 0))
+        return false;
+    MatrixNetwork network;
+    const QString roomId = QStringLiteral("!member-actions:example.org");
+    MatrixNetworkTestAccess::addUnknownJoinedRoom(network, roomId);
+    network.setServerUrl(QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort()));
+    MatrixNetworkTestAccess::setAccessToken(network, QStringLiteral("synthetic-token"));
+
+    const QJsonObject expected{{QStringLiteral("users_default"), 0},
+        {QStringLiteral("kick"), 50}, {QStringLiteral("ban"), 50}};
+    QString receivedRoomId;
+    QJsonObject receivedContent;
+    int requestCount = 0;
+    bool validRequest = false;
+    QEventLoop loop;
+    QTimer timeout;
+    timeout.setSingleShot(true);
+    QObject::connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
+    QObject::connect(&network, &MatrixNetwork::roomPowerLevelsChanged, &loop,
+        [&loop, &receivedRoomId, &receivedContent](const QString &receivedRoom,
+            const QJsonObject &content) {
+            receivedRoomId = receivedRoom;
+            receivedContent = content;
+            loop.quit();
+        });
+    const auto handleRequest = [&requestCount, &validRequest](QTcpSocket *socket) {
+        const QByteArray request = socket->readAll();
+        if (request.isEmpty())
+            return;
+        ++requestCount;
+        const QByteArray requestLine = request.left(request.indexOf(char(13)));
+        validRequest = requestLine.startsWith("GET ") &&
+            requestLine.contains("/state/m.room.power_levels/") &&
+            request.contains("Authorization: Bearer synthetic-token");
+        const QByteArray body = QByteArrayLiteral(
+            "{\"users_default\":0,\"kick\":50,\"ban\":50}");
+        QByteArray response = QByteArrayLiteral("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ");
+        response += QByteArray::number(body.size());
+        response += QByteArrayLiteral("\r\nConnection: close\r\n\r\n") + body;
+        socket->write(response);
+        socket->disconnectFromHost();
+    };
+    QObject::connect(&server, &QTcpServer::newConnection, &server,
+        [&server, handleRequest]() {
+            while (server.hasPendingConnections()) {
+                QTcpSocket *socket = server.nextPendingConnection();
+                QObject::connect(socket, &QTcpSocket::readyRead, socket,
+                    [socket, handleRequest]() { handleRequest(socket); });
+                if (socket->bytesAvailable() > 0)
+                    handleRequest(socket);
+            }
+        });
+
+    timeout.start(1500);
+    network.requestRoomPowerLevels(roomId);
+    network.requestRoomPowerLevels(roomId); // Duplicate profile queries must coalesce.
+    loop.exec();
+    MatrixNetworkTestAccess::setAccessToken(network, QString());
+    return receivedRoomId == roomId && receivedContent == expected &&
+        requestCount == 1 && validRequest;
+}
+
 int fail(const char *message)
 {
     std::cerr << message << '\n';
@@ -319,8 +384,12 @@ int main(int argc, char **argv)
         {QStringLiteral("origin_server_ts"), 1700000000000LL},
         {QStringLiteral("content"), QJsonObject{{QStringLiteral("algorithm"),
             QStringLiteral("m.megolm.v1.aes-sha2")}}}};
+    const QJsonObject powerLevelsContent{{QStringLiteral("users_default"), 0},
+        {QStringLiteral("kick"), 50}, {QStringLiteral("ban"), 50}};
+    const QJsonObject powerLevelsEvent{{QStringLiteral("type"), QStringLiteral("m.room.power_levels")},
+        {QStringLiteral("state_key"), QString()}, {QStringLiteral("content"), powerLevelsContent}};
     const QJsonObject roomData{{QStringLiteral("state"), QJsonObject{{QStringLiteral("events"),
-            QJsonArray{roomNameEvent}}}},
+            QJsonArray{roomNameEvent, powerLevelsEvent}}}},
         {QStringLiteral("timeline"), QJsonObject{{QStringLiteral("prev_batch"), QStringLiteral("$prev")},
             {QStringLiteral("events"), QJsonArray{encryptionEvent}}}}};
     const QJsonObject clearRoomData{{QStringLiteral("state"), QJsonObject{{QStringLiteral("events"),
@@ -330,10 +399,20 @@ int main(int argc, char **argv)
     const QJsonObject response{{QStringLiteral("next_batch"), QStringLiteral("$next")},
         {QStringLiteral("rooms"), QJsonObject{{QStringLiteral("join"),
             QJsonObject{{roomId, roomData}, {clearRoomId, clearRoomData}}}}}};
+    QString receivedPowerLevelsRoomId;
+    QJsonObject receivedPowerLevels;
+    QObject::connect(&network, &MatrixNetwork::roomPowerLevelsChanged,
+        [&receivedPowerLevelsRoomId, &receivedPowerLevels](const QString &receivedRoomId,
+            const QJsonObject &content) {
+            receivedPowerLevelsRoomId = receivedRoomId;
+            receivedPowerLevels = content;
+        });
     auto *reply = new SyntheticSyncReply(QJsonDocument(response).toJson(QJsonDocument::Compact),
         &network);
     MatrixNetworkTestAccess::processSyncResponse(network, reply);
     MatrixNetworkTestAccess::suppressBackgroundSync(network);
+    if (receivedPowerLevelsRoomId != roomId || receivedPowerLevels != powerLevelsContent)
+        return fail("sync did not expose the current room power-level state");
 
     bool persistedEncrypted = false;
     bool persistedEncryptedKnown = false;
@@ -412,5 +491,7 @@ int main(int argc, char **argv)
     if (!endpointEncryptedStateResolved || !foundEndpointEncryptedState || !endpointEncryptedKnown ||
         !endpointEncryptedValue)
         return fail("200 room-state lookup result was not persisted as known encrypted");
+    if (!testRoomPowerLevelsLookup())
+        return fail("lazy room power-level lookup did not coalesce or return current state");
     return 0;
 }

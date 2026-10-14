@@ -83,6 +83,13 @@ inline bool messageNotificationMuted(const Jid &AStreamJid, const Jid &ATargetJi
 	return messageNotificationMuted(AStreamJid.pBare(), ATargetJid.pBare());
 }
 
+inline bool messageNotificationMutedForTarget(const QString &AStreamId,
+	const QString &AConversationId, const QString &ASenderId)
+{
+	return (!AConversationId.isEmpty() && messageNotificationMuted(AStreamId, AConversationId)) ||
+		(!ASenderId.isEmpty() && messageNotificationMuted(AStreamId, ASenderId));
+}
+
 inline void setMessageNotificationMuted(const QString &AStreamId, const QString &ATargetId, bool AMuted)
 {
 	const QString key = messageNotificationMuteKey(AStreamId, ATargetId);
@@ -97,6 +104,35 @@ inline void setMessageNotificationMuted(const QString &AStreamId, const QString 
 
 	// Remove entries written by the old dynamic-element-name format.
 	targets.removeNode(key);
+}
+
+inline bool messageNotificationIgnored(const QString &AStreamId, const QString &AMemberId)
+{
+	const QString key = messageNotificationMuteKey(AStreamId, AMemberId);
+	if (!Options::hasNode(OPV_MESSAGES_IGNORED_MEMBERS))
+		return false;
+	const OptionsNode members = Options::node(OPV_MESSAGES_IGNORED_MEMBERS);
+	return members.hasNode("target", key) && members.node("target", key).value().toBool();
+}
+
+inline bool messageNotificationIgnoredForTarget(const QString &AStreamId,
+	const QString &AConversationId, const QString &ASenderId)
+{
+	Q_UNUSED(AConversationId);
+	return !ASenderId.isEmpty() && messageNotificationIgnored(AStreamId, ASenderId);
+}
+
+inline void setMessageNotificationIgnored(const QString &AStreamId,
+	const QString &AMemberId, bool AIgnored)
+{
+	const QString key = messageNotificationMuteKey(AStreamId, AMemberId);
+	if (!AIgnored && !Options::hasNode(OPV_MESSAGES_IGNORED_MEMBERS))
+		return;
+	OptionsNode members = Options::node(OPV_MESSAGES_IGNORED_MEMBERS);
+	if (AIgnored)
+		members.node("target", key).setValue(true);
+	else
+		members.removeNode("target", key);
 }
 
 inline void setMessageNotificationMuted(const Jid &AStreamJid, const Jid &ATargetJid, bool AMuted)

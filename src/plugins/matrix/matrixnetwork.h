@@ -146,6 +146,9 @@ public:
 	Q_INVOKABLE void startDirectChat(const QString &userId);
 	Q_INVOKABLE void inviteUserToRoom(const QString &roomId, const QString &userId);
 	Q_INVOKABLE void leaveRoom(const QString &roomId);
+	Q_INVOKABLE void changeRoomMember(const QString &roomId, const QString &userId,
+		const QString &action, const QString &reason = QString());
+	Q_INVOKABLE void updateRoomPowerLevels(const QString &roomId, const QJsonObject &content);
 	Q_INVOKABLE void uploadFileAndSend(const QString &roomId, const QString &filePath, const QString &mimeType,
 		const QString &messageType, const QString &body, const QString &txnId);
 	Q_INVOKABLE void retryFailedOutbox();
@@ -154,6 +157,7 @@ public:
 	Q_INVOKABLE void requestDisplayName(const QString &userId);
 	Q_INVOKABLE void requestRoomName(const QString &roomId);
 	Q_INVOKABLE void refreshRoomMetadata(const QString &roomId);
+	Q_INVOKABLE void requestRoomPowerLevels(const QString &roomId);
 	Q_INVOKABLE void requestJoinedMembers(const QString &roomId, bool forceRefresh = false);
 	Q_INVOKABLE void refreshRosterSnapshot();
 	Q_INVOKABLE void setKnownRoomTypes(const QVariantMap &roomTypes);
@@ -208,6 +212,7 @@ signals:
 	void directRoomCreated(const QString &userId, const QString &roomId, const QString &error);
 	void rosterChanged(const QList<ProtocolRoom> &rooms);
 	void roomMetadataChanged(const ProtocolRoom &room);
+	void roomPowerLevelsChanged(const QString &roomId, const QJsonObject &content);
 	void roomKeyRequestReceived(const QString &sender, const QString &deviceId,
 		const QString &roomId, const QString &sessionId, const QString &requestId);
 	void deviceKeysReceived(const QString &userId, const QString &deviceId,
@@ -234,6 +239,7 @@ private slots:
 	void onSendFinished(QNetworkReply *reply);
 	void onReplyError(QNetworkReply *reply);
 	void onRoomEncryptionStateFinished(QNetworkReply *reply);
+	void onRoomPowerLevelsStateFinished(QNetworkReply *reply);
 	void onRoomMetadataStateFinished(QNetworkReply *reply);
 
 private:
@@ -307,6 +313,8 @@ private:
 	quint64 FRoomMetadataRequestCounter = 0;
 	QMap<QString, quint64> FRoomEncryptionStateRequests;
 	quint64 FRoomEncryptionStateQueryCounter = 0;
+	QMap<QString, quint64> FRoomPowerLevelsRequests;
+	quint64 FRoomPowerLevelsRequestCounter = 0;
 	QMap<QString, QJsonArray> FPendingRoomEncryptionSends;
 	QSet<QString> FPendingOlmRecoveryDevices;
 	QMap<QString, QPair<QString, QJsonObject>> FPendingForcedOlmEvents;

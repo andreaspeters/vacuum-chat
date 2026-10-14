@@ -9,6 +9,7 @@
 #include <QPointer>
 #include <QUuid>
 #include <QUrl>
+#include <QJsonObject>
 #include <interfaces/ipluginmanager.h>
 #include <interfaces/iaccountmanager.h>
 #include <interfaces/ioptionsmanager.h>
@@ -20,6 +21,7 @@
 #include <interfaces/iprotocolcontactactions.h>
 #include <interfaces/iprotocolaccountavataractions.h>
 #include <interfaces/iprotocolprofileactions.h>
+#include <interfaces/iprotocolroommemberactions.h>
 #include <interfaces/iavatars.h>
 #include <interfaces/iemoticons.h>
 #include <interfaces/irostersview.h>
@@ -33,11 +35,11 @@
 
 class IMessageWidgets;
 
-class Matrix : public QObject, public IPlugin, public IProtocolPresence, public IProtocolRoster, public IProtocolMessaging, public IProtocolNotifications, public IProtocolCapabilities, public IProtocolContactActions, public IProtocolAccountAvatarActions, public IProtocolProfileActions
+class Matrix : public QObject, public IPlugin, public IProtocolPresence, public IProtocolRoster, public IProtocolMessaging, public IProtocolNotifications, public IProtocolCapabilities, public IProtocolContactActions, public IProtocolAccountAvatarActions, public IProtocolProfileActions, public IProtocolRoomMemberActions
 {
 	Q_OBJECT
 	Q_PLUGIN_METADATA(IID "Vacuum.Core.IPlugin/1.0" FILE "matrix.json")
-	Q_INTERFACES(IPlugin IProtocolPresence IProtocolRoster IProtocolMessaging IProtocolNotifications IProtocolCapabilities IProtocolContactActions IProtocolAccountAvatarActions IProtocolProfileActions)
+	Q_INTERFACES(IPlugin IProtocolPresence IProtocolRoster IProtocolMessaging IProtocolNotifications IProtocolCapabilities IProtocolContactActions IProtocolAccountAvatarActions IProtocolProfileActions IProtocolRoomMemberActions)
 
 public:
 	Matrix();
@@ -60,6 +62,19 @@ public:
 	bool setAccountAvatar(const AccountId &accountId, const QByteArray &imageData) override;
 	bool showProfile(const AccountId &accountId, const UserId &userId) override;
 	bool editProfile(const AccountId &accountId) override;
+	IProtocolRoomMemberActions::MemberActions actionsForMember(const AccountId &accountId,
+		const ConversationId &roomId, const UserId &memberId) const override;
+	QList<ProtocolRoomMemberRole> memberRoles(const AccountId &accountId,
+		const ConversationId &roomId, const UserId &memberId) const override;
+	QString memberRole(const AccountId &accountId, const ConversationId &roomId,
+		const UserId &memberId) const override;
+	bool setMemberRole(const AccountId &accountId, const ConversationId &roomId,
+		const UserId &memberId, const QString &roleId) override;
+	bool openDirectConversation(const AccountId &accountId, const UserId &memberId) override;
+	bool kickMember(const AccountId &accountId, const ConversationId &roomId,
+		const UserId &memberId, const QString &reason = QString()) override;
+	bool banMember(const AccountId &accountId, const ConversationId &roomId,
+		const UserId &memberId, const QString &reason = QString()) override;
 	virtual QString protocol() const { return QStringLiteral("matrix"); }
 	virtual QString formatEmoticonForSending(const QString &iconKey) const;
 	virtual QString formatEmoticonsForSending(const QString &text) const;
@@ -136,6 +151,7 @@ public:
 		const QString &userId, const QString &deviceId);
 
 private slots:
+	void onDirectRoomCreated(const QString &userId, const QString &roomId, const QString &error);
 	void onAccountShown(IAccount *AAccount);
 	void onAccountAppended(IAccount *AAccount);
 	void onAccountChanged(IAccount *AAccount, const OptionsNode &ANode);
@@ -162,6 +178,7 @@ private slots:
 		const QString &avatarUrl, const QString &error);
 	void onAccountDisplayNameUpdateFinished(const QString &userId, bool success,
 		const QString &displayName, const QString &error);
+	void onRoomPowerLevelsChanged(const QString &roomId, const QJsonObject &content);
 
 
 signals:
@@ -207,6 +224,8 @@ private:
 	QList<ProtocolNotification> FNotifications;
 	QDialog *FInitialSyncWindow;
 	QSet<QString> FNotificationEventIds;
+	QMap<QString, quint64> FDirectConversationOpenRequests;
+	QMap<QString, QJsonObject> FRoomPowerLevels;
 	QSet<QString> FDisplayedLocalEchoTransactions;
 	bool FNotificationsReady = false;
 

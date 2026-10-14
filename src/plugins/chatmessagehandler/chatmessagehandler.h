@@ -120,7 +120,8 @@ protected:
 	void setupFileTransferAction(IChatWindow *AWindow, IProtocolMessaging *AMessaging = nullptr);
 	void setupRoomSidebar(IChatWindow *AWindow, IProtocolMessaging *AMessaging);
 	void showRoomMemberProfile(QWidget *AParent, IProtocolMessaging *AMessaging,
-		const ProtocolRoom &ARoom, const ProtocolRosterEntry &AMember);
+		const ProtocolRoom &ARoom, const ProtocolRosterEntry &AMember,
+		const AccountId &AAccountId, QObject *AProtocolObject);
 	void showRoomInviteDialog(QWidget *AParent, IProtocolMessaging *AMessaging,
 		const ProtocolRoom &ARoom);
 	void renderProtocolMessage(IChatWindow *AWindow, IProtocolMessaging *AMessaging,

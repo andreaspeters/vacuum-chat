@@ -102,6 +102,42 @@ void testMuteUsesXmlSafeNamespaceAndUnmuteRemovesIt()
 		"unmuting removes the namespaced room entry");
 }
 
+void testMemberMuteSuppressesOnlyThatMemberAcrossRooms()
+{
+	resetOptions();
+	const QString streamId = QStringLiteral("account-A");
+	const QString memberId = QStringLiteral("@member:example.org");
+	setMessageNotificationMuted(streamId, memberId, true);
+	expect(messageNotificationMutedForTarget(streamId, QStringLiteral("!room-one:example.org"), memberId),
+		"member mute suppresses their notifications in a room");
+	expect(!messageNotificationMutedForTarget(streamId, QStringLiteral("!room-one:example.org"),
+		QStringLiteral("@other:example.org")), "member mute does not suppress another member");
+	expect(!messageNotificationMutedForTarget(QStringLiteral("account-B"),
+		QStringLiteral("!room-one:example.org"), memberId),
+		"member mute is scoped to the account");
+	expect(!messageNotificationMutedForTarget(streamId, QStringLiteral("!room-two:example.org"),
+		QStringLiteral("@other:example.org")), "member mute does not suppress unrelated room traffic");
+}
+
+void testMemberIgnoreIsPersistedSeparatelyAndScopedToAccount()
+{
+	resetOptions();
+	const QString memberId = QStringLiteral("@member:example.org");
+	const QString roomId = QStringLiteral("!room:example.org");
+	expect(!messageNotificationIgnoredForTarget(QStringLiteral("account-A"), roomId, memberId),
+		"unknown member is not ignored");
+	setMessageNotificationIgnored(QStringLiteral("account-A"), memberId, true);
+	expect(messageNotificationIgnoredForTarget(QStringLiteral("account-A"), roomId, memberId),
+		"ignored member is filtered in the room");
+	expect(!messageNotificationIgnoredForTarget(QStringLiteral("account-B"), roomId, memberId),
+		"member ignore is scoped to the account");
+	expect(!messageNotificationMuted(QStringLiteral("account-A"), memberId),
+		"ignoring a member does not enable notification mute");
+	setMessageNotificationIgnored(QStringLiteral("account-A"), memberId, false);
+	expect(!messageNotificationIgnoredForTarget(QStringLiteral("account-A"), roomId, memberId),
+		"unignored member is no longer filtered");
+}
+
 void testLegacyXmlMigrationPreservesAccountAndOnlyMutedTargets()
 {
 	const QString mutedHash(64, QLatin1Char('1'));
@@ -165,6 +201,8 @@ int main(int argc, char *argv[])
 	QCoreApplication app(argc, argv);
 	testUnmutedLookupDoesNotCreateOptions();
 	testMuteUsesXmlSafeNamespaceAndUnmuteRemovesIt();
+	testMemberMuteSuppressesOnlyThatMemberAcrossRooms();
+	testMemberIgnoreIsPersistedSeparatelyAndScopedToAccount();
 	testLegacyXmlMigrationPreservesAccountAndOnlyMutedTargets();
 	if (failures != 0)
 		return 1;

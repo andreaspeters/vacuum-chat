@@ -23,7 +23,7 @@ static bool sameProtocolNotification(const ProtocolNotification &left,
 	return left.id == right.id && left.accountId == right.accountId &&
 		left.streamId == right.streamId &&
 		left.conversationId == right.conversationId && left.title == right.title &&
-		left.body == right.body && left.protocol == right.protocol &&
+		left.senderId == right.senderId && left.body == right.body && left.protocol == right.protocol &&
 		left.timestamp == right.timestamp && left.kind == right.kind;
 }
 
@@ -257,9 +257,12 @@ void Notifications::synchronizeProtocolNotifications()
 				continue;
 			const QString muteStreamId = notification.streamId.isEmpty()
 				? notification.accountId : notification.streamId;
-			if (!notification.conversationId.isEmpty() &&
-				messageNotificationMuted(muteStreamId,notification.conversationId))
-				continue;
+			if (messageNotificationMutedForTarget(muteStreamId,
+				notification.conversationId, notification.senderId))
+					continue;
+			if (messageNotificationIgnoredForTarget(muteStreamId,
+				notification.conversationId, notification.senderId))
+					continue;
 
 			const QString key = protocolNotificationKey(notification.accountId,notification.id);
 			activeKeys.insert(key);
@@ -938,7 +941,7 @@ void Notifications::onOptionsOpened()
 void Notifications::onOptionsChanged(const OptionsNode &ANode)
 {
 	const QString path = Options::cleanNSpaces(ANode.path());
-	if (path == OPV_MESSAGES_MUTED_TARGETS)
+	if (path == OPV_MESSAGES_MUTED_TARGETS || path == OPV_MESSAGES_IGNORED_MEMBERS)
 	{
 		synchronizeProtocolNotifications();
 	}
