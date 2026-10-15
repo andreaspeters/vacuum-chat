@@ -133,6 +133,30 @@ void testMemberIgnoreIsPersistedSeparatelyAndScopedToAccount()
 		"member ignore is scoped to the account");
 	expect(!messageNotificationMuted(QStringLiteral("account-A"), memberId),
 		"ignoring a member does not enable notification mute");
+
+	QDomDocument stored;
+	QDomElement root = stored.createElement("options");
+	stored.appendChild(root);
+	Options::exportNode(OPV_MESSAGES_IGNORED_MEMBERS, root);
+	const QDomElement messages = stored.documentElement().firstChildElement("messages");
+	const QDomElement ignored = messages.firstChildElement("ignored-members");
+	const QString key = messageNotificationMuteKey(QStringLiteral("account-A"), memberId);
+	bool hasPersistedIgnore = false;
+	for (QDomElement target = ignored.firstChildElement("target"); !target.isNull();
+		target = target.nextSiblingElement("target"))
+		hasPersistedIgnore = hasPersistedIgnore ||
+			(target.attribute("ns") == key && target.text() == "true");
+	expect(hasPersistedIgnore, "ignore is serialized under its own XML-safe option namespace");
+	expect(messages.firstChildElement("muted-notification-targets").isNull(),
+		"persisting an ignore does not create or reuse the mute namespace");
+
+	QDomDocument parsed;
+	expect(setDocumentContent(parsed, stored.toByteArray()), "ignored-member options serialize as valid XML");
+	Options::setOptions(parsed, QString(), QByteArray());
+	expect(messageNotificationIgnoredForTarget(QStringLiteral("account-A"), roomId, memberId),
+		"ignored-member preference survives an options XML round-trip");
+	expect(!messageNotificationMuted(QStringLiteral("account-A"), memberId),
+		"round-tripping an ignore still leaves mute disabled");
 	setMessageNotificationIgnored(QStringLiteral("account-A"), memberId, false);
 	expect(!messageNotificationIgnoredForTarget(QStringLiteral("account-A"), roomId, memberId),
 		"unignored member is no longer filtered");

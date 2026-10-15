@@ -64,6 +64,9 @@ public:
 	bool editProfile(const AccountId &accountId) override;
 	IProtocolRoomMemberActions::MemberActions actionsForMember(const AccountId &accountId,
 		const ConversationId &roomId, const UserId &memberId) const override;
+	IProtocolRoomMemberActions::MemberActions observeActionsForMember(const AccountId &accountId,
+		const ConversationId &roomId, const UserId &memberId, QObject *callbackContext,
+		IProtocolRoomMemberActions::MemberActionsUpdatedCallback callback) override;
 	QList<ProtocolRoomMemberRole> memberRoles(const AccountId &accountId,
 		const ConversationId &roomId, const UserId &memberId) const override;
 	QString memberRole(const AccountId &accountId, const ConversationId &roomId,
@@ -74,6 +77,8 @@ public:
 	bool kickMember(const AccountId &accountId, const ConversationId &roomId,
 		const UserId &memberId, const QString &reason = QString()) override;
 	bool banMember(const AccountId &accountId, const ConversationId &roomId,
+		const UserId &memberId, const QString &reason = QString()) override;
+	bool redactMemberMessages(const AccountId &accountId, const ConversationId &roomId,
 		const UserId &memberId, const QString &reason = QString()) override;
 	virtual QString protocol() const { return QStringLiteral("matrix"); }
 	virtual QString formatEmoticonForSending(const QString &iconKey) const;
@@ -179,6 +184,10 @@ private slots:
 	void onAccountDisplayNameUpdateFinished(const QString &userId, bool success,
 		const QString &displayName, const QString &error);
 	void onRoomPowerLevelsChanged(const QString &roomId, const QJsonObject &content);
+	void onMemberRedactionFinished(const QString &roomId, const QString &memberId,
+		int succeeded, int total, const QString &error);
+	void onRoomMemberActionFailed(const QString &roomId, const QString &memberId,
+		const QString &action, const QString &error);
 
 
 signals:
@@ -201,6 +210,15 @@ signals:
 private:
 	friend class MatrixPresenceLifecycleTestAccess;
 	friend class MatrixSyncBatchTestAccess;
+	struct PendingMemberActionObserver
+	{
+		quint64 id = 0;
+		QPointer<QObject> context;
+		AccountId accountId;
+		ConversationId roomId;
+		UserId memberId;
+		IProtocolRoomMemberActions::MemberActionsUpdatedCallback callback;
+	};
 
 	QUuid FUuid;
 	MatrixNetwork *FMatrixNetwork;
@@ -226,6 +244,8 @@ private:
 	QSet<QString> FNotificationEventIds;
 	QMap<QString, quint64> FDirectConversationOpenRequests;
 	QMap<QString, QJsonObject> FRoomPowerLevels;
+	QMap<QString, QList<PendingMemberActionObserver>> FPendingMemberActionObservers;
+	quint64 FNextMemberActionObserverId = 1;
 	QSet<QString> FDisplayedLocalEchoTransactions;
 	bool FNotificationsReady = false;
 

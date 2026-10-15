@@ -163,6 +163,7 @@ bool Matrix::setPresence(int AShow, const QString &AStatus)
 		const quint64 sessionGeneration = ++FLoginGeneration;
 		FDirectConversationOpenRequests.clear();
 		FRoomPowerLevels.clear();
+		FPendingMemberActionObservers.clear();
 
 		const QString deviceId = options.value("matrix.device-id").toString();
 		const QString accessToken = qEnvironmentVariable("MATRIX_ACCESS_TOKEN");
@@ -691,6 +692,43 @@ IProtocolRoomMemberActions::MemberActions Matrix::actionsForMember(const Account
 		actions |= IProtocolRoomMemberActions::ActionKick;
 	if (moderation.canBan)
 		actions |= IProtocolRoomMemberActions::ActionBan;
+	if (moderation.canRedact)
+		actions |= IProtocolRoomMemberActions::ActionRedactMessages;
+	return actions;
+}
+
+IProtocolRoomMemberActions::MemberActions Matrix::observeActionsForMember(
+	const AccountId &requestedAccountId, const ConversationId &roomId, const UserId &memberId,
+	QObject *callbackContext, IProtocolRoomMemberActions::MemberActionsUpdatedCallback callback)
+{
+	const IProtocolRoomMemberActions::MemberActions actions =
+		actionsForMember(requestedAccountId, roomId, memberId);
+	if (callback && callbackContext && actions.testFlag(
+		IProtocolRoomMemberActions::ActionOpenDirectConversation) &&
+		!FRoomPowerLevels.contains(roomId)) {
+		PendingMemberActionObserver observer;
+		observer.id = FNextMemberActionObserverId++;
+		observer.context = callbackContext;
+		observer.accountId = requestedAccountId;
+		observer.roomId = roomId;
+		observer.memberId = memberId;
+		observer.callback = callback;
+		FPendingMemberActionObservers[roomId].append(observer);
+		QObject::connect(callbackContext, &QObject::destroyed, this,
+			[this, roomId, observerId = observer.id]() {
+			auto roomObservers = FPendingMemberActionObservers.find(roomId);
+			if (roomObservers == FPendingMemberActionObservers.end())
+				return;
+			QList<PendingMemberActionObserver> &observers = roomObservers.value();
+			for (int i = observers.size() - 1; i >= 0; --i)
+				if (observers.at(i).id == observerId)
+					observers.removeAt(i);
+			if (observers.isEmpty())
+				FPendingMemberActionObservers.erase(roomObservers);
+		});
+	}
+	if (callback)
+		callback(actions);
 	return actions;
 }
 
@@ -740,7 +778,7 @@ bool Matrix::setMemberRole(const AccountId &requestedAccountId, const Conversati
 	users.insert(memberId, level);
 	content.insert(QStringLiteral("users"), users);
 	return QMetaObject::invokeMethod(FMatrixNetwork, "updateRoomPowerLevels", Qt::QueuedConnection,
-		Q_ARG(QString, roomId), Q_ARG(QJsonObject, content));
+		Q_ARG(QString, roomId), Q_ARG(QString, memberId), Q_ARG(QJsonObject, content));
 }
 
 bool Matrix::openDirectConversation(const AccountId &requestedAccountId, const UserId &memberId)
@@ -781,10 +819,71 @@ bool Matrix::banMember(const AccountId &requestedAccountId, const ConversationId
 		Q_ARG(QString, reason));
 }
 
+bool Matrix::redactMemberMessages(const AccountId &requestedAccountId,
+	const ConversationId &roomId, const UserId &memberId, const QString &reason)
+{
+	if (!FMatrixNetwork || !actionsForMember(requestedAccountId, roomId, memberId).testFlag(
+		IProtocolRoomMemberActions::ActionRedactMessages))
+		return false;
+	return QMetaObject::invokeMethod(FMatrixNetwork, "redactMemberMessages", Qt::QueuedConnection,
+		Q_ARG(QString, roomId), Q_ARG(QString, memberId), Q_ARG(QString, reason));
+}
+
 void Matrix::onRoomPowerLevelsChanged(const QString &roomId, const QJsonObject &content)
 {
-	if (!roomId.isEmpty())
-		FRoomPowerLevels.insert(roomId, content);
+	if (roomId.isEmpty())
+		return;
+	FRoomPowerLevels.insert(roomId, content);
+	const QList<PendingMemberActionObserver> observers =
+		FPendingMemberActionObservers.take(roomId);
+	for (const PendingMemberActionObserver &observer : observers) {
+		if (!observer.context || !observer.callback)
+			continue;
+		QPointer<Matrix> adapter(this);
+		const QPointer<QObject> context = observer.context;
+		QMetaObject::invokeMethod(context.data(), [adapter, context, observer]() {
+			if (adapter && context && observer.callback)
+				observer.callback(adapter->actionsForMember(observer.accountId,
+					observer.roomId, observer.memberId));
+		}, Qt::QueuedConnection);
+	}
+}
+
+void Matrix::onMemberRedactionFinished(const QString &roomId, const QString &memberId,
+	int succeeded, int total, const QString &error)
+{
+	QWidget *parent = FRostersViewPlugin && FRostersViewPlugin->rostersView()
+		? FRostersViewPlugin->rostersView()->instance() : nullptr;
+	if (total == 0 && error == QStringLiteral("No matching cached messages were found.")) {
+		QMessageBox::information(parent, tr("Redact cached messages"),
+			tr("No locally cached messages from %1 were found.").arg(memberId));
+		return;
+	}
+	if (!error.isEmpty()) {
+		QMessageBox::warning(parent, tr("Redact cached messages"),
+			tr("Redacted %1 of %2 cached messages in %3 before stopping: %4")
+				.arg(succeeded).arg(total).arg(roomId, error));
+		return;
+	}
+	QMessageBox::information(parent, tr("Redact cached messages"),
+		tr("Redacted %1 cached messages from %2.").arg(succeeded).arg(memberId));
+}
+
+void Matrix::onRoomMemberActionFailed(const QString &roomId, const QString &memberId,
+	const QString &action, const QString &error)
+{
+	QWidget *parent = FRostersViewPlugin && FRostersViewPlugin->rostersView()
+		? FRostersViewPlugin->rostersView()->instance() : nullptr;
+	QString actionLabel;
+	if (action == QStringLiteral("kick"))
+		actionLabel = tr("Kick");
+	else if (action == QStringLiteral("ban"))
+		actionLabel = tr("Ban");
+	else
+		actionLabel = tr("Role change");
+	QMessageBox::warning(parent, tr("Room member action failed"),
+		tr("%1 failed for %2 in room %3: %4")
+			.arg(actionLabel, memberId, roomId, error));
 }
 
 void Matrix::onDirectRoomCreated(const QString &userId, const QString &roomId, const QString &error)
@@ -959,6 +1058,10 @@ void Matrix::onAccountShown(IAccount *AAccount)
 		&Matrix::onRoomMetadataChanged, Qt::UniqueConnection);
 	connect(FMatrixNetwork, &MatrixNetwork::roomPowerLevelsChanged, this,
 		&Matrix::onRoomPowerLevelsChanged, Qt::UniqueConnection);
+	connect(FMatrixNetwork, &MatrixNetwork::memberRedactionFinished, this,
+		&Matrix::onMemberRedactionFinished, Qt::UniqueConnection);
+	connect(FMatrixNetwork, &MatrixNetwork::roomMemberActionFailed, this,
+		&Matrix::onRoomMemberActionFailed, Qt::UniqueConnection);
 	connect(FMatrixNetwork, SIGNAL(messageReceived(BasicMessage)),
 		this, SLOT(onNetworkMessageReceived(BasicMessage)), Qt::UniqueConnection);
 	connect(FMatrixNetwork, &MatrixNetwork::typingChanged,
@@ -1044,6 +1147,7 @@ void Matrix::onAccountHidden(IAccount *AAccount)
 		FNetworkUserId.clear();
 		FProtocolRooms.clear();
 		FRoomPowerLevels.clear();
+		FPendingMemberActionObservers.clear();
 		FProtocolEntries.clear();
 		QMetaObject::invokeMethod(FMatrixNetwork, "logout", Qt::QueuedConnection);
 		if (FInitialSyncWindow)

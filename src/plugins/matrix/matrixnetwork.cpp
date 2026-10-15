@@ -1,6 +1,7 @@
 #include "matrixnetwork.h"
 #include "matrixdatabaseworker.h"
 #include "matrixssss.h"
+#include "matrixroommemberredactionpolicy.h"
 #include "interfaces/iprotocolpresence.h"
 #include "interfaces/ichatstates.h"
 #include "interfaces/matrixreply.h"
@@ -847,6 +848,7 @@ void MatrixNetwork::logout()
 	FRoomNameRequests.clear();
 	FRoomEncryptionStateRequests.clear();
 	FRoomPowerLevelsRequests.clear();
+	FMemberRedactionBatches.clear();
 	FPendingRoomEncryptionSends.clear();
 	FJoinedMembersRequests.clear();
 	FJoinedMembersLoaded.clear();
@@ -1059,6 +1061,28 @@ void MatrixNetwork::startDirectChat(const QString &userId)
 			QStringLiteral("A logged-in Matrix account and a valid Matrix user ID are required"));
 		return;
 	}
+	const ProtocolRoom *existingDirectRoom = nullptr;
+	for (auto roomIt = FRooms.cbegin(); roomIt != FRooms.cend(); ++roomIt) {
+		const ProtocolRoom &room = roomIt.value();
+		if (!room.isDirect || !room.isJoined || !room.isAvailable ||
+			room.membership != QStringLiteral("join"))
+			continue;
+		bool containsCurrentUser = false;
+		bool containsInvitee = false;
+		for (const ProtocolRosterEntry &member : room.members) {
+			if (!member.isValid)
+				continue;
+			containsCurrentUser = containsCurrentUser || member.id == FUserId;
+			containsInvitee = containsInvitee || member.id == inviteeUserId;
+		}
+		if (containsCurrentUser && containsInvitee &&
+			(!existingDirectRoom || room.lastMessageTs > existingDirectRoom->lastMessageTs))
+			existingDirectRoom = &room;
+	}
+	if (existingDirectRoom) {
+		emit directRoomCreated(inviteeUserId, existingDirectRoom->id, QString());
+		return;
+	}
 	const QUrl endpoint(constructUrl(QStringLiteral("/_matrix/client/v3/createRoom")));
 	QNetworkReply *reply = MatrixDirectRoom::requestCreation(FNetworkAccessManager, endpoint,
 		FAccesToken.toUtf8(), inviteeUserId, FUseHttp2, FOlmCrypto.isInitialized());
@@ -1100,9 +1124,10 @@ void MatrixNetwork::changeRoomMember(const QString &roomId, const QString &userI
 	reply->setProperty("membershipAction", action);
 }
 
-void MatrixNetwork::updateRoomPowerLevels(const QString &roomId, const QJsonObject &content)
+void MatrixNetwork::updateRoomPowerLevels(const QString &roomId, const QString &memberId,
+	const QJsonObject &content)
 {
-	if (roomId.isEmpty() || FAccesToken.isEmpty() || !FNetworkAccessManager ||
+	if (roomId.isEmpty() || memberId.isEmpty() || FAccesToken.isEmpty() || !FNetworkAccessManager ||
 		!FRooms.value(roomId).isJoined || content.isEmpty())
 		return;
 	const QString path = QStringLiteral("/_matrix/client/v3/rooms/%1/state/m.room.power_levels/")
@@ -1115,6 +1140,141 @@ void MatrixNetwork::updateRoomPowerLevels(const QString &roomId, const QJsonObje
 		QJsonDocument(content).toJson(QJsonDocument::Compact));
 	reply->setProperty("requestType", QStringLiteral("room_power_levels_update"));
 	reply->setProperty("roomId", roomId);
+	reply->setProperty("memberId", memberId);
+}
+
+void MatrixNetwork::redactMemberMessages(const QString &roomId, const QString &memberId,
+	const QString &reason)
+{
+	if (roomId.isEmpty() || memberId.isEmpty() || FAccesToken.isEmpty() ||
+		!FNetworkAccessManager || !FRooms.value(roomId).isJoined || FUserId.isEmpty()) {
+		emit memberRedactionFinished(roomId, memberId, 0, 0,
+			QStringLiteral("Matrix session or room is unavailable."));
+		return;
+	}
+	for (auto it = FMemberRedactionBatches.cbegin(); it != FMemberRedactionBatches.cend(); ++it)
+		if (it->roomId == roomId && it->memberId == memberId && it->userId == FUserId)
+			return;
+	auto *worker = qobject_cast<MatrixDatabaseWorker *>(FDatabaseWorker);
+	if (!worker) {
+		emit memberRedactionFinished(roomId, memberId, 0, 0,
+			QStringLiteral("Local Matrix history is unavailable."));
+		return;
+	}
+	const QString batchId = generateTransactionId();
+	MemberRedactionBatch batch;
+	batch.roomId = roomId;
+	batch.memberId = memberId;
+	batch.reason = reason;
+	batch.userId = FUserId;
+	batch.loginGeneration = FActiveLoginGeneration;
+	FMemberRedactionBatches.insert(batchId, batch);
+	QPointer<MatrixNetwork> network(this);
+	QPointer<MatrixDatabaseWorker> databaseWorker(worker);
+	const bool queued = QMetaObject::invokeMethod(worker,
+		[network, databaseWorker, batchId, roomId, memberId]() {
+			if (!network || !databaseWorker)
+				return;
+			const QList<MatrixTimelineEvent> cached = databaseWorker->events(roomId);
+			QList<MatrixRoomMemberRedactionPolicy::CachedEvent> candidates;
+			candidates.reserve(cached.size());
+			for (const MatrixTimelineEvent &event : cached)
+				candidates.append({event.roomId, event.eventId, event.sender, event.eventType,
+					event.metadata.value(QStringLiteral("redacted")).toBool()});
+			const QStringList eventIds = MatrixRoomMemberRedactionPolicy::eventIdsToRedact(
+				candidates, roomId, memberId);
+			QMetaObject::invokeMethod(network,
+				[network, batchId, eventIds]() {
+					if (!network)
+						return;
+				auto it = network->FMemberRedactionBatches.find(batchId);
+					if (it == network->FMemberRedactionBatches.end())
+						return;
+					if (it->loginGeneration != network->FActiveLoginGeneration ||
+						it->userId != network->FUserId || it->roomId.isEmpty() ||
+						!network->FRooms.value(it->roomId).isJoined) {
+						network->finishMemberRedaction(batchId,
+							QStringLiteral("Matrix session or room changed before redaction began."));
+						return;
+					}
+					if (eventIds.isEmpty()) {
+						network->finishMemberRedaction(batchId,
+							QStringLiteral("No matching cached messages were found."));
+						return;
+					}
+					it->eventIds = eventIds;
+					network->sendNextMemberRedaction(batchId);
+				}, Qt::QueuedConnection);
+		}, Qt::QueuedConnection);
+	if (!queued)
+		finishMemberRedaction(batchId,
+			QStringLiteral("Could not queue the local Matrix history lookup."));
+}
+
+void MatrixNetwork::sendNextMemberRedaction(const QString &batchId)
+{
+	auto it = FMemberRedactionBatches.find(batchId);
+	if (it == FMemberRedactionBatches.end())
+		return;
+	if (it->loginGeneration != FActiveLoginGeneration || it->userId != FUserId ||
+		FAccesToken.isEmpty() || !FRooms.value(it->roomId).isJoined) {
+		finishMemberRedaction(batchId,
+			QStringLiteral("Matrix session or room changed during redaction."));
+		return;
+	}
+	if (it->nextEvent >= it->eventIds.size()) {
+		finishMemberRedaction(batchId);
+		return;
+	}
+	const QString eventId = it->eventIds.at(it->nextEvent);
+	const QString transactionId = generateTransactionId();
+	const QString path = MatrixRoomMemberRedactionPolicy::redactionPath(
+		it->roomId, eventId, transactionId);
+	if (path.isEmpty()) {
+		finishMemberRedaction(batchId, QStringLiteral("Invalid cached Matrix event identity."));
+		return;
+	}
+	QNetworkRequest request(QUrl(constructUrl(path)));
+	request.setAttribute(QNetworkRequest::Http2AllowedAttribute, FUseHttp2);
+	request.setRawHeader("Authorization", QByteArray("Bearer ") + FAccesToken.toUtf8());
+	request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+	QJsonObject content;
+	if (!it->reason.isEmpty())
+		content.insert(QStringLiteral("reason"), it->reason);
+	QNetworkReply *reply = FNetworkAccessManager->put(request,
+		QJsonDocument(content).toJson(QJsonDocument::Compact));
+	reply->setProperty("requestType", QStringLiteral("room_member_redaction"));
+	reply->setProperty("redactionBatchId", batchId);
+	++it->nextEvent;
+}
+
+void MatrixNetwork::finishMemberRedaction(const QString &batchId, const QString &error)
+{
+	const auto it = FMemberRedactionBatches.find(batchId);
+	if (it == FMemberRedactionBatches.end())
+		return;
+	const QString roomId = it->roomId;
+	const QString memberId = it->memberId;
+	const int succeeded = it->succeeded;
+	const int total = it->eventIds.size();
+	FMemberRedactionBatches.erase(it);
+	emit memberRedactionFinished(roomId, memberId, succeeded, total, error);
+	if (succeeded > 0)
+		sync();
+}
+
+void MatrixNetwork::onMemberRedactionFinished(QNetworkReply *reply)
+{
+	const QString batchId = reply->property("redactionBatchId").toString();
+	auto it = FMemberRedactionBatches.find(batchId);
+	if (it == FMemberRedactionBatches.end())
+		return;
+	if (reply->error() != QNetworkReply::NoError) {
+		finishMemberRedaction(batchId, reply->errorString());
+		return;
+	}
+	++it->succeeded;
+	sendNextMemberRedaction(batchId);
 }
 
 void MatrixNetwork::changeRoomMembership(const QString &roomId, const QString &action)
@@ -2589,17 +2749,19 @@ void MatrixNetwork::onReplyFinished(QNetworkReply *reply)
 		const QString userId = reply->property("memberId").toString();
 		const QString action = reply->property("membershipAction").toString();
 		if (reply->error() != QNetworkReply::NoError)
-			emit syncError(QStringLiteral("Matrix %1 for member %2 failed: %3")
-				.arg(action, userId, reply->errorString()));
+			emit roomMemberActionFailed(roomId, userId, action, reply->errorString());
 		else {
 			Q_UNUSED(roomId);
 			sync();
 		}
+	} else if (type == "room_member_redaction") {
+		onMemberRedactionFinished(reply);
 	} else if (type == "room_power_levels_update") {
 		const QString roomId = reply->property("roomId").toString();
+		const QString memberId = reply->property("memberId").toString();
 		if (reply->error() != QNetworkReply::NoError)
-			emit syncError(QStringLiteral("Matrix room role update failed for %1: %2")
-				.arg(roomId, reply->errorString()));
+			emit roomMemberActionFailed(roomId, memberId, QStringLiteral("role"),
+				reply->errorString());
 		else
 			sync();
 	} else if (type == "room_membership") {
@@ -3457,6 +3619,7 @@ void MatrixNetwork::onLoginFinished(QNetworkReply *reply)
 	FJoinedMembersRequests.clear();
 	FRoomEncryptionStateRequests.clear();
 	FRoomPowerLevelsRequests.clear();
+	FMemberRedactionBatches.clear();
 	FPendingRoomEncryptionSends.clear();
 	FJoinedMembersLoaded.clear();
 	FDeviceKeyQueries.clear();

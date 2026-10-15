@@ -3,7 +3,9 @@
 
 #include <QFlags>
 #include <QList>
+#include <QObject>
 #include <QtPlugin>
+#include <functional>
 #include <interfaces/identity.h>
 
 struct ProtocolRoomMemberRole
@@ -30,6 +32,7 @@ public:
         ActionMentionMember = 1 << 7
     };
     Q_DECLARE_FLAGS(MemberActions, Action)
+    using MemberActionsUpdatedCallback = std::function<void(MemberActions)>;
 
     virtual ~IProtocolRoomMemberActions() {}
 
@@ -43,6 +46,19 @@ public:
         Q_UNUSED(roomId);
         Q_UNUSED(memberId);
         return MemberActions();
+    }
+
+    // Returns the current snapshot and reports later changes while callbackContext
+    // remains alive. Adapters may use this when action availability is asynchronous.
+    virtual MemberActions observeActionsForMember(const AccountId &accountId,
+        const ConversationId &roomId, const UserId &memberId, QObject *callbackContext,
+        MemberActionsUpdatedCallback callback)
+    {
+        Q_UNUSED(callbackContext);
+        const MemberActions actions = actionsForMember(accountId, roomId, memberId);
+        if (callback)
+            callback(actions);
+        return actions;
     }
 
     virtual QList<ProtocolRoomMemberRole> memberRoles(const AccountId &accountId,

@@ -148,7 +148,10 @@ public:
 	Q_INVOKABLE void leaveRoom(const QString &roomId);
 	Q_INVOKABLE void changeRoomMember(const QString &roomId, const QString &userId,
 		const QString &action, const QString &reason = QString());
-	Q_INVOKABLE void updateRoomPowerLevels(const QString &roomId, const QJsonObject &content);
+	Q_INVOKABLE void updateRoomPowerLevels(const QString &roomId, const QString &memberId,
+		const QJsonObject &content);
+	Q_INVOKABLE void redactMemberMessages(const QString &roomId, const QString &memberId,
+		const QString &reason = QString());
 	Q_INVOKABLE void uploadFileAndSend(const QString &roomId, const QString &filePath, const QString &mimeType,
 		const QString &messageType, const QString &body, const QString &txnId);
 	Q_INVOKABLE void retryFailedOutbox();
@@ -213,6 +216,10 @@ signals:
 	void rosterChanged(const QList<ProtocolRoom> &rooms);
 	void roomMetadataChanged(const ProtocolRoom &room);
 	void roomPowerLevelsChanged(const QString &roomId, const QJsonObject &content);
+	void memberRedactionFinished(const QString &roomId, const QString &memberId,
+		int succeeded, int total, const QString &error);
+	void roomMemberActionFailed(const QString &roomId, const QString &memberId,
+		const QString &action, const QString &error);
 	void roomKeyRequestReceived(const QString &sender, const QString &deviceId,
 		const QString &roomId, const QString &sessionId, const QString &requestId);
 	void deviceKeysReceived(const QString &userId, const QString &deviceId,
@@ -241,6 +248,7 @@ private slots:
 	void onRoomEncryptionStateFinished(QNetworkReply *reply);
 	void onRoomPowerLevelsStateFinished(QNetworkReply *reply);
 	void onRoomMetadataStateFinished(QNetworkReply *reply);
+	void onMemberRedactionFinished(QNetworkReply *reply);
 
 private:
 	friend class MatrixNetworkTestAccess;
@@ -291,6 +299,19 @@ private:
 	void changeRoomMembership(const QString &roomId, const QString &action);
 	void requestRoomEncryptionState(const QString &roomId);
 	void queryDeviceKeysForRoom(const QString &roomId);
+	void sendNextMemberRedaction(const QString &batchId);
+	void finishMemberRedaction(const QString &batchId, const QString &error = QString());
+	struct MemberRedactionBatch
+	{
+		QString roomId;
+		QString memberId;
+		QString reason;
+		QString userId;
+		QStringList eventIds;
+		int nextEvent = 0;
+		int succeeded = 0;
+		quint64 loginGeneration = 0;
+	};
 
 	QString FServerUrl;
 	QString FNormalizedServerUrl;
@@ -315,6 +336,7 @@ private:
 	quint64 FRoomEncryptionStateQueryCounter = 0;
 	QMap<QString, quint64> FRoomPowerLevelsRequests;
 	quint64 FRoomPowerLevelsRequestCounter = 0;
+	QMap<QString, MemberRedactionBatch> FMemberRedactionBatches;
 	QMap<QString, QJsonArray> FPendingRoomEncryptionSends;
 	QSet<QString> FPendingOlmRecoveryDevices;
 	QMap<QString, QPair<QString, QJsonObject>> FPendingForcedOlmEvents;

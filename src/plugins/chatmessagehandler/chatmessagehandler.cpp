@@ -2312,10 +2312,11 @@ void ChatMessageHandler::showRoomMemberProfile(QWidget *AParent, IProtocolMessag
 			layout->addWidget(roleRow);
 		}
 	}
-	auto addMemberActionButton = [dialog, layout, dispatchMemberAction](const QString &label,
-		IProtocolRoomMemberActions::Action action,
+	auto addMemberActionButton = [dialog, dispatchMemberAction](QVBoxLayout *targetLayout,
+		const QString &label, IProtocolRoomMemberActions::Action action,
 		const std::function<bool(IProtocolRoomMemberActions *)> &invoke, bool confirm) {
-		QPushButton *button = new QPushButton(label, dialog);
+		QWidget *parent = targetLayout->parentWidget() ? targetLayout->parentWidget() : dialog;
+		QPushButton *button = new QPushButton(label, parent);
 		connect(button, &QPushButton::clicked, dialog, [dialog, dispatchMemberAction,
 			label, action, invoke, confirm]() {
 			if (confirm && QMessageBox::question(dialog, label,
@@ -2324,28 +2325,40 @@ void ChatMessageHandler::showRoomMemberProfile(QWidget *AParent, IProtocolMessag
 			if (!dispatchMemberAction(action, invoke))
 				QMessageBox::warning(dialog, label, QObject::tr("This action is no longer available."));
 		});
-		layout->addWidget(button);
+		targetLayout->addWidget(button);
+	};
+	auto addActionSeparator = [dialog](QVBoxLayout *targetLayout) {
+		QWidget *parent = targetLayout->parentWidget() ? targetLayout->parentWidget() : dialog;
+		QFrame *separator = new QFrame(parent);
+		separator->setFrameShape(QFrame::HLine);
+		separator->setFrameShadow(QFrame::Sunken);
+		targetLayout->addWidget(separator);
 	};
 	if (availableActions.testFlag(IProtocolRoomMemberActions::ActionOpenDirectConversation))
-		addMemberActionButton(tr("Send message"), IProtocolRoomMemberActions::ActionOpenDirectConversation,
+		addMemberActionButton(layout, tr("Send message"), IProtocolRoomMemberActions::ActionOpenDirectConversation,
 			[AAccountId, memberId = AMember.id](IProtocolRoomMemberActions *actions) {
 				return actions->openDirectConversation(AAccountId, memberId);
 			}, false);
 	if (availableActions.testFlag(IProtocolRoomMemberActions::ActionJumpToReadReceipt))
-		addMemberActionButton(tr("Jump to read receipt"), IProtocolRoomMemberActions::ActionJumpToReadReceipt,
+		addMemberActionButton(layout, tr("Jump to read receipt"), IProtocolRoomMemberActions::ActionJumpToReadReceipt,
 			[AAccountId, roomId = ARoom.id, memberId = AMember.id](IProtocolRoomMemberActions *actions) {
 				return actions->jumpToMemberReadReceipt(AAccountId, roomId, memberId);
 			}, false);
 	if (availableActions.testFlag(IProtocolRoomMemberActions::ActionShareProfile))
-		addMemberActionButton(tr("Share profile"), IProtocolRoomMemberActions::ActionShareProfile,
+		addMemberActionButton(layout, tr("Share profile"), IProtocolRoomMemberActions::ActionShareProfile,
 			[AAccountId, memberId = AMember.id](IProtocolRoomMemberActions *actions) {
 				return actions->shareMemberProfile(AAccountId, memberId);
 			}, false);
 	if (availableActions.testFlag(IProtocolRoomMemberActions::ActionMentionMember))
-		addMemberActionButton(tr("Mention"), IProtocolRoomMemberActions::ActionMentionMember,
+		addMemberActionButton(layout, tr("Mention"), IProtocolRoomMemberActions::ActionMentionMember,
 			[AAccountId, roomId = ARoom.id, memberId = AMember.id](IProtocolRoomMemberActions *actions) {
 				return actions->mentionMember(AAccountId, roomId, memberId);
 			}, false);
+	if (availableActions.testFlag(IProtocolRoomMemberActions::ActionOpenDirectConversation) ||
+		availableActions.testFlag(IProtocolRoomMemberActions::ActionJumpToReadReceipt) ||
+		availableActions.testFlag(IProtocolRoomMemberActions::ActionShareProfile) ||
+		availableActions.testFlag(IProtocolRoomMemberActions::ActionMentionMember))
+		addActionSeparator(layout);
 	QCheckBox *muteMember = new QCheckBox(tr("Mute notifications from this member"), dialog);
 	muteMember->setChecked(messageNotificationMuted(AMessaging->streamId(), AMember.id));
 	connect(muteMember, &QCheckBox::toggled, dialog,
@@ -2353,6 +2366,58 @@ void ChatMessageHandler::showRoomMemberProfile(QWidget *AParent, IProtocolMessag
 			setMessageNotificationMuted(streamId, memberId, muted);
 		});
 	layout->addWidget(muteMember);
+	QWidget *moderationActionsWidget = new QWidget(dialog);
+	QVBoxLayout *moderationLayout = new QVBoxLayout(moderationActionsWidget);
+	moderationLayout->setContentsMargins(0, 0, 0, 0);
+	layout->addWidget(moderationActionsWidget);
+	auto refreshModerationActions = [moderationActionsWidget, moderationLayout,
+		addMemberActionButton, addActionSeparator, AAccountId,
+		roomId = ARoom.id, memberId = AMember.id](
+		IProtocolRoomMemberActions::MemberActions actions) {
+		while (QLayoutItem *item = moderationLayout->takeAt(0)) {
+			delete item->widget();
+			delete item;
+		}
+		bool hasModerationAction = false;
+		if (actions.testFlag(IProtocolRoomMemberActions::ActionRedactMessages)) {
+			addMemberActionButton(moderationLayout, QObject::tr("Remove messages"),
+				IProtocolRoomMemberActions::ActionRedactMessages,
+				[accountId = AAccountId, roomId, memberId](IProtocolRoomMemberActions *provider) {
+					return provider->redactMemberMessages(accountId, roomId, memberId);
+				}, true);
+			hasModerationAction = true;
+		}
+		if (actions.testFlag(IProtocolRoomMemberActions::ActionKick)) {
+			addMemberActionButton(moderationLayout, QObject::tr("Remove from room"),
+				IProtocolRoomMemberActions::ActionKick,
+				[accountId = AAccountId, roomId, memberId](IProtocolRoomMemberActions *provider) {
+					return provider->kickMember(accountId, roomId, memberId);
+				}, true);
+			hasModerationAction = true;
+		}
+		if (actions.testFlag(IProtocolRoomMemberActions::ActionBan)) {
+			addMemberActionButton(moderationLayout, QObject::tr("Ban"),
+				IProtocolRoomMemberActions::ActionBan,
+				[accountId = AAccountId, roomId, memberId](IProtocolRoomMemberActions *provider) {
+					return provider->banMember(accountId, roomId, memberId);
+				}, true);
+			hasModerationAction = true;
+		}
+		if (hasModerationAction)
+			addActionSeparator(moderationLayout);
+		moderationActionsWidget->setVisible(hasModerationAction);
+	};
+	if (memberActions) {
+		QPointer<QWidget> moderationActionsGuard(moderationActionsWidget);
+		memberActions->observeActionsForMember(AAccountId, ARoom.id, AMember.id, dialog,
+			[moderationActionsGuard, refreshModerationActions](
+				IProtocolRoomMemberActions::MemberActions actions) {
+				if (moderationActionsGuard)
+					refreshModerationActions(actions);
+			});
+	} else {
+		refreshModerationActions(availableActions);
+	}
 	QCheckBox *ignoreMember = new QCheckBox(tr("Ignore this member"), dialog);
 	ignoreMember->setChecked(messageNotificationIgnored(AMessaging->streamId(), AMember.id));
 	connect(ignoreMember, &QCheckBox::toggled, dialog,
@@ -2360,21 +2425,6 @@ void ChatMessageHandler::showRoomMemberProfile(QWidget *AParent, IProtocolMessag
 			setMessageNotificationIgnored(streamId, memberId, ignored);
 		});
 	layout->addWidget(ignoreMember);
-	if (availableActions.testFlag(IProtocolRoomMemberActions::ActionRedactMessages))
-		addMemberActionButton(tr("Remove messages"), IProtocolRoomMemberActions::ActionRedactMessages,
-			[AAccountId, roomId = ARoom.id, memberId = AMember.id](IProtocolRoomMemberActions *actions) {
-				return actions->redactMemberMessages(AAccountId, roomId, memberId);
-			}, true);
-	if (availableActions.testFlag(IProtocolRoomMemberActions::ActionKick))
-		addMemberActionButton(tr("Remove from room"), IProtocolRoomMemberActions::ActionKick,
-			[AAccountId, roomId = ARoom.id, memberId = AMember.id](IProtocolRoomMemberActions *actions) {
-				return actions->kickMember(AAccountId, roomId, memberId);
-			}, true);
-	if (availableActions.testFlag(IProtocolRoomMemberActions::ActionBan))
-		addMemberActionButton(tr("Ban"), IProtocolRoomMemberActions::ActionBan,
-			[AAccountId, roomId = ARoom.id, memberId = AMember.id](IProtocolRoomMemberActions *actions) {
-				return actions->banMember(AAccountId, roomId, memberId);
-			}, true);
 	QDialogButtonBox *buttons = new QDialogButtonBox(QDialogButtonBox::Close, dialog);
 	connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
 	layout->addWidget(buttons);

@@ -33,6 +33,17 @@ public:
         network.FAccesToken = token;
     }
 
+    static void setUserId(MatrixNetwork &network, const QString &userId)
+    {
+        network.FUserId = userId;
+    }
+
+    static void setRedactionIdentity(MatrixNetwork &network, const QString &userId)
+    {
+        network.FUserId = userId;
+        network.FActiveLoginGeneration = 7;
+    }
+
     static bool roomIsEncrypted(const MatrixNetwork &network, const QString &roomId)
     {
         return network.FRooms.value(roomId).isEncrypted;
@@ -57,6 +68,29 @@ public:
         room.isJoined = true;
         room.isAvailable = true;
         network.FRooms.insert(roomId, room);
+    }
+
+    static void addDirectRoom(MatrixNetwork &network, const QString &roomId,
+        const QStringList &memberIds, bool isDirect, bool isJoined)
+    {
+        ProtocolRoom room;
+        room.id = roomId;
+        room.name = roomId;
+        room.membership = isJoined ? QStringLiteral("join") : QStringLiteral("leave");
+        room.isJoined = isJoined;
+        room.isAvailable = true;
+        room.isDirect = isDirect;
+        for (const QString &memberId : memberIds) {
+            ProtocolRosterEntry member;
+            member.id = memberId;
+            member.isValid = true;
+            room.members.append(member);
+        }
+        network.FRooms.insert(roomId, room);
+        if (isDirect) {
+            network.FDirectRoomIds.insert(roomId);
+            network.FHasDirectRoomData = true;
+        }
     }
 
     static void suppressBackgroundSync(MatrixNetwork &network)
@@ -293,6 +327,300 @@ bool testRoomPowerLevelsLookup()
         requestCount == 1 && validRequest;
 }
 
+bool testRoomMemberModeration()
+{
+    const QString roomId = QStringLiteral("!moderation:example.org");
+    const QString memberId = QStringLiteral("@member:example.org");
+    QTcpServer server;
+    if (!server.listen(QHostAddress::LocalHost, 0))
+        return false;
+    MatrixNetwork network;
+    MatrixNetworkTestAccess::addUnknownJoinedRoom(network, roomId);
+    network.setServerUrl(QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort()));
+    MatrixNetworkTestAccess::setAccessToken(network, QStringLiteral("moderation-test-token"));
+
+    QList<QByteArray> requestLines;
+    QList<QByteArray> requestHeaders;
+    QList<QByteArray> requestBodies;
+    QList<QPair<QString, QString>> failures;
+    bool failureContextCorrect = true;
+    QEventLoop loop;
+    QTimer timeout;
+    timeout.setSingleShot(true);
+    QObject::connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
+    QObject::connect(&network, &MatrixNetwork::roomMemberActionFailed, &loop,
+        [&failures, &failureContextCorrect, &requestLines, &roomId, &memberId, &loop](
+            const QString &failedRoom, const QString &failedMember, const QString &action,
+            const QString &error) {
+            failureContextCorrect = failureContextCorrect && failedRoom == roomId &&
+                failedMember == memberId && !error.isEmpty();
+            failures.append(qMakePair(action, error));
+            if (failures.size() == 2 && requestLines.size() == 3)
+                loop.quit();
+        });
+    const auto handleRequest = [&requestLines, &requestHeaders, &requestBodies, &failures, &loop](QTcpSocket *socket) {
+        QByteArray request = socket->property("moderationRequestBuffer").toByteArray();
+        request += socket->readAll();
+        socket->setProperty("moderationRequestBuffer", request);
+        const int headerEnd = request.indexOf(QByteArrayLiteral("\r\n\r\n"));
+        if (headerEnd < 0)
+            return;
+        const QByteArray headers = request.left(headerEnd);
+        int contentLength = 0;
+        for (const QByteArray &line : headers.split('\n'))
+            if (line.toLower().startsWith("content-length:"))
+                contentLength = line.mid(line.indexOf(':') + 1).trimmed().toInt();
+        if (request.size() < headerEnd + 4 + contentLength)
+            return;
+        const QByteArray requestLine = headers.left(headers.indexOf('\r'));
+        if (requestLine.contains("/rooms/%21moderation%3Aexample.org/kick") ||
+            requestLine.contains("/rooms/%21moderation%3Aexample.org/ban") ||
+            requestLine.contains("/rooms/%21moderation%3Aexample.org/state/m.room.power_levels/")) {
+            requestLines.append(requestLine);
+            requestHeaders.append(headers);
+            requestBodies.append(request.mid(headerEnd + 4, contentLength));
+        }
+        // Leave /sync unanswered: successful mutation handlers start a sync,
+        // but it is outside the three requests under test.
+        if (requestLine.contains("/sync"))
+            return;
+        const bool forbidden = requestLine.contains("/kick") || requestLine.contains("/state/m.room.power_levels/");
+        const QByteArray responseBody = forbidden
+            ? QByteArrayLiteral("{\"errcode\":\"M_FORBIDDEN\",\"error\":\"not allowed\"}")
+            : QByteArrayLiteral("{}");
+        QByteArray response = forbidden
+            ? QByteArrayLiteral("HTTP/1.1 403 Forbidden\r\nContent-Type: application/json\r\nContent-Length: ")
+            : QByteArrayLiteral("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ");
+        response += QByteArray::number(responseBody.size());
+        response += QByteArrayLiteral("\r\nConnection: close\r\n\r\n") + responseBody;
+        socket->write(response);
+        socket->disconnectFromHost();
+        if (requestLines.size() == 3 && failures.size() == 2)
+            loop.quit();
+    };
+    QObject::connect(&server, &QTcpServer::newConnection, &server, [&server, handleRequest]() {
+        while (server.hasPendingConnections()) {
+            QTcpSocket *socket = server.nextPendingConnection();
+            QObject::connect(socket, &QTcpSocket::readyRead, socket,
+                [socket, handleRequest]() { handleRequest(socket); });
+            if (socket->bytesAvailable() > 0)
+                handleRequest(socket);
+        }
+    });
+
+    QJsonObject expectedPowerLevels;
+    expectedPowerLevels.insert(QStringLiteral("users_default"), 0);
+    expectedPowerLevels.insert(QStringLiteral("state_default"), 50);
+    QJsonObject users;
+    users.insert(memberId, 50);
+    expectedPowerLevels.insert(QStringLiteral("users"), users);
+    network.changeRoomMember(roomId, memberId, QStringLiteral("kick"), QStringLiteral("kick reason"));
+    network.changeRoomMember(roomId, memberId, QStringLiteral("ban"), QStringLiteral("ban reason"));
+    network.updateRoomPowerLevels(roomId, memberId, expectedPowerLevels);
+    timeout.start(3000);
+    loop.exec();
+    MatrixNetworkTestAccess::setAccessToken(network, QString());
+
+    const QByteArray roomPath = QByteArrayLiteral("/rooms/%21moderation%3Aexample.org/");
+    bool sawKick = false;
+    bool sawBan = false;
+    bool sawPowerUpdate = false;
+    bool validAuthorization = requestHeaders.size() == 3;
+    for (int i = 0; i < requestLines.size(); ++i) {
+        validAuthorization = validAuthorization &&
+            requestHeaders.at(i).contains("Authorization: Bearer moderation-test-token");
+        const QByteArray &line = requestLines.at(i);
+        const QJsonObject body = QJsonDocument::fromJson(requestBodies.at(i)).object();
+        if (line.startsWith("POST ") && line.contains(roomPath + "kick"))
+            sawKick = body.value(QStringLiteral("user_id")).toString() == memberId &&
+                body.value(QStringLiteral("reason")).toString() == QStringLiteral("kick reason");
+        else if (line.startsWith("POST ") && line.contains(roomPath + "ban"))
+            sawBan = body.value(QStringLiteral("user_id")).toString() == memberId &&
+                body.value(QStringLiteral("reason")).toString() == QStringLiteral("ban reason");
+        else if (line.startsWith("PUT ") && line.contains(roomPath + "state/m.room.power_levels/"))
+            sawPowerUpdate = body == expectedPowerLevels;
+    }
+    bool sawKickFailure = false;
+    bool sawRoleFailure = false;
+    for (const auto &failure : failures) {
+        sawKickFailure = sawKickFailure || failure.first == QStringLiteral("kick");
+        sawRoleFailure = sawRoleFailure || failure.first == QStringLiteral("role");
+    }
+    return requestLines.size() == 3 && sawKick && sawBan && sawPowerUpdate && validAuthorization &&
+        failures.size() == 2 && sawKickFailure && sawRoleFailure && failureContextCorrect;
+}
+
+bool testRoomMemberRedaction(MatrixDatabaseWorker *worker)
+{
+    if (!worker)
+        return false;
+    const QString roomId = QStringLiteral("!redaction:example.org");
+    const QString memberId = QStringLiteral("@member:example.org");
+    QList<MatrixTimelineEvent> cachedEvents;
+    for (const QString &eventId : {QStringLiteral("$redact-one:example.org"),
+             QStringLiteral("$redact-two:example.org")}) {
+        MatrixTimelineEvent event;
+        event.roomId = roomId;
+        event.eventId = eventId;
+        event.eventType = QStringLiteral("m.room.message");
+        event.sender = memberId;
+        event.originTs = 1700000000000LL + cachedEvents.size();
+        cachedEvents.append(event);
+    }
+    MatrixTimelineEvent unrelated;
+    unrelated.roomId = roomId;
+    unrelated.eventId = QStringLiteral("$other-sender:example.org");
+    unrelated.eventType = QStringLiteral("m.room.message");
+    unrelated.sender = QStringLiteral("@other:example.org");
+    unrelated.originTs = 1700000000010LL;
+    cachedEvents.append(unrelated);
+    bool saved = false;
+    const bool saveQueued = QMetaObject::invokeMethod(worker, [&]() {
+        worker->execute([&](MatrixDatabase &database) {
+            saved = database.saveTimeline(roomId, cachedEvents);
+        });
+    }, Qt::BlockingQueuedConnection);
+    if (!saveQueued || !saved)
+        return false;
+
+    QTcpServer server;
+    if (!server.listen(QHostAddress::LocalHost, 0))
+        return false;
+    MatrixNetwork network;
+    MatrixNetworkTestAccess::addUnknownJoinedRoom(network, roomId);
+    network.setServerUrl(QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort()));
+    MatrixNetworkTestAccess::setAccessToken(network, QStringLiteral("synthetic-token"));
+    MatrixNetworkTestAccess::setRedactionIdentity(network, QStringLiteral("@self:example.org"));
+    if (!QMetaObject::invokeMethod(&network, "setDatabaseWorker", Qt::DirectConnection,
+            Q_ARG(QObject *, static_cast<QObject *>(worker))))
+        return false;
+
+    int succeeded = -1;
+    int total = -1;
+    QString error;
+    QEventLoop loop;
+    QTimer timeout;
+    timeout.setSingleShot(true);
+    QObject::connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
+    QObject::connect(&network, &MatrixNetwork::memberRedactionFinished, &loop,
+        [&loop, &succeeded, &total, &error](const QString &, const QString &,
+            int redacted, int count, const QString &failure) {
+            succeeded = redacted;
+            total = count;
+            error = failure;
+            loop.quit();
+        });
+
+    QList<QByteArray> requestLines;
+    QList<QByteArray> bodies;
+    bool validAuthorization = true;
+    const auto handleRequest = [&requestLines, &bodies, &validAuthorization](QTcpSocket *socket) {
+        QByteArray request = socket->property("redactionRequestBuffer").toByteArray();
+        request += socket->readAll();
+        socket->setProperty("redactionRequestBuffer", request);
+        const int headerEnd = request.indexOf(QByteArrayLiteral("\r\n\r\n"));
+        if (headerEnd < 0)
+            return;
+        int contentLength = 0;
+        const QByteArray headers = request.left(headerEnd);
+        for (const QByteArray &line : headers.split('\n'))
+            if (line.toLower().startsWith("content-length:"))
+                contentLength = line.mid(line.indexOf(':') + 1).trimmed().toInt();
+        if (request.size() < headerEnd + 4 + contentLength)
+            return;
+        requestLines.append(headers.left(headers.indexOf('\r')));
+        bodies.append(request.mid(headerEnd + 4, contentLength));
+        validAuthorization = validAuthorization &&
+            headers.contains("Authorization: Bearer synthetic-token");
+        const QByteArray responseBody = QByteArrayLiteral("{\"event_id\":\"$redacted\"}");
+        QByteArray response = QByteArrayLiteral("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ");
+        response += QByteArray::number(responseBody.size());
+        response += QByteArrayLiteral("\r\nConnection: close\r\n\r\n") + responseBody;
+        socket->write(response);
+        socket->disconnectFromHost();
+    };
+    QObject::connect(&server, &QTcpServer::newConnection, &server, [&server, handleRequest]() {
+        while (server.hasPendingConnections()) {
+            QTcpSocket *socket = server.nextPendingConnection();
+            QObject::connect(socket, &QTcpSocket::readyRead, socket,
+                [socket, handleRequest]() { handleRequest(socket); });
+            if (socket->bytesAvailable() > 0)
+                handleRequest(socket);
+        }
+    });
+
+    timeout.start(3000);
+    network.redactMemberMessages(roomId, memberId, QStringLiteral("test reason"));
+    loop.exec();
+    MatrixNetworkTestAccess::setAccessToken(network, QString());
+    QMetaObject::invokeMethod(&network, "setDatabaseWorker", Qt::DirectConnection,
+        Q_ARG(QObject *, static_cast<QObject *>(nullptr)));
+    const bool validTargets = requestLines.size() == 2 &&
+        requestLines.at(0).startsWith("PUT ") &&
+        requestLines.at(0).contains("/redact/%24redact-one%3Aexample.org/") &&
+        requestLines.at(1).startsWith("PUT ") &&
+        requestLines.at(1).contains("/redact/%24redact-two%3Aexample.org/");
+    const bool validBodies = bodies.size() == 2 &&
+        QJsonDocument::fromJson(bodies.value(0)).object().value(QStringLiteral("reason")).toString() ==
+            QStringLiteral("test reason") &&
+        QJsonDocument::fromJson(bodies.value(1)).object().value(QStringLiteral("reason")).toString() ==
+            QStringLiteral("test reason");
+    return succeeded == 2 && total == 2 && error.isEmpty() && validTargets &&
+        validAuthorization && validBodies;
+}
+
+bool testExistingDirectChatReuse()
+{
+    QTcpServer server;
+    if (!server.listen(QHostAddress::LocalHost, 0))
+        return false;
+
+    MatrixNetwork network;
+    const QString ownUserId = QStringLiteral("@self:example.org");
+    const QString contactUserId = QStringLiteral("@contact:example.org");
+    MatrixNetworkTestAccess::setUserId(network, ownUserId);
+    MatrixNetworkTestAccess::setAccessToken(network, QStringLiteral("synthetic-token"));
+    network.setServerUrl(QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort()));
+    MatrixNetworkTestAccess::addDirectRoom(network, QStringLiteral("!other-contact:example.org"),
+        {ownUserId, QStringLiteral("@other:example.org")}, true, true);
+    MatrixNetworkTestAccess::addDirectRoom(network, QStringLiteral("!not-direct:example.org"),
+        {ownUserId, contactUserId}, false, true);
+    MatrixNetworkTestAccess::addDirectRoom(network, QStringLiteral("!not-joined:example.org"),
+        {ownUserId, contactUserId}, true, false);
+    const QString matchingRoomId = QStringLiteral("!matching-direct:example.org");
+    MatrixNetworkTestAccess::addDirectRoom(network, matchingRoomId,
+        {ownUserId, contactUserId}, true, true);
+
+    QString createdForUser;
+    QString openedRoomId;
+    QString error;
+    int requestCount = 0;
+    QObject::connect(&network, &MatrixNetwork::directRoomCreated, &network,
+        [&createdForUser, &openedRoomId, &error](const QString &userId,
+            const QString &roomId, const QString &failure) {
+            createdForUser = userId;
+            openedRoomId = roomId;
+            error = failure;
+        });
+    QObject::connect(&server, &QTcpServer::newConnection, &server,
+        [&server, &requestCount]() {
+            while (server.hasPendingConnections()) {
+                ++requestCount;
+                QTcpSocket *socket = server.nextPendingConnection();
+                socket->abort();
+                socket->deleteLater();
+            }
+        });
+
+    network.startDirectChat(contactUserId);
+    QEventLoop loop;
+    QTimer::singleShot(150, &loop, &QEventLoop::quit);
+    loop.exec();
+    MatrixNetworkTestAccess::setAccessToken(network, QString());
+    return createdForUser == contactUserId && openedRoomId == matchingRoomId &&
+        error.isEmpty() && requestCount == 0;
+}
+
 int fail(const char *message)
 {
     std::cerr << message << '\n';
@@ -330,6 +658,8 @@ bool createLegacyRoomsDatabase(const QString &profileDirectory)
 int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
+    if (!testExistingDirectChatReuse())
+        return fail("Send Message did not reuse the joined direct room for the exact contact");
     QTemporaryDir profileDirectory;
     if (!profileDirectory.isValid())
         return fail("could not create temporary Matrix profile");
@@ -450,6 +780,8 @@ int main(int argc, char **argv)
     bool endpointEncryptedKnown = false;
     const bool foundEndpointEncryptedState = readStoredEncryption(worker, endpointEncryptedRoomId,
         endpointEncryptedValue, endpointEncryptedKnown);
+    const bool memberRedactionWorked = testRoomMemberRedaction(worker);
+    const bool memberModerationWorked = testRoomMemberModeration();
     if (!unknownSendRetried)
         std::cerr << "unknown room cached=" << unknownRoomPresent << ", status known before send="
             << unknownRoomKnownBeforeSend << '\n';
@@ -491,6 +823,10 @@ int main(int argc, char **argv)
     if (!endpointEncryptedStateResolved || !foundEndpointEncryptedState || !endpointEncryptedKnown ||
         !endpointEncryptedValue)
         return fail("200 room-state lookup result was not persisted as known encrypted");
+    if (!memberRedactionWorked)
+        return fail("cached Matrix messages were not redacted through sequential PUT requests");
+    if (!memberModerationWorked)
+        return fail("Matrix kick, ban, and power-level updates sent incorrect HTTP requests");
     if (!testRoomPowerLevelsLookup())
         return fail("lazy room power-level lookup did not coalesce or return current state");
     return 0;

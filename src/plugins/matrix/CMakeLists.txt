@@ -60,6 +60,11 @@ if (BUILD_TESTING)
 	target_include_directories(matrix_room_member_action_policy_tests PRIVATE "${CMAKE_SOURCE_DIR}/src")
 	target_compile_features(matrix_room_member_action_policy_tests PRIVATE cxx_std_11)
 	target_link_libraries(matrix_room_member_action_policy_tests PRIVATE Qt6::Core)
+	add_executable(matrix_room_member_redaction_policy_tests EXCLUDE_FROM_ALL
+		matrixroommemberredactionpolicy_test.cpp)
+	target_compile_features(matrix_room_member_redaction_policy_tests PRIVATE cxx_std_11)
+	target_link_libraries(matrix_room_member_redaction_policy_tests PRIVATE Qt6::Core)
+	add_test(NAME matrix_room_member_redaction_policy_tests COMMAND matrix_room_member_redaction_policy_tests)
 	add_executable(matrix_room_invite_tests EXCLUDE_FROM_ALL
 		matrixroominvite_test.cpp matrixroominvite.cpp matrixdirectroom.cpp)
 	target_link_libraries(matrix_room_invite_tests PRIVATE Qt6::Core Qt6::Network)
