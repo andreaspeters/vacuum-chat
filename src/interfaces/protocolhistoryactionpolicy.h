@@ -6,6 +6,23 @@
 
 namespace ProtocolHistoryActionPolicy
 {
+inline bool canViewLocalConversationHistoryForIdentity(
+    const IProtocolCapabilities *capabilities, const AccountId &accountId,
+    const ConversationId &conversationId)
+{
+    return capabilities && !accountId.isEmpty() && !conversationId.isEmpty() &&
+        capabilities->hasCapabilities(accountId,
+            IProtocolCapabilities::CapabilityViewHistory, conversationId);
+}
+
+inline bool canShowLocalHistoryViewerButton(const IProtocolCapabilities *capabilities,
+    const AccountId &accountId, const ConversationId &conversationId,
+    bool providesLocalHistoryBackup)
+{
+    return providesLocalHistoryBackup &&
+        canViewLocalConversationHistoryForIdentity(capabilities, accountId, conversationId);
+}
+
 inline bool canViewLocalConversationHistory(const IProtocolCapabilities *capabilities,
     const AccountId &accountId, const QString &providerStreamId,
     const QString &rosterStreamId, const ConversationId &conversationId)
@@ -22,7 +39,7 @@ inline bool canViewLocalConversationHistoryForWindow(const IProtocolCapabilities
     const QString &rosterStreamId)
 {
     return !windowAccountId.isEmpty() && !windowConversationId.isEmpty() &&
-        windowAccountId == providerAccountId &&
+        (windowAccountId == providerAccountId || windowAccountId == providerStreamId) &&
         canViewLocalConversationHistory(capabilities, providerAccountId,
             providerStreamId, rosterStreamId, windowConversationId);
 }

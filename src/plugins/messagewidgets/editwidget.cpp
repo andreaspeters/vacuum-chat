@@ -8,13 +8,26 @@
 EditWidget::EditWidget(IMessageWidgets *AMessageWidgets, const Jid& AStreamJid, const Jid &AContactJid, QWidget *AParent) : QWidget(AParent)
 {
 	ui.setupUi(this);
-	ui.medEditor->setAcceptRichText(true);
-	ui.medEditor->setWordWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
-
 	FMessageWidgets = AMessageWidgets;
 	FStreamJid = AStreamJid;
 	FContactJid = AContactJid;
-	
+	initEditor();
+}
+
+
+EditWidget::EditWidget(IMessageWidgets *AMessageWidgets, const AccountId &AAccountId, const ConversationId &AConversationId, QWidget *AParent) : QWidget(AParent)
+{
+	ui.setupUi(this);
+	FMessageWidgets = AMessageWidgets;
+	FAccountId = AAccountId;
+	FConversationId = AConversationId;
+	initEditor();
+}
+void EditWidget::initEditor()
+{
+	ui.medEditor->setAcceptRichText(true);
+	ui.medEditor->setWordWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+
 	FBufferPos = -1;
 	setRichTextEnabled(false);
 
@@ -56,50 +69,6 @@ EditWidget::EditWidget(IMessageWidgets *AMessageWidgets, const Jid& AStreamJid, 
 	onOptionsChanged(Options::node(OPV_MESSAGES_EDITORMINIMUMLINES));
 	connect(Options::instance(),SIGNAL(optionsChanged(const OptionsNode &)),SLOT(onOptionsChanged(const OptionsNode &)));
 
-	connect(Shortcuts::instance(),SIGNAL(shortcutUpdated(const QString &)),SLOT(onShortcutUpdated(const QString &)));
-	connect(Shortcuts::instance(),SIGNAL(shortcutActivated(const QString &, QWidget *)),SLOT(onShortcutActivated(const QString &, QWidget *)));
-}
-
-EditWidget::EditWidget(IMessageWidgets *AMessageWidgets, const AccountId &AAccountId, const ConversationId &AConversationId, QWidget *AParent) : QWidget(AParent)
-{
-	ui.setupUi(this);
-	ui.medEditor->setAcceptRichText(true);
-	ui.medEditor->setWordWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
-	FMessageWidgets = AMessageWidgets;
-	FAccountId = AAccountId;
-	FConversationId = AConversationId;
-	FBufferPos = -1;
-	setRichTextEnabled(false);
-	QToolBar *toolBar = new QToolBar;
-	toolBar->setMovable(false);
-	toolBar->setFloatable(false);
-	toolBar->setIconSize(QSize(16,16));
-	toolBar->layout()->setContentsMargins(0,0,0,0);
-	toolBar->setStyleSheet("QToolBar { border: none; }");
-	toolBar->setSizePolicy(QSizePolicy::Preferred,QSizePolicy::Preferred);
-	ui.wdtSendToolBar->setLayout(new QHBoxLayout);
-	ui.wdtSendToolBar->layout()->setContentsMargins(0,0,0,0);
-	ui.wdtSendToolBar->layout()->addWidget(toolBar);
-	Action *sendAction = new Action(toolBar);
-	sendAction->setToolTip(tr("Send"));
-	sendAction->setIcon(RSR_STORAGE_MENUICONS,MNI_MESSAGEWIDGETS_SEND);
-	connect(sendAction,SIGNAL(triggered(bool)),SLOT(onSendActionTriggered(bool)));
-	FSendToolBar = new ToolBarChanger(toolBar);
-	FSendToolBar->toolBar()->installEventFilter(this);
-	QToolButton *sendButton = FSendToolBar->insertAction(sendAction);
-	sendButton->setSizePolicy(QSizePolicy::Preferred,QSizePolicy::Preferred);
-	ui.medEditor->installEventFilter(this);
-	ui.medEditor->setContextMenuPolicy(Qt::CustomContextMenu);
-	Shortcuts::insertWidgetShortcut(SCT_MESSAGEWINDOWS_EDITNEXTMESSAGE,ui.medEditor);
-	Shortcuts::insertWidgetShortcut(SCT_MESSAGEWINDOWS_EDITPREVMESSAGE,ui.medEditor);
-	connect(ui.medEditor,SIGNAL(createDataRequest(QMimeData *)),SLOT(onEditorCreateDataRequest(QMimeData *)));
-	connect(ui.medEditor,SIGNAL(canInsertDataRequest(const QMimeData *, bool &)),SLOT(onEditorCanInsertDataRequest(const QMimeData *, bool &)));
-	connect(ui.medEditor,SIGNAL(insertDataRequest(const QMimeData *, QTextDocument *)),SLOT(onEditorInsertDataRequest(const QMimeData *, QTextDocument *)));
-	connect(ui.medEditor->document(),SIGNAL(contentsChange(int,int,int)),SLOT(onEditorContentsChanged(int,int,int)));
-	connect(ui.medEditor,SIGNAL(customContextMenuRequested(const QPoint &)),SLOT(onEditorCustomContextMenuRequested(const QPoint &)));
-	onOptionsChanged(Options::node(OPV_MESSAGES_EDITORAUTORESIZE));
-	onOptionsChanged(Options::node(OPV_MESSAGES_EDITORMINIMUMLINES));
-	connect(Options::instance(),SIGNAL(optionsChanged(const OptionsNode &)),SLOT(onOptionsChanged(const OptionsNode &)));
 	connect(Shortcuts::instance(),SIGNAL(shortcutUpdated(const QString &)),SLOT(onShortcutUpdated(const QString &)));
 	connect(Shortcuts::instance(),SIGNAL(shortcutActivated(const QString &, QWidget *)),SLOT(onShortcutActivated(const QString &, QWidget *)));
 }

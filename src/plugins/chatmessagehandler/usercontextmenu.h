@@ -13,7 +13,6 @@ class UserContextMenu :
 	Q_OBJECT;
 public:
 	UserContextMenu(IRostersModel *AModel, IRostersView *AView, IChatWindow *AWindow);
-	~UserContextMenu();
 protected:
 	bool isAcceptedIndex(IRosterIndex *AIndex);
 	void updateMenu();

@@ -1,4 +1,5 @@
 #include "messagearchiver.h"
+#include "xmpplocalhistoryprovider.h"
 #include <algorithm>
 #include <interfaces/iprotocolcapabilities.h>
 #include <interfaces/protocolhistoryactionpolicy.h>
@@ -38,6 +39,28 @@
 #define NS_ARCHIVE_OLD_MANUAL "http://www.xmpp.org/extensions/xep-0136.html#ns-manual"
 #define NS_ARCHIVE_OLD_PREF   "http://www.xmpp.org/extensions/xep-0136.html#ns-pref"
 
+static bool canViewRemoteArchiveForConversation(IPluginManager *pluginManager,
+	IAccountManager *accountManager, const Jid &streamJid, const Jid &conversationJid)
+{
+	if (!pluginManager || !accountManager || !streamJid.isValid() || !conversationJid.isValid())
+		return false;
+	IAccount *account = accountManager->accountByStream(streamJid);
+	if (!account || account->accountId().isNull())
+		return false;
+	const AccountId accountId = account->accountId().toString();
+	const ConversationId conversationId = conversationJid.pFull();
+
+	const QList<IPlugin *> providers = pluginManager->pluginInterface("IProtocolCapabilities");
+	for (IPlugin *plugin : providers)
+	{
+		IProtocolCapabilities *capabilities = plugin
+			? qobject_cast<IProtocolCapabilities *>(plugin->instance()) : nullptr;
+		if (ProtocolHistoryActionPolicy::canManageRemoteArchive(capabilities, accountId))
+			return true;
+	}
+	return false;
+}
+
 MessageArchiver::MessageArchiver()
 {
 	FPluginManager = NULL;
@@ -46,6 +69,7 @@ MessageArchiver::MessageArchiver()
 	FOptionsManager = NULL;
 	FPrivateStorage = NULL;
 	FAccountManager = NULL;
+	FLocalHistoryProviderRegistry = NULL;
 	FRostersViewPlugin = NULL;
 	FDiscovery = NULL;
 	FDataForms = NULL;
@@ -55,9 +79,23 @@ MessageArchiver::MessageArchiver()
 	FMultiUserChatPlugin = NULL;
 }
 
-MessageArchiver::~MessageArchiver()
+IProtocolMessaging *MessageArchiver::providerForAccount(const AccountId &accountId)
 {
+	if (!FPluginManager || !FAccountManager || accountId.isEmpty())
+		return nullptr;
 
+	if (!FLocalHistoryProviderRegistry)
+	{
+		IPlugin *plugin = FPluginManager->pluginInterface("IFileMessageArchive").value(0, nullptr);
+		IFileMessageArchive *archive = plugin ?
+			qobject_cast<IFileMessageArchive *>(plugin->instance()) : nullptr;
+		if (!archive)
+			return nullptr;
+		FLocalHistoryProviderRegistry = new XmppLocalHistoryProviderRegistry(
+			FAccountManager, archive, this);
+	}
+
+	return FLocalHistoryProviderRegistry->providerForAccount(accountId);
 }
 
 void MessageArchiver::pluginInfo(IPluginInfo *APluginInfo)
@@ -620,6 +658,18 @@ QWidget *MessageArchiver::showArchiveWindow(const Jid &AStreamJid, const Jid &AC
 		return window;
 	}
 	return NULL;
+}
+
+QWidget *MessageArchiver::showConversationHistory(const AccountId &accountId,
+	const ConversationId &conversationId, const QString &conversationName,
+	const QList<BasicMessage> &messages)
+{
+	if (accountId.isEmpty() || conversationId.isEmpty() || messages.isEmpty())
+		return nullptr;
+	ArchiveViewWindow *window = new ArchiveViewWindow(FPluginManager, accountId,
+		conversationId, conversationName, messages);
+	WidgetManager::showActivateRaiseWindow(window);
+	return window;
 }
 
 QString MessageArchiver::prefsNamespace(const Jid &AStreamJid) const
@@ -2372,8 +2422,10 @@ void MessageArchiver::onShowArchiveWindowByToolBarAction(bool)
 	if (action)
 	{
 		IToolBarWidget *toolBarWidget = qobject_cast<IToolBarWidget *>(action->parent());
-		if (toolBarWidget && toolBarWidget->editWidget())
-			showArchiveWindow(toolBarWidget->editWidget()->streamJid(),toolBarWidget->editWidget()->contactJid());
+		IEditWidget *editWidget = toolBarWidget ? toolBarWidget->editWidget() : nullptr;
+		if (editWidget && canViewRemoteArchiveForConversation(FPluginManager, FAccountManager,
+				editWidget->streamJid(), editWidget->contactJid()))
+			showArchiveWindow(editWidget->streamJid(), editWidget->contactJid());
 	}
 }
 
@@ -2452,7 +2504,10 @@ void MessageArchiver::onStanzaSessionTerminated(const IStanzaSession &ASession)
 
 void MessageArchiver::onToolBarWidgetCreated(IToolBarWidget *AWidget)
 {
-	if (AWidget && AWidget->editWidget() != NULL && AWidget->editWidget()->streamJid().isValid())
+	IEditWidget *editWidget = AWidget ? AWidget->editWidget() : nullptr;
+	if (editWidget && editWidget->streamJid().isValid() &&
+		canViewRemoteArchiveForConversation(FPluginManager, FAccountManager,
+			editWidget->streamJid(), editWidget->contactJid()))
 	{
 		Action *action = new Action(AWidget->toolBarChanger()->toolBar());
 		action->setText(tr("View History"));

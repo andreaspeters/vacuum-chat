@@ -1,6 +1,23 @@
 #include "matrixdatabaseworker.h"
 
-
+namespace
+{
+QList<MatrixCachedRoom> loadCachedRooms(MatrixDatabase &database,
+                                        bool includeTimelineBoundary)
+{
+    QList<MatrixCachedRoom> result;
+    for (const MatrixStoredRoom &room : database.roomStates()) {
+        MatrixCachedRoom cached;
+        cached.room = room;
+        cached.members = database.roomMembers(room.roomId);
+        if (includeTimelineBoundary)
+            database.loadRoomTimelineBoundary(room.roomId, cached.previousBatch,
+                                              cached.limited);
+        result.append(cached);
+    }
+    return result;
+}
+}
 
 MatrixDatabaseWorker::MatrixDatabaseWorker(QObject *parent)
     : QObject(parent)
@@ -29,15 +46,7 @@ bool MatrixDatabaseWorker::persistSyncBatch(const QList<MatrixTimelineEvent> &ev
 
 QList<MatrixCachedRoom> MatrixDatabaseWorker::loadPersistedRooms()
 {
-    QList<MatrixCachedRoom> result;
-    for (const MatrixStoredRoom &room : FDatabase.roomStates()) {
-        MatrixCachedRoom cached;
-        cached.room = room;
-        cached.members = FDatabase.roomMembers(room.roomId);
-        FDatabase.loadRoomTimelineBoundary(room.roomId, cached.previousBatch, cached.limited);
-        result.append(cached);
-    }
-    return result;
+    return loadCachedRooms(FDatabase, true);
 }
 
 QSet<QString> MatrixDatabaseWorker::directRooms() const
@@ -45,19 +54,9 @@ QSet<QString> MatrixDatabaseWorker::directRooms() const
     return FDatabase.directRooms();
 }
 
-QStringList MatrixDatabaseWorker::roomIds() const
-{
-    return FDatabase.roomIds();
-}
-
 QList<MatrixTimelineEvent> MatrixDatabaseWorker::events(const QString &roomId) const
 {
     return FDatabase.getEvents(roomId);
-}
-
-QMap<QString, QByteArray> MatrixDatabaseWorker::deviceKeysForUser(const QString &userId) const
-{
-    return FDatabase.loadDeviceKeysForUser(userId);
 }
 
 QString MatrixDatabaseWorker::nextBatch() const
@@ -80,58 +79,6 @@ bool MatrixDatabaseWorker::clearNextBatch()
     return FDatabase.setNextBatch(QString());
 }
 
-bool MatrixDatabaseWorker::beginSyncMetadataBatch() { return FDatabase.beginSyncMetadataBatch(); }
-bool MatrixDatabaseWorker::commitSyncMetadataBatch() { return FDatabase.commitSyncMetadataBatch(); }
-void MatrixDatabaseWorker::rollbackSyncMetadataBatch() { FDatabase.rollbackSyncMetadataBatch(); }
-bool MatrixDatabaseWorker::loadRoomTimelineBoundary(const QString &roomId, QString &prevBatch,
-                                                    bool &limited) const
-{
-    return FDatabase.loadRoomTimelineBoundary(roomId, prevBatch, limited);
-}
-bool MatrixDatabaseWorker::saveRoomType(const QString &roomId, const QString &roomType,
-                                        const QString &roomVersion)
-{
-    return FDatabase.saveRoomType(roomId, roomType, roomVersion);
-}
-bool MatrixDatabaseWorker::saveRoomMember(const QString &roomId, const QString &userId,
-                                          const QString &membership, const QString &displayName,
-                                          const QString &avatarUrl, const QString &eventId)
-{
-    return FDatabase.saveRoomMember(roomId, userId, membership, displayName, avatarUrl, eventId);
-}
-bool MatrixDatabaseWorker::saveRoomMemberHistory(const QString &roomId, const QString &userId,
-                                                 const QString &membership, const QString &displayName,
-                                                 const QString &avatarUrl, qint64 validFrom,
-                                                 const QString &eventId)
-{
-    return FDatabase.saveRoomMemberHistory(roomId, userId, membership, displayName, avatarUrl,
-                                           validFrom, eventId);
-}
-bool MatrixDatabaseWorker::saveReceipt(const QString &roomId, const QString &userId,
-                                       const QString &eventId, const QString &receiptType,
-                                       qint64 timestamp)
-{
-    return FDatabase.saveReceipt(roomId, userId, eventId, receiptType, timestamp);
-}
-bool MatrixDatabaseWorker::saveRoomTimelineBoundary(const QString &roomId, const QString &prevBatch,
-                                                    bool limited)
-{
-    return FDatabase.saveRoomTimelineBoundary(roomId, prevBatch, limited);
-}
-bool MatrixDatabaseWorker::saveRoomAccountData(const QString &roomId, const QString &eventType,
-                                               const QByteArray &contentJson)
-{
-    return FDatabase.saveRoomAccountData(roomId, eventType, contentJson);
-}
-bool MatrixDatabaseWorker::saveRoomState(const QString &roomId, const QString &name,
-                                         const QString &topic, const QString &avatarUrl,
-                                         const QString &membership, bool isDirect, bool isEncrypted,
-                                         bool encryptionStateKnown,
-                                         const QString &replacementRoomId, const QString &prevBatch)
-{
-    return FDatabase.saveRoomState(roomId, name, topic, avatarUrl, membership, isDirect,
-                                   isEncrypted, encryptionStateKnown, replacementRoomId, prevBatch);
-}
 bool MatrixDatabaseWorker::checkAndSaveMegolmMessageIndex(const QString &sessionId,
                                                           quint32 messageIndex,
                                                           const QString &eventId,
@@ -155,19 +102,12 @@ void MatrixDatabaseWorker::loadRooms(const QString &profileDirectory,
                                      const QString &serverUrl,
                                      const QString &userId)
 {
-    FDatabase.setProfileDirectory(profileDirectory);
-    if (!FDatabase.openForAccount(serverUrl, userId)) {
+    if (!openForAccount(profileDirectory, serverUrl, userId)) {
         emit loadFailed(QStringLiteral("Matrix SQLite database could not be opened"));
         return;
     }
 
-    QList<MatrixCachedRoom> result;
-    for (const MatrixStoredRoom &room : FDatabase.roomStates()) {
-        MatrixCachedRoom cached;
-        cached.room = room;
-        cached.members = FDatabase.roomMembers(room.roomId);
-        result.append(cached);
-    }
+    const QList<MatrixCachedRoom> result = loadCachedRooms(FDatabase, false);
     emit roomsLoaded(result);
 }
 
@@ -176,13 +116,13 @@ void MatrixDatabaseWorker::loadHistory(const QString &profileDirectory,
                                        const QString &userId,
                                        const QString &roomId)
 {
-    FDatabase.setProfileDirectory(profileDirectory);
-    if (!FDatabase.openForAccount(serverUrl, userId)) {
+    MatrixHistoryPageResult page;
+    if (!loadHistoryPageForAccount(profileDirectory, serverUrl, userId, roomId, 30,
+            0, QString(), page)) {
         emit historyLoadFailed(roomId,
             QStringLiteral("Matrix SQLite database could not be opened for history"));
         return;
     }
-    const MatrixHistoryPageResult page = FDatabase.loadHistoryPage(roomId, 30);
     if (!page.success) {
         emit historyLoadFailed(roomId,
             QStringLiteral("Matrix SQLite database could not load history page"));
@@ -198,12 +138,23 @@ void MatrixDatabaseWorker::loadHistoryPage(const QString &profileDirectory,
                                            qint64 beforeOriginTs,
                                            const QString &beforeEventId)
 {
-    FDatabase.setProfileDirectory(profileDirectory);
-    if (!FDatabase.openForAccount(serverUrl, userId)) {
-        emit historyPageLoaded(roomId, MatrixHistoryPageResult());
-        return;
-    }
+    MatrixHistoryPageResult page;
+    if (!loadHistoryPageForAccount(profileDirectory, serverUrl, userId, roomId, limit,
+            beforeOriginTs, beforeEventId, page))
+        page = MatrixHistoryPageResult();
+    emit historyPageLoaded(roomId, page);
+}
 
-    emit historyPageLoaded(roomId, FDatabase.loadHistoryPage(
-        roomId, limit, beforeOriginTs, beforeEventId));
+bool MatrixDatabaseWorker::loadHistoryPageForAccount(const QString &profileDirectory,
+                                                     const QString &serverUrl,
+                                                     const QString &userId,
+                                                     const QString &roomId, int limit,
+                                                     qint64 beforeOriginTs,
+                                                     const QString &beforeEventId,
+                                                     MatrixHistoryPageResult &page)
+{
+    if (!openForAccount(profileDirectory, serverUrl, userId))
+        return false;
+    page = FDatabase.loadHistoryPage(roomId, limit, beforeOriginTs, beforeEventId);
+    return true;
 }

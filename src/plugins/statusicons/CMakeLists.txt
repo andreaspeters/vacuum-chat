@@ -15,8 +15,9 @@ if (IS_ENABLED)
 endif (IS_ENABLED)
 
 if (BUILD_TESTING)
+	set(STATUSICONS_TEST_SOURCE_DIR "${CMAKE_SOURCE_DIR}/tests/statusicons")
 	add_executable(statusicons_roster_presence_tests EXCLUDE_FROM_ALL
-		roster_presence_icons_test.cpp
+		${STATUSICONS_TEST_SOURCE_DIR}/roster_presence_icons_test.cpp
 		${CMAKE_SOURCE_DIR}/src/plugins/rostersmodel/rosterindex.cpp
 		${CMAKE_SOURCE_DIR}/src/plugins/rostersmodel/rosterindex.h)
 	target_include_directories(statusicons_roster_presence_tests PRIVATE

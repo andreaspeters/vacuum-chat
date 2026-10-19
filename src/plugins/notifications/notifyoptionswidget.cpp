@@ -16,6 +16,33 @@ enum ModelDataRoles
 	MDR_SORT
 };
 
+static void updateNotificationKindCheckStates(
+		const QMap<QString, QStandardItem *> &AItems,
+		INotifications *ANotifications, bool AIsDefaults = false)
+{
+	for (QMap<QString, QStandardItem *>::const_iterator it = AItems.constBegin();
+		it != AItems.constEnd(); ++it)
+	{
+		QStandardItem *typeNameItem = it.value();
+		ushort kinds = 0;
+		if (AIsDefaults)
+			kinds = !it.key().isEmpty()
+				? ANotifications->notificationType(it.key()).kindDefs
+				: 0xFFFF;
+		else
+			kinds = !it.key().isEmpty()
+				? ANotifications->typeNotificationKinds(it.key())
+				: ANotifications->enabledNotificationKinds();
+
+		for (int row = 0; row < typeNameItem->rowCount(); ++row)
+		{
+			QStandardItem *kindEnableItem = typeNameItem->child(row, COL_ENABLE);
+			const ushort kind = (ushort)kindEnableItem->data(MDR_KIND).toInt();
+			kindEnableItem->setCheckState((kinds & kind) > 0 ? Qt::Checked : Qt::Unchecked);
+		}
+	}
+}
+
 bool SortFilterProxyModel::lessThan( const QModelIndex &ALeft, const QModelIndex &ARight ) const
 {
 	return QSortFilterProxyModel::lessThan(ALeft,ARight);
@@ -83,16 +110,7 @@ void NotifyOptionsWidget::apply()
 void NotifyOptionsWidget::reset()
 {
 	ui.spbPopupTimeout->setValue(Options::node(OPV_NOTIFICATIONS_POPUPTIMEOUT).value().toInt());
-	for(QMap<QString, QStandardItem *>::const_iterator it=FTypeItems.constBegin(); it!=FTypeItems.constEnd(); ++it)
-	{
-		QStandardItem *typeNameItem = it.value();
-		ushort kinds = !it.key().isEmpty() ? FNotifications->typeNotificationKinds(it.key()) : FNotifications->enabledNotificationKinds();
-		for (int row=0; row<typeNameItem->rowCount(); row++)
-		{
-			QStandardItem *kindEnableItem = typeNameItem->child(row, COL_ENABLE);
-			kindEnableItem->setCheckState((kinds & (ushort)kindEnableItem->data(MDR_KIND).toInt())>0 ? Qt::Checked : Qt::Unchecked);
-		}
-	}
+	updateNotificationKindCheckStates(FTypeItems, FNotifications);
 	void childReset();
 }
 
@@ -186,16 +204,7 @@ void NotifyOptionsWidget::setItemItalic(QStandardItem *AItem, bool AItalic) cons
 
 void NotifyOptionsWidget::onRestoreDefaultsClicked()
 {
-	for(QMap<QString, QStandardItem *>::const_iterator it=FTypeItems.constBegin(); it!=FTypeItems.constEnd(); ++it)
-	{
-		QStandardItem *typeNameItem = it.value();
-		ushort kinds = !it.key().isEmpty() ? FNotifications->notificationType(it.key()).kindDefs : 0xFFFF;
-		for (int row=0; row<typeNameItem->rowCount(); row++)
-		{
-			QStandardItem *kindEnableItem = typeNameItem->child(row, COL_ENABLE);
-			kindEnableItem->setCheckState((kinds & (ushort)kindEnableItem->data(MDR_KIND).toInt())>0 ? Qt::Checked : Qt::Unchecked);
-		}
-	}
+	updateNotificationKindCheckStates(FTypeItems, FNotifications, true);
 }
 
 void NotifyOptionsWidget::onModelItemChanged(QStandardItem *AItem)

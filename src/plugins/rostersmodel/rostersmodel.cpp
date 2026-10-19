@@ -28,6 +28,14 @@ void updateProtocolContactShows(IRosterIndex *parentIndex, int show)
 		updateProtocolContactShows(child, show);
 	}
 }
+
+bool hasActiveXmppStream(IAccount *account)
+{
+	return account &&
+		account->protocolKind() == IProtocolAccount::ProtocolXmpp &&
+		account->isActive() && account->xmppStream();
+}
+
 }
 
 #define INDEX_CHANGES_FOR_RESET 20
@@ -665,7 +673,7 @@ QList<IRosterIndex *> RostersModel::findContactIndexes(const Jid &AStreamJid, co
 void RostersModel::onAccountShown(IAccount *AAccount)
 {
 	// Guard: only process XMPP accounts with valid streams
-	if (AAccount && AAccount->protocolKind() == IProtocolAccount::ProtocolXmpp && AAccount->isActive() && AAccount->xmppStream())
+	if (hasActiveXmppStream(AAccount))
 		addStream(AAccount->xmppStream()->streamJid());
 }
 
@@ -811,7 +819,7 @@ void RostersModel::rebuildProtocolRosterBatch()
 void RostersModel::onAccountHidden(IAccount *AAccount)
 {
 	// Guard: only process XMPP accounts with valid streams
-	if (AAccount && AAccount->protocolKind() == IProtocolAccount::ProtocolXmpp && AAccount->isActive() && AAccount->xmppStream())
+	if (hasActiveXmppStream(AAccount))
 		removeStream(AAccount->xmppStream()->streamJid());
 }
 

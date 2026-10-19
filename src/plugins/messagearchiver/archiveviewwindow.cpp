@@ -1,4 +1,5 @@
 #include "archiveviewwindow.h"
+#include "protocolhistoryviewmodel.h"
 #include <algorithm>
 
 #define QT_ESCAPE(A) (A).toHtmlEscaped()
@@ -112,7 +113,23 @@ bool SortFilterProxyModel::lessThan(const QModelIndex &ALeft, const QModelIndex 
 	return leftType < rightType;
 }
 
-ArchiveViewWindow::ArchiveViewWindow(IPluginManager *APluginManager, IMessageArchiver *AArchiver, IRoster *ARoster, QWidget *AParent) : QMainWindow(AParent)
+ArchiveViewWindow::ArchiveViewWindow(IPluginManager *APluginManager, IMessageArchiver *AArchiver,
+	IRoster *ARoster, QWidget *AParent) : ArchiveViewWindow(APluginManager, AArchiver, ARoster,
+	false, AccountId(), ConversationId(), QString(), QList<BasicMessage>(), AParent)
+{
+}
+
+ArchiveViewWindow::ArchiveViewWindow(IPluginManager *APluginManager, const AccountId &AAccountId,
+	const ConversationId &AConversationId, const QString &AConversationName,
+	const QList<BasicMessage> &AMessages, QWidget *AParent) : ArchiveViewWindow(APluginManager,
+	nullptr, nullptr, true, AAccountId, AConversationId, AConversationName, AMessages, AParent)
+{
+}
+
+ArchiveViewWindow::ArchiveViewWindow(IPluginManager *APluginManager, IMessageArchiver *AArchiver,
+	IRoster *ARoster, bool ALocalHistoryMode, const AccountId &AAccountId,
+	const ConversationId &AConversationId, const QString &AConversationName,
+	const QList<BasicMessage> &AMessages, QWidget *AParent) : QMainWindow(AParent)
 {
 	ui.setupUi(this);
 	setAttribute(Qt::WA_DeleteOnClose,true);
@@ -120,6 +137,11 @@ ArchiveViewWindow::ArchiveViewWindow(IPluginManager *APluginManager, IMessageArc
 
 	FRoster = ARoster;
 	FArchiver = AArchiver;
+	FLocalHistoryMode = ALocalHistoryMode;
+	FAccountId = AAccountId;
+	FConversationId = AConversationId;
+	FConversationName = AConversationName;
+	FLocalMessages = AMessages;
 	FFocusWidget = NULL;
 
 	FStatusIcons = NULL;
@@ -184,15 +206,19 @@ ArchiveViewWindow::ArchiveViewWindow(IPluginManager *APluginManager, IMessageArc
 	ui.pbtHeadersUpdate->setIcon(style()->standardIcon(QStyle::SP_BrowserReload, NULL, this));
 	connect(ui.pbtHeadersUpdate,SIGNAL(clicked()),SLOT(onHeadersUpdateButtonClicked()));
 
-	connect(FArchiver->instance(),SIGNAL(requestFailed(const QString &, const XmppError &)),
-		SLOT(onArchiveRequestFailed(const QString &, const XmppError &)));
-	connect(FArchiver->instance(),SIGNAL(headersLoaded(const QString &, const QList<IArchiveHeader> &)),
-		SLOT(onArchiveHeadersLoaded(const QString &, const QList<IArchiveHeader> &)));
-	connect(FArchiver->instance(),SIGNAL(collectionLoaded(const QString &, const IArchiveCollection &)),
-		SLOT(onArchiveCollectionLoaded(const QString &, const IArchiveCollection &)));
-	connect(FArchiver->instance(),SIGNAL(collectionsRemoved(const QString &, const IArchiveRequest &)),
-		SLOT(onArchiveCollectionsRemoved(const QString &, const IArchiveRequest &)));
-	connect(FRoster->instance(),SIGNAL(destroyed(QObject *)),SLOT(close()));
+	if (FArchiver)
+	{
+		connect(FArchiver->instance(),SIGNAL(requestFailed(const QString &, const XmppError &)),
+			SLOT(onArchiveRequestFailed(const QString &, const XmppError &)));
+		connect(FArchiver->instance(),SIGNAL(headersLoaded(const QString &, const QList<IArchiveHeader> &)),
+			SLOT(onArchiveHeadersLoaded(const QString &, const QList<IArchiveHeader> &)));
+		connect(FArchiver->instance(),SIGNAL(collectionLoaded(const QString &, const IArchiveCollection &)),
+			SLOT(onArchiveCollectionLoaded(const QString &, const IArchiveCollection &)));
+		connect(FArchiver->instance(),SIGNAL(collectionsRemoved(const QString &, const IArchiveRequest &)),
+			SLOT(onArchiveCollectionsRemoved(const QString &, const IArchiveRequest &)));
+	}
+	if (FRoster)
+		connect(FRoster->instance(),SIGNAL(destroyed(QObject *)),SLOT(close()));
 
 	if (!restoreGeometry(Options::fileValue("history.archiveview.geometry").toByteArray()))
 		setGeometry(WidgetManager::alignGeometry(QSize(960,640),this));
@@ -213,7 +239,7 @@ ArchiveViewWindow::~ArchiveViewWindow()
 
 Jid ArchiveViewWindow::streamJid() const
 {
-	return FRoster->streamJid();
+	return FRoster ? FRoster->streamJid() : Jid::null;
 }
 
 Jid ArchiveViewWindow::contactJid() const
@@ -266,6 +292,12 @@ void ArchiveViewWindow::initialize(IPluginManager *APluginManager)
 
 void ArchiveViewWindow::reset()
 {
+	if (FLocalHistoryMode)
+	{
+		resetLocalHistory();
+		return;
+	}
+
 	FHeadersRequests.clear();
 	FCollectionsRequests.clear();
 
@@ -293,6 +325,82 @@ void ArchiveViewWindow::reset()
 	clearMessages();
 	setPageStatus(RequestStarted);
 	FHeadersRequestTimer.start(0);
+}
+
+void ArchiveViewWindow::resetLocalHistory()
+{
+	FHeadersRequestTimer.stop();
+	FCollectionsRequestTimer.stop();
+	FCollectionShowTimer.stop();
+	FModel->clear();
+	FCollections.clear();
+	FCurrentHeaders.clear();
+	FProxyModel->setVisibleInterval(QDateTime(), QDateTime());
+	clearMessages();
+	ui.spwSelectPage->setVisible(false);
+	ui.pbtLoadEarlierMessages->setVisible(false);
+	setWindowTitle(tr("Conversation history with %1 — %2")
+		.arg(FConversationName.isEmpty() ? FConversationId : FConversationName, FAccountId));
+
+	const QList<ProtocolHistoryDayGroup> groups = ProtocolHistoryViewModel::groupByDay(
+		FLocalMessages, FConversationId, searchString());
+	FFilteredLocalMessages.clear();
+
+	QMap<QDate, QStandardItem *> monthItems;
+	for (const ProtocolHistoryDayGroup &group : groups)
+	{
+		FFilteredLocalMessages.append(group.messages);
+		const QDate month(group.date.year(), group.date.month(), 1);
+		QStandardItem *monthItem = monthItems.value(month, nullptr);
+		if (!monthItem)
+		{
+			monthItem = new QStandardItem(QLocale().toString(month, QLocale::LongFormat));
+			monthItem->setData(HIT_DATEGROUP, HDR_TYPE);
+			monthItem->setData(month, HDR_DATEGROUP_DATE);
+			monthItems.insert(month, monthItem);
+			FModel->appendRow(monthItem);
+		}
+		QStandardItem *dayItem = new QStandardItem(QLocale().toString(group.date, QLocale::LongFormat));
+		dayItem->setData(HIT_HEADER, HDR_TYPE);
+		dayItem->setData(group.date.startOfDay(), HDR_HEADER_START);
+		dayItem->setData(group.date.toString(Qt::ISODate), HDR_HEADER_SUBJECT);
+		monthItem->appendRow(dayItem);
+	}
+	ui.trvHeaders->expandAll();
+	setPageStatus(RequestFinished, tr("Local backup: %n message(s)", nullptr, FFilteredLocalMessages.size()));
+	if (FModel->rowCount() > 0)
+	{
+		QModelIndex firstMonth = FProxyModel->index(0, 0);
+		if (FProxyModel->rowCount(firstMonth) > 0)
+			ui.trvHeaders->setCurrentIndex(FProxyModel->index(0, 0, firstMonth));
+	}
+}
+
+void ArchiveViewWindow::showLocalHistoryForDate(const QDate &ADate)
+{
+	clearMessages();
+	QModelIndex current = FProxyModel->mapToSource(ui.trvHeaders->currentIndex());
+	const bool monthGroup = current.data(HDR_TYPE).toInt() == HIT_DATEGROUP;
+	QString html;
+	int count = 0;
+	for (const BasicMessage &message : FFilteredLocalMessages)
+	{
+		const QDate date = message.timestamp().date();
+		if (message.conversationId() != FConversationId || !date.isValid() ||
+			(monthGroup ? (date.year() != ADate.year() || date.month() != ADate.month()) : date != ADate))
+			continue;
+		const QString sender = message.sender().toHtmlEscaped();
+		const QString body = message.body().toHtmlEscaped().replace(QLatin1Char('\n'), QStringLiteral("<br>"));
+		const QString time = message.timestamp().toLocalTime().toString(QStringLiteral("HH:mm:ss")).toHtmlEscaped();
+		html += QStringLiteral("<table width='100%' cellpadding='0' cellspacing='0' style='margin-top:5px;'>"
+			"<tr><td style='font-weight:bold;color:%1;'>%2</td><td align='right' style='font-size:small;color:gray;'>[%3]</td></tr>"
+			"<tr><td colspan='2' style='padding-left:10px;white-space:pre-wrap;'>%4</td></tr></table>")
+			.arg(message.direction() == BasicMessage::Outgoing ? QStringLiteral("red") : QStringLiteral("blue"),
+				sender, time, body);
+		++count;
+	}
+	ui.tbrMessages->setHtml(html);
+	setMessagesStatus(RequestFinished, tr("%n message(s)", nullptr, count));
 }
 
 QString ArchiveViewWindow::contactName(const Jid &AContactJid, bool AShowResource) const
@@ -942,6 +1050,17 @@ void ArchiveViewWindow::onCurrentItemChanged(const QModelIndex &ACurrent, const 
 {
 	Q_UNUSED(ABefore);
 	clearMessages();
+	if (FLocalHistoryMode)
+	{
+		if (ACurrent.isValid())
+		{
+			const QModelIndex index = FProxyModel->mapToSource(ACurrent);
+			const QDate date = index.data(HDR_TYPE).toInt() == HIT_DATEGROUP ?
+				index.data(HDR_DATEGROUP_DATE).toDate() : index.data(HDR_HEADER_START).toDateTime().date();
+			showLocalHistoryForDate(date);
+		}
+		return;
+	}
 	if (ACurrent.isValid())
 	{
 		setMessagesStatus(RequestStarted);
@@ -1122,6 +1241,8 @@ void ArchiveViewWindow::onRemoveCollectionsByAction()
 
 void ArchiveViewWindow::onHeaderContextMenuRequested(const QPoint &APos)
 {
+	if (FLocalHistoryMode)
+		return;
 	QStandardItem *item =  FModel->itemFromIndex(FProxyModel->mapToSource(ui.trvHeaders->indexAt(APos)));
 	if (item)
 	{

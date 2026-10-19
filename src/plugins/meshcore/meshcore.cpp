@@ -92,9 +92,6 @@ QByteArray MeshCoreCodec::parseUsbFrame(const QByteArray &data, int &length)
     return data.mid(3, length);
 }
 
-QByteArray MeshCoreCodec::encodeBlePayload(const QByteArray &payload) { return payload; }
-QByteArray MeshCoreCodec::decodeBlePayload(const QByteArray &payload) { return payload; }
-
 bool MeshCoreCodec::isValidMeshCorePacket(const QByteArray &data)
 {
     return !data.isEmpty() && (data.at(0) == '<' ? isUsbFrame(data) : isBleFrame(data));
@@ -1089,10 +1086,26 @@ void MeshCoreProtocol::onTransportError(const QString &message)
     emit deviceStateChanged(deviceState);
 }
 
-QList<MeshCoreDevice> MeshCoreProtocol::discoverDevices() const { return {}; }
 QList<MeshCoreContact> MeshCoreProtocol::discoverContacts() const { return contacts; }
 QList<MeshCoreChannel> MeshCoreProtocol::discoverChannels() const { return channels; }
 QList<int> MeshCoreProtocol::availableChannelSlots() const { return freeChannelSlots; }
+
+bool MeshCoreProtocol::persistAndSendOutgoingMessage(
+    const BasicMessage &message, const QByteArray &command, const QString &queueError)
+{
+    bool inserted = false;
+    if (!persistMessage(message, inserted) || !inserted)
+        return false;
+
+    if (!transport->sendPayload(command)) {
+        removePersistedMessage(message);
+        onTransportError(queueError);
+        return false;
+    }
+
+    emit messageReceived(message);
+    return true;
+}
 
 bool MeshCoreProtocol::sendMessage(const QString &recipient, const QString &message)
 {
@@ -1132,20 +1145,10 @@ bool MeshCoreProtocol::sendMessage(const QString &recipient, const QString &mess
     metadata.insert(QStringLiteral("delivery_status"), QStringLiteral("sending"));
     localEcho.setMetadata(metadata);
 
-    bool inserted = false;
-    if (!persistMessage(localEcho, inserted) || !inserted)
-        return false;
-
     const QByteArray command(reinterpret_cast<const char *>(encoded.data()),
                              static_cast<int>(encoded.size()));
-    if (!transport->sendPayload(command)) {
-        removePersistedMessage(localEcho);
-        onTransportError(QStringLiteral("Failed to queue direct MeshCore message"));
-        return false;
-    }
-
-    emit messageReceived(localEcho);
-    return true;
+    return persistAndSendOutgoingMessage(
+        localEcho, command, QStringLiteral("Failed to queue direct MeshCore message"));
 }
 
 bool MeshCoreProtocol::sendBroadcastMessage(const QString &message)
@@ -1195,18 +1198,8 @@ bool MeshCoreProtocol::sendGroupMessage(const QString &channelName, const QStrin
     metadata.insert(QStringLiteral("delivery_status"), QStringLiteral("sending"));
     localEcho.setMetadata(metadata);
 
-    bool inserted = false;
-    if (!persistMessage(localEcho, inserted) || !inserted)
-        return false;
-
     const QByteArray command(reinterpret_cast<const char *>(encoded.data()),
                              static_cast<int>(encoded.size()));
-    if (!transport->sendPayload(command)) {
-        removePersistedMessage(localEcho);
-        onTransportError(QStringLiteral("Failed to queue MeshCore room message"));
-        return false;
-    }
-
-    emit messageReceived(localEcho);
-    return true;
+    return persistAndSendOutgoingMessage(
+        localEcho, command, QStringLiteral("Failed to queue MeshCore room message"));
 }

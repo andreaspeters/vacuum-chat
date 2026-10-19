@@ -36,8 +36,9 @@ else (SPELLCHECKER_BACKEND STREQUAL "ASPELL")
 endif (SPELLCHECKER_BACKEND STREQUAL "ASPELL")
 
 if (BUILD_TESTING AND SPELLCHECKER_BACKEND STREQUAL "HUNSPELL")
+	set(SPELLCHECKER_TEST_SOURCE_DIR "${CMAKE_SOURCE_DIR}/tests/spellchecker")
 	add_executable(hunspellchecker_highlighting_tests EXCLUDE_FROM_ALL
-		hunspellchecker_highlighting_test.cpp
+		${SPELLCHECKER_TEST_SOURCE_DIR}/hunspellchecker_highlighting_test.cpp
 		hunspellchecker.cpp
 		spellbackend.cpp
 		spellhighlighter.cpp)

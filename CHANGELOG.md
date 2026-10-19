@@ -9,6 +9,9 @@
 - ADD:    [ui,matrix,xmpp] send images via copy'n paste.
 - FIX:    [tools] Spellchecker
 - FIX:    [matrix] Chat history backfill didn't synced messages.
+- FIX:    [matrix, ui] Do not open vacuum-media:// schemes externaly."
+- FIX:    [matrix] Set messages status as ready."
+- FIX:    [matrix, ui] Replace classic style emojies with unicode."
 
 ## v2.1.0
 

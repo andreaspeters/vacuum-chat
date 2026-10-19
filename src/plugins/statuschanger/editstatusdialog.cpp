@@ -1,4 +1,5 @@
 #include "editstatusdialog.h"
+#include "statusshowcombohelper.h"
 
 #include <QSpinBox>
 #include <QComboBox>
@@ -31,13 +32,7 @@ QWidget *Delegate::createEditor(QWidget *AParent, const QStyleOptionViewItem &AO
 	case DelegateShow:
 	{
 		QComboBox *comboBox = new QComboBox(AParent);
-		comboBox->addItem(FStatusChanger->iconByShow(IPresence::Online),FStatusChanger->nameByShow(IPresence::Online),IPresence::Online);
-		comboBox->addItem(FStatusChanger->iconByShow(IPresence::Chat),FStatusChanger->nameByShow(IPresence::Chat),IPresence::Chat);
-		comboBox->addItem(FStatusChanger->iconByShow(IPresence::Away),FStatusChanger->nameByShow(IPresence::Away),IPresence::Away);
-		comboBox->addItem(FStatusChanger->iconByShow(IPresence::DoNotDisturb),FStatusChanger->nameByShow(IPresence::DoNotDisturb),IPresence::DoNotDisturb);
-		comboBox->addItem(FStatusChanger->iconByShow(IPresence::ExtendedAway),FStatusChanger->nameByShow(IPresence::ExtendedAway),IPresence::ExtendedAway);
-		comboBox->addItem(FStatusChanger->iconByShow(IPresence::Invisible),FStatusChanger->nameByShow(IPresence::Invisible),IPresence::Invisible);
-		comboBox->addItem(FStatusChanger->iconByShow(IPresence::Offline),FStatusChanger->nameByShow(IPresence::Offline),IPresence::Offline);
+		StatusChangerPrivate::populateStatusShowCombo(comboBox, FStatusChanger);
 		comboBox->setEditable(false);
 		return comboBox;
 	}

@@ -1,5 +1,6 @@
 #include "messagewidgets.h"
 #include "imagepastepolicy.h"
+#include "viewurlfallbackpolicy.h"
 
 #include <QPair>
 #include <QBuffer>
@@ -206,6 +207,8 @@ bool MessageWidgets::viewUrlOpen(int AOrder, IViewWidget* APage, const QUrl &AUr
 {
 	Q_UNUSED(APage);
 	Q_UNUSED(AOrder);
+	if (!ViewUrlFallbackPolicy::shouldOpenWithDesktopServices(AUrl))
+		return false;
 	return QDesktopServices::openUrl(AUrl);
 }
 

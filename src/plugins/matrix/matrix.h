@@ -9,6 +9,7 @@
 #include <QPointer>
 #include <QUuid>
 #include <QUrl>
+#include <QJsonObject>
 #include <interfaces/ipluginmanager.h>
 #include <interfaces/iaccountmanager.h>
 #include <interfaces/ioptionsmanager.h>
@@ -20,6 +21,7 @@
 #include <interfaces/iprotocolcontactactions.h>
 #include <interfaces/iprotocolaccountavataractions.h>
 #include <interfaces/iprotocolprofileactions.h>
+#include <interfaces/iprotocolroommemberactions.h>
 #include <interfaces/iavatars.h>
 #include <interfaces/iemoticons.h>
 #include <interfaces/irostersview.h>
@@ -33,11 +35,16 @@
 
 class IMessageWidgets;
 
-class Matrix : public QObject, public IPlugin, public IProtocolPresence, public IProtocolRoster, public IProtocolMessaging, public IProtocolNotifications, public IProtocolCapabilities, public IProtocolContactActions, public IProtocolAccountAvatarActions, public IProtocolProfileActions
+class Matrix : public QObject, public IPlugin, public IProtocolPresence, public IProtocolRoster,
+	public IProtocolMessaging, public IProtocolNotifications, public IProtocolCapabilities,
+	public IProtocolContactActions, public IProtocolAccountAvatarActions,
+	public IProtocolProfileActions, public IProtocolRoomMemberActions
 {
 	Q_OBJECT
 	Q_PLUGIN_METADATA(IID "Vacuum.Core.IPlugin/1.0" FILE "matrix.json")
-	Q_INTERFACES(IPlugin IProtocolPresence IProtocolRoster IProtocolMessaging IProtocolNotifications IProtocolCapabilities IProtocolContactActions IProtocolAccountAvatarActions IProtocolProfileActions)
+	Q_INTERFACES(IPlugin IProtocolPresence IProtocolRoster IProtocolMessaging
+		IProtocolNotifications IProtocolCapabilities IProtocolContactActions
+		IProtocolAccountAvatarActions IProtocolProfileActions IProtocolRoomMemberActions)
 
 public:
 	Matrix();
@@ -60,6 +67,24 @@ public:
 	bool setAccountAvatar(const AccountId &accountId, const QByteArray &imageData) override;
 	bool showProfile(const AccountId &accountId, const UserId &userId) override;
 	bool editProfile(const AccountId &accountId) override;
+	IProtocolRoomMemberActions::MemberActions actionsForMember(const AccountId &accountId,
+		const ConversationId &roomId, const UserId &memberId) const override;
+	IProtocolRoomMemberActions::MemberActions observeActionsForMember(const AccountId &accountId,
+		const ConversationId &roomId, const UserId &memberId, QObject *callbackContext,
+		IProtocolRoomMemberActions::MemberActionsUpdatedCallback callback) override;
+	QList<ProtocolRoomMemberRole> memberRoles(const AccountId &accountId,
+		const ConversationId &roomId, const UserId &memberId) const override;
+	QString memberRole(const AccountId &accountId, const ConversationId &roomId,
+		const UserId &memberId) const override;
+	bool setMemberRole(const AccountId &accountId, const ConversationId &roomId,
+		const UserId &memberId, const QString &roleId) override;
+	bool openDirectConversation(const AccountId &accountId, const UserId &memberId) override;
+	bool kickMember(const AccountId &accountId, const ConversationId &roomId,
+		const UserId &memberId, const QString &reason = QString()) override;
+	bool banMember(const AccountId &accountId, const ConversationId &roomId,
+		const UserId &memberId, const QString &reason = QString()) override;
+	bool redactMemberMessages(const AccountId &accountId, const ConversationId &roomId,
+		const UserId &memberId, const QString &reason = QString()) override;
 	virtual QString protocol() const { return QStringLiteral("matrix"); }
 	virtual QString formatEmoticonForSending(const QString &iconKey) const;
 	virtual QString formatEmoticonsForSending(const QString &text) const;
@@ -93,6 +118,9 @@ public:
 	virtual QList<BasicMessage> conversationHistory(const QString &conversationId) const;
 	bool supportsOlderHistory(const ConversationId &conversationId) const override;
 	bool requestConversationHistorySync(const ConversationId &conversationId) const override;
+	bool requestLocalHistoryBackup(const ConversationId &conversationId,
+		QObject *callbackContext, ProtocolHistoryPageCallback callback) const override;
+	bool providesLocalHistoryBackup() const override { return true; }
 	bool requestOlderHistoryPage(const ConversationId &conversationId,
 		const BasicMessage &beforeMessage, int limit, QObject *callbackContext,
 		ProtocolHistoryPageCallback callback) override;
@@ -110,9 +138,7 @@ public:
 	virtual Jid addressForConversation(const QString &conversationId) const;
 	virtual bool conversationOnline(const Jid &address) const;
 
-	virtual QList<ProtocolRosterEntry> entries() const { return FProtocolEntries; }
 	virtual QList<ProtocolRoom> rooms() const;
-	virtual ProtocolRosterEntry entry(const QString &AId) const;
 	virtual ProtocolRoom room(const QString &AId) const;
 	virtual void loadRoomAvatar(const QString &roomId) const override;
 	QString accountAvatarKey() const override;
@@ -136,6 +162,7 @@ public:
 		const QString &userId, const QString &deviceId);
 
 private slots:
+	void onDirectRoomCreated(const QString &userId, const QString &roomId, const QString &error);
 	void onAccountShown(IAccount *AAccount);
 	void onAccountAppended(IAccount *AAccount);
 	void onAccountChanged(IAccount *AAccount, const OptionsNode &ANode);
@@ -162,6 +189,11 @@ private slots:
 		const QString &avatarUrl, const QString &error);
 	void onAccountDisplayNameUpdateFinished(const QString &userId, bool success,
 		const QString &displayName, const QString &error);
+	void onRoomPowerLevelsChanged(const QString &roomId, const QJsonObject &content);
+	void onMemberRedactionFinished(const QString &roomId, const QString &memberId,
+		int succeeded, int total, const QString &error);
+	void onRoomMemberActionFailed(const QString &roomId, const QString &memberId,
+		const QString &action, const QString &error);
 
 
 signals:
@@ -184,6 +216,21 @@ signals:
 private:
 	friend class MatrixPresenceLifecycleTestAccess;
 	friend class MatrixSyncBatchTestAccess;
+	struct PendingMemberActionObserver
+	{
+		quint64 id = 0;
+		QPointer<QObject> context;
+		AccountId accountId;
+		ConversationId roomId;
+		UserId memberId;
+		IProtocolRoomMemberActions::MemberActionsUpdatedCallback callback;
+	};
+	void notifyPendingMemberActionObservers(const QString &roomId);
+	void clearLoginRequestState();
+	void resetNetworkSessionState();
+	void appendVerificationNotification(const QString &transactionId, const QString &userId);
+	void queueSendMessageEvent(const QString &roomId, const QJsonObject &content,
+		const QString &transactionId);
 
 	QUuid FUuid;
 	MatrixNetwork *FMatrixNetwork;
@@ -196,7 +243,6 @@ private:
 	IAccount *FAccountManagerSlot;
 	IAvatars *FAvatars = nullptr;
 	IEmoticons *FEmoticons = nullptr;
-	QList<ProtocolRosterEntry> FProtocolEntries;
 	QList<ProtocolRoom> FProtocolRooms;
 	QString FStreamId;
 	int FShow;
@@ -207,10 +253,15 @@ private:
 	QList<ProtocolNotification> FNotifications;
 	QDialog *FInitialSyncWindow;
 	QSet<QString> FNotificationEventIds;
+	QMap<QString, quint64> FDirectConversationOpenRequests;
+	QMap<QString, QJsonObject> FRoomPowerLevels;
+	QMap<QString, QList<PendingMemberActionObserver>> FPendingMemberActionObservers;
+	quint64 FNextMemberActionObserverId = 1;
 	QSet<QString> FDisplayedLocalEchoTransactions;
 	bool FNotificationsReady = false;
 
 	void loadRoomsFromDatabase();
+	void requestDatabaseRoomsLoad();
 	void showRoomChatDialog(const QString &boundAccountId);
 	void showVerificationDialog(const QString &transactionId, const QString &userId,
 		const QString &deviceId);
@@ -225,8 +276,11 @@ private:
 	void onCachedRoomsLoadFailed(const QString &error);
 	void onCachedHistoryLoaded(const QString &roomId, const QList<MatrixTimelineEvent> &events);
 	void onCachedHistoryLoadFailed(const QString &roomId, const QString &error);
+	void queueHistoricalImageRequests(const QString &roomId,
+		const QList<MatrixTimelineEvent> &events);
 	void onHistoryPageLoaded(const QString &roomId, const MatrixHistoryPageResult &result);
 	void emitCachedHistoryBatch();
+	void scheduleCachedHistoryBatch();
 	bool isDisplayedLocalEchoDuplicate(const BasicMessage &message) const;
 	void enqueueProtocolEventBatch(const QList<MatrixTextEvent> &events,
 		const QString &historyRoomId = QString());
@@ -236,6 +290,7 @@ private:
 		const QList<BasicMessage> &cached, const QList<BasicMessage> &pending) const;
 	void loadNextAvatar();
 	void enqueueAvatarLoad(const QString &key, const QString &url) const;
+	void scheduleNextAvatarLoad() const;
 	QString avatarUrlForUser(const QString &userId) const;
 	void onCompleteCrossSigningKeysChecked(const QString &userId, bool complete);
 
@@ -245,6 +300,7 @@ private:
 	QThread *FDatabaseThread = nullptr;
 	MatrixDatabaseWorker *FDatabaseWorker = nullptr;
 	QString FDatabaseProfileDirectory;
+	QString FHistoryBackupDirectory;
 	QString FDatabaseServerUrl;
 	QString FDatabaseUserId;
 	QString FNetworkUserId;

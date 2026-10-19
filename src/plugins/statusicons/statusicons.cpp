@@ -237,28 +237,34 @@ bool StatusIcons::setRosterData(IRosterIndex *AIndex, int ARole, const QVariant 
 	return false;
 }
 
+QMap<QString, QString> *StatusIcons::ruleMap(RuleType ARuleType)
+{
+	if (ARuleType == UserRule)
+		return &FUserRules;
+	if (ARuleType == DefaultRule)
+		return &FDefaultRules;
+	return NULL;
+}
+
+const QMap<QString, QString> *StatusIcons::ruleMap(RuleType ARuleType) const
+{
+	if (ARuleType == UserRule)
+		return &FUserRules;
+	if (ARuleType == DefaultRule)
+		return &FDefaultRules;
+	return NULL;
+}
+
 QList<QString> StatusIcons::rules(RuleType ARuleType) const
 {
-	switch (ARuleType)
-	{
-	case UserRule:
-		return FUserRules.keys();
-	case DefaultRule:
-		return FDefaultRules.keys();
-	}
-	return QList<QString>();
+	const QMap<QString, QString> *map = ruleMap(ARuleType);
+	return map != NULL ? map->keys() : QList<QString>();
 }
 
 QString StatusIcons::ruleIconset(const QString &APattern, RuleType ARuleType) const
 {
-	switch (ARuleType)
-	{
-	case UserRule:
-		return FUserRules.value(APattern,STORAGE_SHARED_DIR);
-	case DefaultRule:
-		return FDefaultRules.value(APattern,STORAGE_SHARED_DIR);
-	}
-	return QString();
+	const QMap<QString, QString> *map = ruleMap(ARuleType);
+	return map != NULL ? map->value(APattern,STORAGE_SHARED_DIR) : QString();
 }
 
 void StatusIcons::insertRule(const QString &APattern, const QString &ASubStorage, RuleType ARuleType)
@@ -266,15 +272,9 @@ void StatusIcons::insertRule(const QString &APattern, const QString &ASubStorage
 	if (APattern.isEmpty() || ASubStorage.isEmpty() || !QRegularExpression(APattern).isValid())
 		return;
 
-	switch (ARuleType)
-	{
-	case UserRule:
-		FUserRules.insert(APattern,ASubStorage);
-		break;
-	case DefaultRule:
-		FDefaultRules.insert(APattern,ASubStorage);
-		break;
-	}
+	QMap<QString, QString> *map = ruleMap(ARuleType);
+	if (map != NULL)
+		map->insert(APattern,ASubStorage);
 
 	FJid2Storage.clear();
 	emit ruleInserted(APattern,ASubStorage,ARuleType);
@@ -283,15 +283,9 @@ void StatusIcons::insertRule(const QString &APattern, const QString &ASubStorage
 
 void StatusIcons::removeRule(const QString &APattern, RuleType ARuleType)
 {
-	switch (ARuleType)
-	{
-	case UserRule:
-		FUserRules.remove(APattern);
-		break;
-	case DefaultRule:
-		FDefaultRules.remove(APattern);
-		break;
-	}
+	QMap<QString, QString> *map = ruleMap(ARuleType);
+	if (map != NULL)
+		map->remove(APattern);
 
 	FJid2Storage.clear();
 	emit ruleRemoved(APattern,ARuleType);

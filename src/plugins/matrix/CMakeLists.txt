@@ -49,109 +49,92 @@ include("matrix.cmake")
 include("${CMAKE_SOURCE_DIR}/src/plugins/plugins.cmake")
 
 if (BUILD_TESTING)
-	add_executable(matrix_public_rooms_tests EXCLUDE_FROM_ALL
-		matrixpublicrooms_test.cpp matrixpublicrooms.cpp)
-	target_link_libraries(matrix_public_rooms_tests PRIVATE Qt6::Core Qt6::Network)
-	add_executable(matrix_direct_room_tests EXCLUDE_FROM_ALL
-		matrixdirectroom_test.cpp matrixdirectroom.cpp)
-	target_link_libraries(matrix_direct_room_tests PRIVATE Qt6::Core Qt6::Network)
-	add_executable(matrix_room_invite_tests EXCLUDE_FROM_ALL
-		matrixroominvite_test.cpp matrixroominvite.cpp matrixdirectroom.cpp)
-	target_link_libraries(matrix_room_invite_tests PRIVATE Qt6::Core Qt6::Network)
-	add_executable(matrix_metadata_refresh_policy_tests EXCLUDE_FROM_ALL
-		matrixmetadatarefreshpolicy_test.cpp matrixmetadatarefreshpolicy.cpp)
-	target_link_libraries(matrix_metadata_refresh_policy_tests PRIVATE Qt6::Core)
+	set(MATRIX_TEST_SOURCE_DIR "${CMAKE_SOURCE_DIR}/tests/matrix")
+
+	function(add_matrix_plugin_test_target target_name source_file)
+		add_executable(${target_name} EXCLUDE_FROM_ALL ${source_file})
+		target_include_directories(${target_name} PRIVATE
+			"${CMAKE_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}")
+		target_compile_features(${target_name} PRIVATE cxx_std_17)
+		target_link_libraries(${target_name} PRIVATE
+			matrix ${VACUUM_UTILS_NAME} Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::Xml Qt6::Sql ${ADD_LIBS})
+	endfunction()
+
+	add_matrix_plugin_test_target(matrix_history_export_tests "${MATRIX_TEST_SOURCE_DIR}/matrix_history_export_test.cpp")
+	add_matrix_plugin_test_target(matrix_network_history_backup_tests "${MATRIX_TEST_SOURCE_DIR}/matrix_network_history_backup_test.cpp")
+	target_sources(matrix_network_history_backup_tests PRIVATE
+		../messagearchiver/protocolhistoryviewmodel.cpp)
+	target_include_directories(matrix_network_history_backup_tests PRIVATE
+		"${CMAKE_SOURCE_DIR}/src/plugins/messagearchiver")
+
+	add_executable(matrix_room_api_tests EXCLUDE_FROM_ALL
+		"${MATRIX_TEST_SOURCE_DIR}/matrix_room_api_tests.cpp" matrixroomapi.cpp
+		"${MATRIX_TEST_SOURCE_DIR}/matrix_policy_test.cpp" matrixmetadatarefreshpolicy.cpp)
+	target_include_directories(matrix_room_api_tests PRIVATE "${CMAKE_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}")
+	target_compile_features(matrix_room_api_tests PRIVATE cxx_std_17)
+	target_link_libraries(matrix_room_api_tests PRIVATE Qt6::Core Qt6::Network Qt6::Xml)
+	add_test(NAME matrix_room_api_tests COMMAND matrix_room_api_tests)
+
 	add_executable(matrix_join_dialog_tests EXCLUDE_FROM_ALL
-		matrixjoinroomchatdialog_test.cpp matrixjoinroomchatdialog.cpp matrixdirectroom.cpp
-		matrixpublicrooms.cpp)
+		"${MATRIX_TEST_SOURCE_DIR}/matrixjoinroomchatdialog_test.cpp" matrixjoinroomchatdialog.cpp matrixroomapi.cpp)
+	target_include_directories(matrix_join_dialog_tests PRIVATE "${CMAKE_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}")
 	target_link_libraries(matrix_join_dialog_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network)
-	add_executable(matrix_context_tests EXCLUDE_FROM_ALL matrixcontext_test.cpp matrixcontext.cpp)
+	add_executable(matrix_context_tests EXCLUDE_FROM_ALL "${MATRIX_TEST_SOURCE_DIR}/matrixcontext_test.cpp" matrixcontext.cpp)
+	target_include_directories(matrix_context_tests PRIVATE "${CMAKE_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}")
 	target_link_libraries(matrix_context_tests PRIVATE ${VACUUM_UTILS_NAME} Qt6::Core Qt6::Xml)
 	add_executable(matrix_text_message_tests EXCLUDE_FROM_ALL
-		matrixtextmessage_test.cpp matrixtextmessage.cpp ../../utils/matrixhtml.cpp)
+		"${MATRIX_TEST_SOURCE_DIR}/matrixtextmessage_test.cpp" matrixtextmessage.cpp ../../utils/matrixhtml.cpp)
 	target_include_directories(matrix_text_message_tests PRIVATE
 		"${CMAKE_SOURCE_DIR}/src" "${CMAKE_SOURCE_DIR}/src/plugins/matrix")
 	target_compile_features(matrix_text_message_tests PRIVATE cxx_std_17)
 	target_link_libraries(matrix_text_message_tests PRIVATE Qt6::Core Qt6::Gui)
-	add_executable(matrix_timestamp_tests EXCLUDE_FROM_ALL matrix_timestamp_test.cpp)
-	target_include_directories(matrix_timestamp_tests PRIVATE "${CMAKE_SOURCE_DIR}/src")
+	add_executable(matrix_timestamp_tests EXCLUDE_FROM_ALL "${MATRIX_TEST_SOURCE_DIR}/matrix_timestamp_test.cpp")
+	target_include_directories(matrix_timestamp_tests PRIVATE "${CMAKE_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}")
 	target_compile_features(matrix_timestamp_tests PRIVATE cxx_std_11)
 	target_link_libraries(matrix_timestamp_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Network Qt6::Sql)
-	add_executable(matrix_history_retry_tests EXCLUDE_FROM_ALL
-		matrixhistoryretry_test.cpp matrixnetwork.cpp matrixnetworkinvite.cpp matrixroominvite.cpp matrixdatabase.cpp matrixdatabaseworker.cpp
-		matrixolm.cpp matrixssss.cpp matrixdirectroom.cpp matrixpublicrooms.cpp)
-	target_include_directories(matrix_history_retry_tests PRIVATE "${CMAKE_SOURCE_DIR}/src")
-	target_link_libraries(matrix_history_retry_tests PRIVATE
-		${VACUUM_UTILS_NAME} Qt6::Core Qt6::Gui Qt6::Network Qt6::Sql ${ADD_LIBS})
-	add_executable(matrix_room_encryption_tests EXCLUDE_FROM_ALL
-		matrix_room_encryption_test.cpp matrixnetwork.cpp matrixnetworkinvite.cpp matrixroominvite.cpp matrixdatabase.cpp matrixdatabaseworker.cpp
-		matrixolm.cpp matrixssss.cpp matrixdirectroom.cpp matrixpublicrooms.cpp)
-	target_include_directories(matrix_room_encryption_tests PRIVATE "${CMAKE_SOURCE_DIR}/src")
-	target_link_libraries(matrix_room_encryption_tests PRIVATE
-		${VACUUM_UTILS_NAME} Qt6::Core Qt6::Gui Qt6::Network Qt6::Sql ${ADD_LIBS})
-	add_executable(matrix_network_login_tests EXCLUDE_FROM_ALL
-		matrix_network_login_tests.cpp matrixnetwork.cpp matrixnetworkinvite.cpp matrixroominvite.cpp matrixdatabase.cpp matrixdatabaseworker.cpp
-		matrixolm.cpp matrixssss.cpp matrixdirectroom.cpp matrixpublicrooms.cpp)
-	target_include_directories(matrix_network_login_tests PRIVATE "${CMAKE_SOURCE_DIR}/src")
-	target_link_libraries(matrix_network_login_tests PRIVATE
-		${VACUUM_UTILS_NAME} Qt6::Core Qt6::Gui Qt6::Network Qt6::Sql ${ADD_LIBS})
-	if (OLM_FOUND)
-		add_executable(matrix_avatar_cache_tests EXCLUDE_FROM_ALL
-			matrixavatarcache_test.cpp matrixnetwork.cpp matrixnetworkinvite.cpp matrixroominvite.cpp matrixdatabase.cpp matrixdatabaseworker.cpp
-			matrixolm.cpp matrixssss.cpp matrixdirectroom.cpp matrixpublicrooms.cpp)
-		target_link_libraries(matrix_avatar_cache_tests PRIVATE
-			${VACUUM_UTILS_NAME} Qt6::Core Qt6::Gui Qt6::Network Qt6::Sql ${ADD_LIBS})
-	endif()
-	add_executable(matrix_account_avatar_tests EXCLUDE_FROM_ALL
-		matrixaccountavatar_test.cpp matrixnetwork.cpp matrixnetworkinvite.cpp matrixroominvite.cpp matrixdatabase.cpp matrixdatabaseworker.cpp
-		matrixolm.cpp matrixssss.cpp matrixdirectroom.cpp matrixpublicrooms.cpp)
-	target_include_directories(matrix_account_avatar_tests PRIVATE "${CMAKE_SOURCE_DIR}/src")
-	target_link_libraries(matrix_account_avatar_tests PRIVATE
-		${VACUUM_UTILS_NAME} Qt6::Core Qt6::Gui Qt6::Network Qt6::Sql ${ADD_LIBS})
-	add_executable(matrix_avatar_key_policy_tests EXCLUDE_FROM_ALL matrixavatarkeypolicy_test.cpp)
-	target_include_directories(matrix_avatar_key_policy_tests PRIVATE "${CMAKE_SOURCE_DIR}/src")
-	target_compile_features(matrix_avatar_key_policy_tests PRIVATE cxx_std_11)
-	target_link_libraries(matrix_avatar_key_policy_tests PRIVATE Qt6::Core)
-	add_executable(matrix_presence_session_policy_tests EXCLUDE_FROM_ALL
-		matrixsessionpolicy_test.cpp)
-	target_include_directories(matrix_presence_session_policy_tests PRIVATE "${CMAKE_SOURCE_DIR}/src")
-	target_compile_features(matrix_presence_session_policy_tests PRIVATE cxx_std_11)
-	target_link_libraries(matrix_presence_session_policy_tests PRIVATE Qt6::Core Qt6::Xml)
-		add_executable(matrix_presence_lifecycle_tests EXCLUDE_FROM_ALL
-			matrix_presence_lifecycle_test.cpp)
-		target_include_directories(matrix_presence_lifecycle_tests PRIVATE
-			"${CMAKE_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}")
-		target_compile_features(matrix_presence_lifecycle_tests PRIVATE cxx_std_17)
-		target_link_libraries(matrix_presence_lifecycle_tests PRIVATE
-			matrix ${VACUUM_UTILS_NAME} Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::Xml Qt6::Sql ${ADD_LIBS})
-	add_executable(matrix_presence_status_send_tests EXCLUDE_FROM_ALL
-		matrix_presence_status_send_test.cpp)
-	target_include_directories(matrix_presence_status_send_tests PRIVATE
-		"${CMAKE_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}")
-	target_compile_features(matrix_presence_status_send_tests PRIVATE cxx_std_17)
-	target_link_libraries(matrix_presence_status_send_tests PRIVATE
-		matrix ${VACUUM_UTILS_NAME} Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::Xml Qt6::Sql ${ADD_LIBS})
 
-	add_executable(matrix_history_pagination_tests EXCLUDE_FROM_ALL
-		matrixhistorypagination_test.cpp matrixdatabase.cpp matrixdatabaseworker.cpp
+	# Sources shared by Matrix network integration tests.
+	set(MATRIX_TEST_SOURCES
+		matrixhistorybackup.cpp
+		matrixnetwork.cpp
+		matrixnetworkinvite.cpp
+		matrixroomapi.cpp
+		matrixdatabase.cpp
+		matrixdatabaseworker.cpp
+		matrixolm.cpp
+		matrixssss.cpp
 	)
-	target_include_directories(matrix_history_pagination_tests PRIVATE "${CMAKE_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}")
-	target_compile_features(matrix_history_pagination_tests PRIVATE cxx_std_11)
-	target_link_libraries(matrix_history_pagination_tests PRIVATE Qt6::Core Qt6::Sql)
 
-	add_executable(matrix_history_backfill_tests EXCLUDE_FROM_ALL
-		matrix_history_backfill_test.cpp matrixdatabase.cpp)
-	target_include_directories(matrix_history_backfill_tests PRIVATE "${CMAKE_SOURCE_DIR}/src")
-	target_compile_features(matrix_history_backfill_tests PRIVATE cxx_std_17)
-	target_link_libraries(matrix_history_backfill_tests PRIVATE Qt6::Core Qt6::Sql)
+	# Helper function to add Matrix test targets with shared configuration.
+	function(add_matrix_test_target target_name source_file)
+		add_executable(${target_name} EXCLUDE_FROM_ALL
+			${source_file} ${MATRIX_TEST_SOURCES})
+		target_include_directories(${target_name} PRIVATE "${CMAKE_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}")
+		target_link_libraries(${target_name} PRIVATE
+			${VACUUM_UTILS_NAME} Qt6::Core Qt6::Gui Qt6::Network Qt6::Sql ${ADD_LIBS})
+	endfunction()
 
-	add_executable(matrix_sync_batch_tests EXCLUDE_FROM_ALL
-		matrix_sync_batch_test.cpp)
-	target_include_directories(matrix_sync_batch_tests PRIVATE
-		"${CMAKE_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}")
-	target_compile_features(matrix_sync_batch_tests PRIVATE cxx_std_17)
-	target_link_libraries(matrix_sync_batch_tests PRIVATE
-		matrix ${VACUUM_UTILS_NAME} Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::Xml Qt6::Sql ${ADD_LIBS})
+	add_matrix_test_target(matrix_history_retry_tests "${MATRIX_TEST_SOURCE_DIR}/matrixhistoryretry_test.cpp")
+	add_matrix_test_target(matrix_room_encryption_tests "${MATRIX_TEST_SOURCE_DIR}/matrix_room_encryption_test.cpp")
+	add_matrix_test_target(matrix_network_login_tests "${MATRIX_TEST_SOURCE_DIR}/matrix_network_login_tests.cpp")
+	if (OLM_FOUND)
+		add_matrix_test_target(matrix_avatar_cache_tests "${MATRIX_TEST_SOURCE_DIR}/matrixavatarcache_test.cpp")
+	endif()
+	add_matrix_test_target(matrix_account_avatar_tests "${MATRIX_TEST_SOURCE_DIR}/matrixaccountavatar_test.cpp")
+
+	add_matrix_plugin_test_target(matrix_presence_tests "${MATRIX_TEST_SOURCE_DIR}/matrix_presence_lifecycle_test.cpp")
+
+	add_executable(matrix_history_tests EXCLUDE_FROM_ALL
+		"${MATRIX_TEST_SOURCE_DIR}/matrixhistorypagination_test.cpp"
+		matrixhistorybackup.cpp
+		matrixdatabase.cpp
+		matrixdatabaseworker.cpp
+	)
+	target_include_directories(matrix_history_tests PRIVATE "${CMAKE_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}")
+	target_compile_features(matrix_history_tests PRIVATE cxx_std_17)
+	target_link_libraries(matrix_history_tests PRIVATE Qt6::Core Qt6::Network Qt6::Gui Qt6::Sql)
+
+	add_matrix_plugin_test_target(matrix_sync_batch_tests "${MATRIX_TEST_SOURCE_DIR}/matrix_sync_batch_test.cpp")
 endif()
 
 if(TARGET matrix)

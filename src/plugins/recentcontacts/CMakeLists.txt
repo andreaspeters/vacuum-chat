@@ -8,8 +8,9 @@ include("recentcontacts.cmake")
 include("${CMAKE_SOURCE_DIR}/src/plugins/plugins.cmake")
 
 if (BUILD_TESTING)
+	set(RECENTCONTACTS_TEST_SOURCE_DIR "${CMAKE_SOURCE_DIR}/tests/recentcontacts")
 	add_executable(recentcontacts_protocol_icon_tests EXCLUDE_FROM_ALL
-		recentcontacts_protocol_icon_test.cpp
+		${RECENTCONTACTS_TEST_SOURCE_DIR}/recentcontacts_protocol_icon_test.cpp
 		recentcontactsprotocolicon.cpp)
 	target_compile_definitions(recentcontacts_protocol_icon_tests PRIVATE
 		RECENTCONTACTS_RESOURCE_DIR="${CMAKE_SOURCE_DIR}/resources")

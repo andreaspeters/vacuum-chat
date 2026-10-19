@@ -40,11 +40,6 @@ PrivacyLists::PrivacyLists()
 	connect(this,SIGNAL(activeListChanged(const Jid &, const QString &)),SLOT(onActiveListChanged(const Jid &, const QString &)));
 }
 
-PrivacyLists::~PrivacyLists()
-{
-
-}
-
 void PrivacyLists::pluginInfo(IPluginInfo *APluginInfo)
 {
 	APluginInfo->name = tr("Privacy Lists");

@@ -13,7 +13,6 @@ class StreamParser :
 	Q_OBJECT;
 public:
 	StreamParser(QObject *AParent = NULL);
-	~StreamParser();
 	void parseData(const QByteArray &AData);
 	void restart();
 signals:

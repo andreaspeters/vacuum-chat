@@ -769,6 +769,15 @@ IProtocolAccountAvatarActions *Avatars::accountAvatarActions(const AccountId &AA
 	return NULL;
 }
 
+void Avatars::dispatchAvatarAction(const QStringList &AAccountIds, const QByteArray &AData)
+{
+	foreach (const AccountId &accountId, AAccountIds)
+	{
+		ProtocolAccountAvatarPolicy::dispatchSetAvatar(
+			accountAvatarActions(accountId), accountId, AData);
+	}
+}
+
 bool Avatars::profileActionProviderForAccount(const AccountId &AAccountId, const QString &AProviderStreamId,
 	const UserId &AUserId, bool AEdit,
 	IProtocolCapabilities *&ACapabilities, IProtocolProfileActions *&AActions) const
@@ -1022,10 +1031,7 @@ void Avatars::onSetAvatarByAction(bool)
 			QByteArray data = loadFromFile(fileName);
 			const QStringList accountIds = action->data(ADR_ACCOUNT_ID).toStringList();
 			if (!accountIds.isEmpty()) {
-				foreach (const AccountId &accountId, accountIds) {
-					ProtocolAccountAvatarPolicy::dispatchSetAvatar(
-						accountAvatarActions(accountId), accountId, data);
-				}
+				dispatchAvatarAction(accountIds, data);
 			} else if (!action->data(ADR_CONTACT_JID).isNull())
 			{
 				foreach(Jid contactJid, action->data(ADR_CONTACT_JID).toStringList())
@@ -1042,10 +1048,7 @@ void Avatars::onClearAvatarByAction(bool)
 	{
 		const QStringList accountIds = action->data(ADR_ACCOUNT_ID).toStringList();
 		if (!accountIds.isEmpty()) {
-			foreach (const AccountId &accountId, accountIds) {
-				ProtocolAccountAvatarPolicy::dispatchSetAvatar(
-					accountAvatarActions(accountId), accountId, QByteArray());
-			}
+			dispatchAvatarAction(accountIds, QByteArray());
 		} else if (!action->data(ADR_CONTACT_JID).isNull())
 		{
 			Jid contactJid = action->data(ADR_CONTACT_JID).toString();

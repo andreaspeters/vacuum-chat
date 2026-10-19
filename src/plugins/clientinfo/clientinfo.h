@@ -73,7 +73,6 @@ class ClientInfo :
 	Q_INTERFACES(IPlugin IClientInfo IOptionsHolder IStanzaHandler IStanzaRequestOwner IDataLocalizer IDiscoFeatureHandler);
 public:
 	ClientInfo();
-	~ClientInfo();
 	//IPlugin
 	virtual QObject *instance() { return this; }
 	virtual QUuid pluginUuid() const { return CLIENTINFO_UUID; }

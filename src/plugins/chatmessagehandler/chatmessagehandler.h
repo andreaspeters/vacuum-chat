@@ -89,7 +89,6 @@ class ChatMessageHandler :
 	Q_INTERFACES(IPlugin IMessageHandler IRostersClickHooker IXmppUriHandler IOptionsHolder);
 public:
 	ChatMessageHandler();
-	~ChatMessageHandler();
 	//IPlugin
 	virtual QObject *instance() { return this; }
 	virtual QUuid pluginUuid() const { return CHATMESSAGEHANDLER_UUID; }
@@ -120,7 +119,8 @@ protected:
 	void setupFileTransferAction(IChatWindow *AWindow, IProtocolMessaging *AMessaging = nullptr);
 	void setupRoomSidebar(IChatWindow *AWindow, IProtocolMessaging *AMessaging);
 	void showRoomMemberProfile(QWidget *AParent, IProtocolMessaging *AMessaging,
-		const ProtocolRoom &ARoom, const ProtocolRosterEntry &AMember);
+		const ProtocolRoom &ARoom, const ProtocolRosterEntry &AMember,
+		const AccountId &AAccountId, QObject *AProtocolObject);
 	void showRoomInviteDialog(QWidget *AParent, IProtocolMessaging *AMessaging,
 		const ProtocolRoom &ARoom);
 	void renderProtocolMessage(IChatWindow *AWindow, IProtocolMessaging *AMessaging,
@@ -189,11 +189,12 @@ protected slots:
 private:
 	IProtocolMessaging *findLocalHistoryProvider(const QString &ARosterStreamId,
 		IProtocolRoster *&AProviderRoster, IProtocolCapabilities *&ACapabilities) const;
-	IProtocolMessaging *findLocalHistoryProviderForAccount(const AccountId &AAccountId,
-		IProtocolRoster *&AProviderRoster, IProtocolCapabilities *&ACapabilities) const;
+	IProtocolMessaging *findLocalHistoryProviderForAccount(const AccountId &AAccountId);
+	IProtocolCapabilities *findHistoryCapabilitiesForConversation(const AccountId &AAccountId,
+		const ConversationId &AConversationId) const;
 	void setupLocalHistoryAction(IChatWindow *AWindow);
-	void showLocalConversationHistory(const QString &ARosterStreamId,
-		const ConversationId &AConversationId);
+	void showLocalHistoryViewer(IProtocolMessaging *AProvider, const AccountId &AAccountId,
+		const QString &AProviderStreamId, const ConversationId &AConversationId);
 	IMessageWidgets *FMessageWidgets;
 	IMessageProcessor *FMessageProcessor;
 	IPluginManager *FPluginManager;

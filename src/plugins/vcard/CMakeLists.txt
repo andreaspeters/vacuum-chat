@@ -7,8 +7,9 @@ include("vcard.cmake")
 include("${CMAKE_SOURCE_DIR}/src/plugins/plugins.cmake")
 
 if(BUILD_TESTING)
+    set(VCARD_TEST_SOURCE_DIR "${CMAKE_SOURCE_DIR}/tests/vcard")
     add_executable(protocol_profile_action_policy_tests
-        protocolprofileactionpolicy_test.cpp
+        ${VCARD_TEST_SOURCE_DIR}/protocolprofileactionpolicy_test.cpp
     )
     target_link_libraries(protocol_profile_action_policy_tests
         Qt6::Core
@@ -23,7 +24,7 @@ if(BUILD_TESTING)
     )
 
     add_executable(vcard_dialog_binding_tests
-        vcard_dialog_binding_test.cpp
+        ${VCARD_TEST_SOURCE_DIR}/vcard_dialog_binding_test.cpp
     )
     target_link_libraries(vcard_dialog_binding_tests
         Qt6::Core

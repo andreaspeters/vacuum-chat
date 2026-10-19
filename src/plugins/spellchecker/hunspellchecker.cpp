@@ -13,6 +13,17 @@
 #include <QStringConverter>
 #include "spellchecker.h"
 
+namespace {
+
+QByteArray encodeWord(const QString &AWord, const QByteArray &AEncoding)
+{
+	if (AEncoding.isEmpty())
+		return AWord.toUtf8();
+	return QByteArray(QStringEncoder(AEncoding)(AWord));
+}
+
+}
+
 HunspellChecker::HunspellChecker() : FHunSpell(NULL)
 {
 #if defined (Q_OS_WIN)
@@ -88,7 +99,7 @@ bool HunspellChecker::isCorrect(const QString &AWord)
 {
 	if(available())
 	{
-		QByteArray encWord = FDictEncoding.isEmpty() ? AWord.toUtf8() : QByteArray(QStringEncoder(FDictEncoding)(AWord));
+		QByteArray encWord = encodeWord(AWord, FDictEncoding);
 		return FHunSpell->spell(encWord.constData());
 	}
 	return true;
@@ -107,7 +118,7 @@ bool HunspellChecker::add(const QString &AWord)
 	if (available() && canAdd(AWord))
 	{
 		QString trimmedWord = AWord.trimmed();
-		QByteArray encWord = FDictEncoding.isEmpty() ? trimmedWord.toUtf8() : QByteArray(QStringEncoder(FDictEncoding)(trimmedWord));
+		QByteArray encWord = encodeWord(trimmedWord, FDictEncoding);
 		FHunSpell->add(encWord.constData());
 		savePersonalDict(trimmedWord);
 		return true;
@@ -121,7 +132,7 @@ QList<QString> HunspellChecker::suggestions(const QString &AWord)
 	if(available())
 	{
 		char **sugglist;
-		QByteArray encWord = FDictEncoding.isEmpty() ? AWord.toUtf8() : QByteArray(QStringEncoder(FDictEncoding)(AWord));
+		QByteArray encWord = encodeWord(AWord, FDictEncoding);
 		int count = FHunSpell->suggest(&sugglist, encWord.data());
 		for(int i = 0; i < count; ++i)
 			words.append(FDictEncoding.isEmpty() ? QString::fromUtf8(sugglist[i]) : QStringDecoder(FDictEncoding)(QByteArray(sugglist[i])));
@@ -162,7 +173,7 @@ void HunspellChecker::loadPersonalDict()
 				QString word = QString::fromUtf8(file.readLine()).trimmed();
 				if (canAdd(word))
 				{
-					QByteArray encWord = FDictEncoding.isEmpty() ? word.toUtf8() : QByteArray(QStringEncoder(FDictEncoding)(word));
+					QByteArray encWord = encodeWord(word, FDictEncoding);
 					FHunSpell->add(encWord.constData());
 				}
 			}

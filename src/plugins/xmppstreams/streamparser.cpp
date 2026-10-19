@@ -7,11 +7,6 @@ StreamParser::StreamParser(QObject *AParent) : QObject(AParent)
 	restart();
 }
 
-StreamParser::~StreamParser()
-{
-
-}
-
 void StreamParser::parseData(const QByteArray &AData)
 {
 	static QDomDocument doc;

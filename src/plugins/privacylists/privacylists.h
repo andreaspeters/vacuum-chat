@@ -31,7 +31,6 @@ class PrivacyLists :
 	Q_INTERFACES(IPlugin IPrivacyLists IStanzaHandler IStanzaRequestOwner);
 public:
 	PrivacyLists();
-	~PrivacyLists();
 	virtual QObject *instance() { return this; }
 	//IPlugin
 	virtual QUuid pluginUuid() const { return PRIVACYLISTS_UUID; }

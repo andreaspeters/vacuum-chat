@@ -3,7 +3,7 @@
 
 #include <QDialog>
 #include <QString>
-#include "matrixpublicrooms.h"
+#include "matrixroomapi.h"
 
 class QLabel;
 class QLineEdit;

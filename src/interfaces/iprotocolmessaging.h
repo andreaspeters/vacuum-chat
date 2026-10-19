@@ -106,6 +106,14 @@ public:
     { (void)conversationId; return QString(); }
     virtual bool requestConversationHistorySync(const ConversationId &conversationId) const
     { (void)conversationId; return false; }
+    // Reads the separate on-disk history backup; it must not alter primary persistence.
+    virtual bool requestLocalHistoryBackup(const ConversationId &conversationId,
+        QObject *callbackContext, ProtocolHistoryPageCallback callback) const
+    {
+        (void)conversationId; (void)callbackContext; (void)callback;
+        return false;
+    }
+    virtual bool providesLocalHistoryBackup() const { return false; }
 };
 
 Q_DECLARE_INTERFACE(IProtocolMessaging, "Vacuum.Plugin.IProtocolMessaging/1.0")

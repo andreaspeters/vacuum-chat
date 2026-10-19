@@ -7,11 +7,6 @@ SortFilterProxyModel::SortFilterProxyModel(IRostersViewPlugin *ARostersViewPlugi
 	FRostersViewPlugin = ARostersViewPlugin;
 }
 
-SortFilterProxyModel::~SortFilterProxyModel()
-{
-
-}
-
 void SortFilterProxyModel::invalidate()
 {
 	FShowOffline = Options::node(OPV_ROSTER_SHOWOFFLINE).value().toBool();

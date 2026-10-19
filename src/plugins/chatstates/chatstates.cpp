@@ -50,11 +50,6 @@ ChatStates::ChatStates()
 	connect(&FUpdateTimer,SIGNAL(timeout()),SLOT(onUpdateSelfStates()));
 }
 
-ChatStates::~ChatStates()
-{
-
-}
-
 void ChatStates::pluginInfo(IPluginInfo *APluginInfo)
 {
 	APluginInfo->name = tr("Chat State Notifications");

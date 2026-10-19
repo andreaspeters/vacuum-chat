@@ -484,9 +484,15 @@ def test_redacted_matrix_messages_scrub_format_and_preserve_timestamp():
     redaction_start = network.index('if (eventType == QStringLiteral("m.room.redaction"))')
     redaction_end = network.index("MatrixTextEvent matrixEvent;", redaction_start)
     redaction = network[redaction_start:redaction_end]
-    assert 'redacted->metadata.remove(QStringLiteral("formatted_body"))' in redaction
-    assert 'redacted->metadata.remove(QStringLiteral("format"))' in redaction
-    assert 'redacted->metadata.remove(QStringLiteral("body"))' in redaction
+    assert 'redactedMetadataKeys' in redaction
+    assert 'for (const QString &key : redactedMetadataKeys)' in redaction
+    # Extract list of keys to verify they are correctly looped over
+    start = network.find('static const QStringList redactedMetadataKeys = {')
+    end = network.find('};', start)
+    key_list = network[start:end].split('{')[1].split('}')[0]
+    assert 'formatted_body' in key_list
+    assert 'format' in key_list
+    assert 'body' in key_list
     assert "replacement.originTs = redacted->timestamp.toLongLong();" in redaction
 
     render_start = renderer.index("void ChatMessageHandler::renderProtocolMessage(")
@@ -871,7 +877,12 @@ def test_room_image_history_cache_lazy_load_contract():
     render_message = renderer.split("void ChatMessageHandler::renderProtocolMessage(", 1)[1].split(
         "void ChatMessageHandler::renderProtocolHistory(", 1)[0]
     assert "requestHistoricalImages" in network_header
-    assert "requestHistoricalImages" in history_callback
+    assert "queueHistoricalImageRequests(roomId, events);" in history_callback
+    history_image_queue = matrix_source.split(
+        "void Matrix::queueHistoricalImageRequests(", 1)[1].split(
+        "void Matrix::onCachedHistoryLoaded(", 1)[0]
+    assert "network->requestHistoricalImages(roomId, events);" in history_image_queue
+    assert "Qt::QueuedConnection" in history_image_queue
     history_loader = network_source.split("void MatrixNetwork::requestHistoricalImages(", 1)[1].split(
         "void MatrixNetwork::requestRoomName(", 1)[0]
     assert "events.crbegin()" in history_loader, "cached images must be requested newest first"
@@ -896,8 +907,14 @@ def test_matrix_media_reads_and_decodes_off_ui_lazily():
         "void MatrixNetwork::requestHistoricalImages(", 1)[0]
     history_loader = network_source.split("void MatrixNetwork::requestHistoricalImages(", 1)[1].split(
         "void MatrixNetwork::requestRoomName(", 1)[0]
-    sync_media = network_source.split("if (!wasInitialSync && !events.isEmpty())", 1)[1].split(
-        "Continue the sync loop", 1)[0]
+    sync_finish = network_source.split("void MatrixNetwork::onSyncFinished(", 1)[1].split(
+        "void MatrixNetwork::dispatchSyncEventBatch(", 1)[0]
+    sync_dispatch = sync_finish.split("if (!events.isEmpty()) {", 1)[1].split(
+        "// Keep a one-second floor", 1)[0]
+    assert "if (!wasInitialSync)" in sync_dispatch
+    assert "dispatchSyncEventBatch(events)" in sync_dispatch
+    sync_media = network_source.split("void MatrixNetwork::dispatchSyncEventBatch(", 1)[1].split(
+        "QList<MatrixTextEvent> MatrixNetwork::messageHistory(", 1)[0]
     assert "QFile::exists" not in avatar_enqueue, "cache probes must be on MatrixNetworkThread"
     assert "loadRoomAvatar(room.id)" not in roster_model, "roster rebuild must not prefetch all room avatars"
     assert "loadRoomAvatar" in avatars_source, "visible avatar data requests should trigger lazy room loads"

@@ -18,7 +18,6 @@ class ChatWindowMenu :
 	Q_OBJECT;
 public:
 	ChatWindowMenu(IMessageArchiver *AArchiver, IPluginManager *APluginManager, IToolBarWidget *AToolBarWidget, QWidget *AParent);
-	~ChatWindowMenu();
 	Jid streamJid() const;
 	Jid contactJid() const;
 protected:

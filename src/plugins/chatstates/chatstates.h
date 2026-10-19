@@ -64,7 +64,6 @@ class ChatStates :
 	Q_INTERFACES(IPlugin IChatStates IStanzaHandler IArchiveHandler IOptionsHolder ISessionNegotiator);
 public:
 	ChatStates();
-	~ChatStates();
 	//IPlugin
 	virtual QObject *instance() { return this; }
 	virtual QUuid pluginUuid() const { return CHATSTATES_UUID; }

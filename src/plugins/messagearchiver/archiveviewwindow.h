@@ -17,6 +17,8 @@
 #include <interfaces/imessagestyles.h>
 #include <interfaces/imessagewidgets.h>
 #include <interfaces/imessageprocessor.h>
+#include <interfaces/imessage.h>
+#include <interfaces/identity.h>
 #include <interfaces/iurlprocessor.h>
 #include <utils/iconstorage.h>
 #include <utils/textmanager.h>
@@ -61,6 +63,9 @@ class ArchiveViewWindow :
 	Q_OBJECT;
 public:
 	ArchiveViewWindow(IPluginManager *APluginManager, IMessageArchiver *AArchiver, IRoster *ARoster, QWidget *AParent = NULL);
+	ArchiveViewWindow(IPluginManager *APluginManager, const AccountId &AAccountId,
+		const ConversationId &AConversationId, const QString &AConversationName,
+		const QList<BasicMessage> &AMessages, QWidget *AParent = NULL);
 	~ArchiveViewWindow();
 	Jid streamJid() const;
 	Jid contactJid() const;
@@ -70,6 +75,8 @@ public:
 protected:
 	void initialize(IPluginManager *APluginManager);
 	void reset();
+	void resetLocalHistory();
+	void showLocalHistoryForDate(const QDate &ADate);
 protected:
 	QString contactName(const Jid &AContactJid, bool AShowResource = false) const;
 	QStandardItem *createContactItem(const Jid &AContactJid, QStandardItem *AParent);
@@ -125,8 +132,18 @@ protected slots:
 private:
 	Ui::ArchiveViewWindowClass ui;
 private:
+	ArchiveViewWindow(IPluginManager *APluginManager, IMessageArchiver *AArchiver, IRoster *ARoster,
+		bool ALocalHistoryMode, const AccountId &AAccountId, const ConversationId &AConversationId,
+		const QString &AConversationName, const QList<BasicMessage> &AMessages, QWidget *AParent);
+private:
 	IRoster *FRoster;
 	IMessageArchiver *FArchiver;
+	bool FLocalHistoryMode;
+	AccountId FAccountId;
+	ConversationId FConversationId;
+	QString FConversationName;
+	QList<BasicMessage> FLocalMessages;
+	QList<BasicMessage> FFilteredLocalMessages;
 	IStatusIcons *FStatusIcons;
 	IUrlProcessor *FUrlProcessor;
 	IMessageStyles *FMessageStyles;

@@ -2,7 +2,8 @@
 #include "matrixavatarkeypolicy.h"
 #include "matrixsessionpolicy.h"
 #include "matrixnetwork.h"
-#include "matrixroominvite.h"
+#include "matrixroomapi.h"
+#include "matrixroommemberpolicy.h"
 #include "matrixdatabase.h"
 #include "matrixverificationdialog.h"
 #include "matrixjoinroomchatdialog.h"
@@ -18,7 +19,9 @@
 #include <definitions/rosterindextyperole.h>
 
 #include <QByteArray>
+#include <QCoreApplication>
 #include <QDebug>
+#include <QDir>
 #include <QNetworkRequest>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -36,7 +39,6 @@
 #include <QStandardPaths>
 #include <QLabel>
 #include <QProgressBar>
-#include <QMessageBox>
 #include <QPushButton>
 #include <QVBoxLayout>
 #include <QRegularExpression>
@@ -46,9 +48,33 @@
 
 static QString matrixAvatarCachePath(const QString &profileDirectory, const QString &mxcUrl);
 
+static BasicMessage makeHistoricalMessage(const QString &roomId,
+	const MatrixTimelineEvent &event, const QString &networkUserId, const QString &databaseUserId)
+{
+	BasicMessage message(event.eventId, roomId, event.sender, QString(), event.content,
+		MatrixTimestamps::fromUnixMilliseconds(event.originTs), QStringLiteral("matrix"),
+		BasicMessage::Incoming);
+	QVariantMap metadata;
+	for (auto it = event.metadata.constBegin(); it != event.metadata.constEnd(); ++it)
+		metadata.insert(it.key(), it.value());
+	metadata.insert(QStringLiteral("historical"), true);
+	const bool senderIsSelf = networkUserId.isEmpty()
+		? (event.metadata.value(QStringLiteral("sender_is_self")).toBool() ||
+			MatrixSessionPolicy::matchesLoginUserId(databaseUserId, event.sender))
+		: networkUserId == event.sender;
+	metadata.insert(QStringLiteral("sender_is_self"), senderIsSelf);
+	message.setMetadata(metadata);
+	return message;
+}
 
 Matrix::Matrix()
-	: FUuid("{5f9b0e2a-6c1e-4c93-9e2d-7e8b0f3d6a41}"), FMatrixNetwork(nullptr), FAccountManager(nullptr), FOptionsManager(nullptr), FMatrixAccount(nullptr), FShow(0), FInitialSyncWindow(nullptr)
+	: FUuid("{5f9b0e2a-6c1e-4c93-9e2d-7e8b0f3d6a41}"),
+	  FMatrixNetwork(nullptr),
+	  FAccountManager(nullptr),
+	  FOptionsManager(nullptr),
+	  FMatrixAccount(nullptr),
+	  FShow(0),
+	  FInitialSyncWindow(nullptr)
 {
 	FMetadataRefreshClock.start();
 }
@@ -69,6 +95,19 @@ QString Matrix::formatEmoticonForSending(const QString &iconKey) const
 QString Matrix::formatEmoticonsForSending(const QString &text) const
 {
 	QString result = text;
+	static const QList<QPair<QStringList, QString>> textEmoticons = {
+		{QStringList{QStringLiteral("(:")}, QStringLiteral("🙃")},
+		{QStringList{QStringLiteral(":-)"), QStringLiteral(":)")}, QStringLiteral("🙂")},
+		{QStringList{QStringLiteral(":-("), QStringLiteral(":(")}, QStringLiteral("🙁")},
+		{QStringList{QStringLiteral(":-D"), QStringLiteral(":D")}, QStringLiteral("😄")},
+		{QStringList{QStringLiteral(";-)"), QStringLiteral(";)")}, QStringLiteral("😉")},
+		{QStringList{QStringLiteral(":-P"), QStringLiteral(":P")}, QStringLiteral("😛")},
+		{QStringList{QStringLiteral(":-O"), QStringLiteral(":O")}, QStringLiteral("😮")}
+	};
+	for (const auto &replacement : textEmoticons)
+		for (const QString &alias : replacement.first)
+			result.replace(alias, replacement.second);
+
 	static const QStringList keys = {
 		QStringLiteral("smile"), QStringLiteral("lol"), QStringLiteral("rofl"),
 		QStringLiteral("happy"), QStringLiteral("wink"), QStringLiteral("sad"),
@@ -110,6 +149,23 @@ QString Matrix::emojiPickerType() const
 	return pack;
 }
 
+void Matrix::clearLoginRequestState()
+{
+	FLoginRequested = false;
+	FLoginAccountId.clear();
+	FLoginUserId.clear();
+	FPendingStatus.clear();
+}
+
+void Matrix::resetNetworkSessionState()
+{
+	clearLoginRequestState();
+	FPendingShow = IPresence::Offline;
+	FNetworkLoggedIn = false;
+	FNetworkInitialSyncComplete = false;
+	FNetworkUserId.clear();
+}
+
 bool Matrix::setPresence(int AShow, const QString &AStatus)
 {
 	if (!FMatrixNetwork || !FMatrixAccount || !FMatrixAccount->isActive())
@@ -120,14 +176,8 @@ bool Matrix::setPresence(int AShow, const QString &AStatus)
 	if (action == MatrixSessionPolicy::PresenceAction::Disconnect)
 	{
 		++FLoginGeneration;
-		FLoginRequested = false;
-		FLoginAccountId.clear();
-		FLoginUserId.clear();
-		FPendingShow = IPresence::Offline;
-		FPendingStatus.clear();
-		FNetworkLoggedIn = false;
-		FNetworkInitialSyncComplete = false;
-		FNetworkUserId.clear();
+		FDirectConversationOpenRequests.clear();
+		resetNetworkSessionState();
 		const bool invoked = QMetaObject::invokeMethod(FMatrixNetwork, "logout", Qt::QueuedConnection);
 		FShow = AShow;
 		FStatus = AStatus;
@@ -158,6 +208,9 @@ bool Matrix::setPresence(int AShow, const QString &AStatus)
 		FLoginUserId = username;
 		FLoginRequested = true;
 		const quint64 sessionGeneration = ++FLoginGeneration;
+		FDirectConversationOpenRequests.clear();
+		FRoomPowerLevels.clear();
+		FPendingMemberActionObservers.clear();
 
 		const QString deviceId = options.value("matrix.device-id").toString();
 		const QString accessToken = qEnvironmentVariable("MATRIX_ACCESS_TOKEN");
@@ -173,10 +226,7 @@ bool Matrix::setPresence(int AShow, const QString &AStatus)
 			const QString password = FMatrixAccount->password();
 			if (password.isEmpty())
 			{
-				FLoginRequested = false;
-				FLoginAccountId.clear();
-				FLoginUserId.clear();
-				FPendingStatus.clear();
+				clearLoginRequestState();
 				return false;
 			}
 			invoked = QMetaObject::invokeMethod(FMatrixNetwork, "loginForSession", Qt::QueuedConnection,
@@ -185,10 +235,7 @@ bool Matrix::setPresence(int AShow, const QString &AStatus)
 		}
 		if (!invoked)
 		{
-			FLoginRequested = false;
-			FLoginAccountId.clear();
-			FLoginUserId.clear();
-			FPendingStatus.clear();
+			clearLoginRequestState();
 			return false;
 		}
 		return true;
@@ -397,6 +444,12 @@ void Matrix::onVerificationRequest(const QString &transactionId, const QString &
 		qWarning() << "Matrix verification request deferred until initial sync completes";
 		return;
 	}
+	appendVerificationNotification(transactionId, userId);
+	showVerificationDialog(transactionId, userId, deviceId);
+}
+
+void Matrix::appendVerificationNotification(const QString &transactionId, const QString &userId)
+{
 	ProtocolNotification notification;
 	notification.id = QStringLiteral("verification:") + transactionId;
 	notification.accountId = accountId();
@@ -406,7 +459,6 @@ void Matrix::onVerificationRequest(const QString &transactionId, const QString &
 	notification.timestamp = QDateTime::currentDateTimeUtc();
 	notification.kind = ProtocolNotification::Verification;
 	appendNotification(notification);
-	showVerificationDialog(transactionId, userId, deviceId);
 }
 
 void Matrix::onVerificationSas(const QString &transactionId, const QStringList &emoji,
@@ -496,14 +548,6 @@ void Matrix::onSsssRecoveryFinished(bool success, const QString &error)
 	qWarning() << "[Matrix-E2EE] SSSS recovery completed; private cross-signing keys held in RAM only";
 }
 
-ProtocolRosterEntry Matrix::entry(const QString &AId) const
-{
-	for (const ProtocolRosterEntry &entry : FProtocolEntries)
-		if (entry.id == AId)
-			return entry;
-	return ProtocolRosterEntry();
-}
-
 QList<ProtocolRoom> Matrix::rooms() const
 {
 	QList<ProtocolRoom> visibleRooms;
@@ -562,6 +606,9 @@ void Matrix::pluginInfo(IPluginInfo *APluginInfo)
 bool Matrix::initConnections(IPluginManager *APluginManager, int &AInitOrder)
 {
 	AInitOrder = 0;
+	const QString homePath = APluginManager->homePath();
+	FHistoryBackupDirectory = homePath.isEmpty() ? QString() :
+		QDir(homePath).filePath(QStringLiteral("archive"));
 	IPlugin *plugin = APluginManager->pluginInterface("IAccountManager").value(0, NULL);
 	if (plugin) {
 		IAccountManager *accounts = qobject_cast<IAccountManager *>(plugin->instance());
@@ -569,7 +616,8 @@ bool Matrix::initConnections(IPluginManager *APluginManager, int &AInitOrder)
 			FAccountManager = accounts;
 			connect(accounts->instance(), SIGNAL(shown(IAccount *)), this, SLOT(onAccountShown(IAccount *)));
 			connect(accounts->instance(), SIGNAL(appended(IAccount *)), this, SLOT(onAccountAppended(IAccount *)));
-			connect(accounts->instance(), SIGNAL(changed(IAccount *,OptionsNode)), this, SLOT(onAccountChanged(IAccount *,OptionsNode)));
+			connect(accounts->instance(), SIGNAL(changed(IAccount *,OptionsNode)),
+				this, SLOT(onAccountChanged(IAccount *,OptionsNode)));
 			connect(accounts->instance(), SIGNAL(hidden(IAccount *)), this, SLOT(onAccountHidden(IAccount *)));
 
 		}
@@ -658,6 +706,285 @@ bool Matrix::editProfile(const AccountId &accountId)
 		Q_ARG(QString, displayName));
 }
 
+IProtocolRoomMemberActions::MemberActions Matrix::actionsForMember(const AccountId &requestedAccountId,
+	const ConversationId &roomId, const UserId &memberId) const
+{
+	IProtocolRoomMemberActions::MemberActions actions;
+	const bool sessionReady = FMatrixNetwork && FNetworkLoggedIn && FNetworkInitialSyncComplete;
+	const QString ownUserId = FNetworkUserId;
+	const AccountId boundAccountId = accountId();
+	const ProtocolRoom targetRoom = room(roomId);
+	bool targetIsJoinedMember = false;
+	for (const ProtocolRosterEntry &member : targetRoom.members)
+		if (member.id == memberId && member.isValid) {
+			targetIsJoinedMember = true;
+			break;
+		}
+	const bool accountMatches = !requestedAccountId.isEmpty() && requestedAccountId == boundAccountId;
+	const bool validUserId = MatrixDirectRoom::isValidUserId(memberId);
+	const bool allowed = MatrixRoomMemberActionPolicy::directConversationAllowed(requestedAccountId,
+		boundAccountId, sessionReady, roomId, targetRoom, memberId, ownUserId);
+	const bool debugEnabled = QCoreApplication::arguments().contains(QStringLiteral("--debug"));
+	if (!validUserId || !allowed) {
+		if (debugEnabled)
+			qDebug() << "[Matrix-member-actions] profile rejected; room-key" << qHash(roomId)
+				<< "session" << sessionReady << "account" << accountMatches
+				<< "room-found" << (targetRoom.id == roomId) << "joined" << targetRoom.isJoined
+				<< "available" << targetRoom.isAvailable << "members" << targetRoom.members.size()
+				<< "target-member" << targetIsJoinedMember << "valid-user" << validUserId;
+		return actions;
+	}
+	actions |= IProtocolRoomMemberActions::ActionOpenDirectConversation;
+	const auto powerLevelsIt = FRoomPowerLevels.constFind(roomId);
+	if (powerLevelsIt == FRoomPowerLevels.constEnd()) {
+		if (debugEnabled)
+			qDebug() << "[Matrix-member-actions] profile waiting for power levels; room-key"
+				<< qHash(roomId) << "members" << targetRoom.members.size();
+		if (sessionReady)
+			QMetaObject::invokeMethod(FMatrixNetwork, "requestRoomPowerLevels", Qt::QueuedConnection,
+				Q_ARG(QString, roomId));
+		return actions;
+	}
+	const QJsonObject &powerLevels = powerLevelsIt.value();
+	const MatrixRoomMemberActionPolicy::ModerationActions moderation =
+		MatrixRoomMemberActionPolicy::moderationActions(true, powerLevels, ownUserId, memberId);
+	if (debugEnabled) {
+		const int actorPowerLevel = MatrixRoomMemberActionPolicy::userPowerLevel(powerLevels, ownUserId);
+		const int targetPowerLevel = MatrixRoomMemberActionPolicy::userPowerLevel(powerLevels, memberId);
+		qDebug() << "[Matrix-member-actions] evaluated; room-key" << qHash(roomId)
+			<< "members" << targetRoom.members.size() << "actor-level" << actorPowerLevel
+			<< "target-level" << targetPowerLevel
+			<< "can-kick" << moderation.canKick << "can-ban" << moderation.canBan;
+		if (moderation.canKick && !moderation.canBan)
+			qDebug() << "Matrix member ban unavailable: actor power" << actorPowerLevel
+				<< "target power" << targetPowerLevel
+				<< "ban threshold" << powerLevels.value(QStringLiteral("ban")).toInt(50);
+	}
+	if (moderation.canSetRole && !memberRoles(requestedAccountId, roomId, memberId).isEmpty())
+		actions |= IProtocolRoomMemberActions::ActionSetRole;
+	if (moderation.canKick)
+		actions |= IProtocolRoomMemberActions::ActionKick;
+	if (moderation.canBan)
+		actions |= IProtocolRoomMemberActions::ActionBan;
+	if (moderation.canRedact)
+		actions |= IProtocolRoomMemberActions::ActionRedactMessages;
+	return actions;
+}
+
+IProtocolRoomMemberActions::MemberActions Matrix::observeActionsForMember(
+	const AccountId &requestedAccountId, const ConversationId &roomId, const UserId &memberId,
+	QObject *callbackContext, IProtocolRoomMemberActions::MemberActionsUpdatedCallback callback)
+{
+	const IProtocolRoomMemberActions::MemberActions actions =
+		actionsForMember(requestedAccountId, roomId, memberId);
+	const bool sessionReady = FMatrixNetwork && FNetworkLoggedIn && FNetworkInitialSyncComplete;
+	const ProtocolRoom profileRoom = room(roomId);
+	if (callback && callbackContext && MatrixDirectRoom::isValidUserId(memberId) &&
+		MatrixRoomMemberActionPolicy::canObserveMemberProfile(requestedAccountId, accountId(),
+			sessionReady, roomId, profileRoom, memberId, FNetworkUserId)) {
+		PendingMemberActionObserver observer;
+		observer.id = FNextMemberActionObserverId++;
+		observer.context = callbackContext;
+		observer.accountId = requestedAccountId;
+		observer.roomId = roomId;
+		observer.memberId = memberId;
+		observer.callback = callback;
+		FPendingMemberActionObservers[roomId].append(observer);
+		QObject::connect(callbackContext, &QObject::destroyed, this,
+			[this, roomId, observerId = observer.id]() {
+			auto roomObservers = FPendingMemberActionObservers.find(roomId);
+			if (roomObservers == FPendingMemberActionObservers.end())
+				return;
+			QList<PendingMemberActionObserver> &observers = roomObservers.value();
+			for (int i = observers.size() - 1; i >= 0; --i)
+				if (observers.at(i).id == observerId)
+					observers.removeAt(i);
+			if (observers.isEmpty())
+				FPendingMemberActionObservers.erase(roomObservers);
+		});
+		QMetaObject::invokeMethod(FMatrixNetwork, "requestJoinedMembers", Qt::QueuedConnection,
+			Q_ARG(QString, roomId), Q_ARG(bool, true));
+		QMetaObject::invokeMethod(FMatrixNetwork, "requestRoomPowerLevels", Qt::QueuedConnection,
+			Q_ARG(QString, roomId));
+	}
+	if (callback)
+		callback(actions);
+	return actions;
+}
+
+QList<ProtocolRoomMemberRole> Matrix::memberRoles(const AccountId &requestedAccountId,
+	const ConversationId &roomId, const UserId &memberId) const
+{
+	const bool sessionReady = FMatrixNetwork && FNetworkLoggedIn && FNetworkInitialSyncComplete;
+	const auto powerLevels = FRoomPowerLevels.constFind(roomId);
+	if (!MatrixDirectRoom::isValidUserId(memberId) || powerLevels == FRoomPowerLevels.constEnd() ||
+		!MatrixRoomMemberActionPolicy::directConversationAllowed(requestedAccountId, accountId(),
+			sessionReady, roomId, room(roomId), memberId, FNetworkUserId))
+		return {};
+	return MatrixRoomMemberActionPolicy::rolesForMember(true, powerLevels.value(),
+		FNetworkUserId, memberId);
+}
+
+QString Matrix::memberRole(const AccountId &requestedAccountId, const ConversationId &roomId,
+	const UserId &memberId) const
+{
+	const auto powerLevels = FRoomPowerLevels.constFind(roomId);
+	if (powerLevels == FRoomPowerLevels.constEnd() || requestedAccountId != accountId())
+		return QString();
+	return QString::number(MatrixRoomMemberActionPolicy::userPowerLevel(
+		powerLevels.value(), memberId));
+}
+
+bool Matrix::setMemberRole(const AccountId &requestedAccountId, const ConversationId &roomId,
+	const UserId &memberId, const QString &roleId)
+{
+	if (!actionsForMember(requestedAccountId, roomId, memberId).testFlag(
+		IProtocolRoomMemberActions::ActionSetRole))
+		return false;
+	const QList<ProtocolRoomMemberRole> roles = memberRoles(requestedAccountId, roomId, memberId);
+	if (std::none_of(roles.cbegin(), roles.cend(), [&roleId](const ProtocolRoomMemberRole &role) {
+			return role.id == roleId;
+		}))
+		return false;
+	bool levelOk = false;
+	const int level = roleId.toInt(&levelOk);
+	if (!levelOk)
+		return false;
+	QJsonObject content = FRoomPowerLevels.value(roomId);
+	QJsonObject users = content.value(QStringLiteral("users")).toObject();
+	users.insert(memberId, level);
+	content.insert(QStringLiteral("users"), users);
+	return QMetaObject::invokeMethod(FMatrixNetwork, "updateRoomPowerLevels", Qt::QueuedConnection,
+		Q_ARG(QString, roomId), Q_ARG(QString, memberId), Q_ARG(QJsonObject, content));
+}
+
+bool Matrix::openDirectConversation(const AccountId &requestedAccountId, const UserId &memberId)
+{
+	if (!FMatrixNetwork || !FNetworkLoggedIn || !FNetworkInitialSyncComplete ||
+		requestedAccountId != accountId() || !MatrixDirectRoom::isValidUserId(memberId) ||
+		memberId == FNetworkUserId)
+		return false;
+	if (FDirectConversationOpenRequests.contains(memberId))
+		return true;
+	FDirectConversationOpenRequests.insert(memberId, FLoginGeneration);
+	if (QMetaObject::invokeMethod(FMatrixNetwork, "startDirectChat", Qt::QueuedConnection,
+		Q_ARG(QString, memberId)))
+		return true;
+	FDirectConversationOpenRequests.remove(memberId);
+	return false;
+}
+
+bool Matrix::kickMember(const AccountId &requestedAccountId, const ConversationId &roomId,
+	const UserId &memberId, const QString &reason)
+{
+	if (!actionsForMember(requestedAccountId, roomId, memberId).testFlag(
+		IProtocolRoomMemberActions::ActionKick))
+		return false;
+	return QMetaObject::invokeMethod(FMatrixNetwork, "changeRoomMember", Qt::QueuedConnection,
+		Q_ARG(QString, roomId), Q_ARG(QString, memberId), Q_ARG(QString, QStringLiteral("kick")),
+		Q_ARG(QString, reason));
+}
+
+bool Matrix::banMember(const AccountId &requestedAccountId, const ConversationId &roomId,
+	const UserId &memberId, const QString &reason)
+{
+	if (!actionsForMember(requestedAccountId, roomId, memberId).testFlag(
+		IProtocolRoomMemberActions::ActionBan))
+		return false;
+	return QMetaObject::invokeMethod(FMatrixNetwork, "changeRoomMember", Qt::QueuedConnection,
+		Q_ARG(QString, roomId), Q_ARG(QString, memberId), Q_ARG(QString, QStringLiteral("ban")),
+		Q_ARG(QString, reason));
+}
+
+bool Matrix::redactMemberMessages(const AccountId &requestedAccountId,
+	const ConversationId &roomId, const UserId &memberId, const QString &reason)
+{
+	if (!FMatrixNetwork || !actionsForMember(requestedAccountId, roomId, memberId).testFlag(
+		IProtocolRoomMemberActions::ActionRedactMessages))
+		return false;
+	return QMetaObject::invokeMethod(FMatrixNetwork, "redactMemberMessages", Qt::QueuedConnection,
+		Q_ARG(QString, roomId), Q_ARG(QString, memberId), Q_ARG(QString, reason));
+}
+
+void Matrix::onRoomPowerLevelsChanged(const QString &roomId, const QJsonObject &content)
+{
+	if (roomId.isEmpty())
+		return;
+	FRoomPowerLevels.insert(roomId, content);
+	notifyPendingMemberActionObservers(roomId);
+}
+
+void Matrix::notifyPendingMemberActionObservers(const QString &roomId)
+{
+	const QList<PendingMemberActionObserver> observers = FPendingMemberActionObservers.value(roomId);
+	for (const PendingMemberActionObserver &observer : observers) {
+		if (!observer.context || !observer.callback)
+			continue;
+		QPointer<Matrix> adapter(this);
+		const QPointer<QObject> context = observer.context;
+		QMetaObject::invokeMethod(context.data(), [adapter, context, observer]() {
+			if (adapter && context && observer.callback)
+				observer.callback(adapter->actionsForMember(observer.accountId,
+					observer.roomId, observer.memberId));
+		}, Qt::QueuedConnection);
+	}
+}
+
+void Matrix::onMemberRedactionFinished(const QString &roomId, const QString &memberId,
+	int succeeded, int total, const QString &error)
+{
+	QWidget *parent = FRostersViewPlugin && FRostersViewPlugin->rostersView()
+		? FRostersViewPlugin->rostersView()->instance() : nullptr;
+	if (total == 0 && error == QStringLiteral("No matching cached messages were found.")) {
+		QMessageBox::information(parent, tr("Redact cached messages"),
+			tr("No locally cached messages from %1 were found.").arg(memberId));
+		return;
+	}
+	if (!error.isEmpty()) {
+		QMessageBox::warning(parent, tr("Redact cached messages"),
+			tr("Redacted %1 of %2 cached messages in %3 before stopping: %4")
+				.arg(succeeded).arg(total).arg(roomId, error));
+		return;
+	}
+	QMessageBox::information(parent, tr("Redact cached messages"),
+		tr("Redacted %1 cached messages from %2.").arg(succeeded).arg(memberId));
+}
+
+void Matrix::onRoomMemberActionFailed(const QString &roomId, const QString &memberId,
+	const QString &action, const QString &error)
+{
+	QWidget *parent = FRostersViewPlugin && FRostersViewPlugin->rostersView()
+		? FRostersViewPlugin->rostersView()->instance() : nullptr;
+	QString actionLabel;
+	if (action == QStringLiteral("kick"))
+		actionLabel = tr("Kick");
+	else if (action == QStringLiteral("ban"))
+		actionLabel = tr("Ban");
+	else
+		actionLabel = tr("Role change");
+	QMessageBox::warning(parent, tr("Room member action failed"),
+		tr("%1 failed for %2 in room %3: %4")
+			.arg(actionLabel, memberId, roomId, error));
+}
+
+void Matrix::onDirectRoomCreated(const QString &userId, const QString &roomId, const QString &error)
+{
+	auto request = FDirectConversationOpenRequests.find(userId);
+	if (request == FDirectConversationOpenRequests.end())
+		return;
+	const quint64 generation = request.value();
+	FDirectConversationOpenRequests.erase(request);
+	Q_UNUSED(error);
+	if (generation != FLoginGeneration || !FNetworkLoggedIn || roomId.isEmpty())
+		return;
+	const AccountId boundAccountId = accountId();
+	if (boundAccountId.isEmpty() || !FMessageWidgets)
+		return;
+	setActiveConversation(roomId);
+	if (IChatWindow *window = FMessageWidgets->getConversationWindow(boundAccountId, roomId))
+		window->showTabPage();
+}
+
 void Matrix::showRoomChatDialog(const QString &boundAccountId)
 {
 	if (!FMatrixNetwork || !FMatrixAccount ||
@@ -696,6 +1023,8 @@ bool Matrix::initObjects()
 	FNetworkThread = new QThread();
 	FNetworkThread->setObjectName(QStringLiteral("MatrixNetworkThread"));
 	FMatrixNetwork->moveToThread(FNetworkThread);
+	connect(FMatrixNetwork, &MatrixNetwork::directRoomCreated,
+		this, &Matrix::onDirectRoomCreated);
 	FNetworkThread->start();
 	qRegisterMetaType<QList<MatrixCachedRoom>>();
 	qRegisterMetaType<QList<MatrixTimelineEvent>>();
@@ -751,7 +1080,7 @@ bool Matrix::startPlugin()
 				account->setActive(true);
 			}
 		}
-		foreach (IAccount *account, FAccountManager->accounts()) {
+		for (IAccount *account : FAccountManager->accounts()) {
 			if (account->isActive())
 				onAccountShown(account);
 		}
@@ -792,6 +1121,8 @@ void Matrix::onAccountShown(IAccount *AAccount)
 		? FOptionsManager->profilePath(FOptionsManager->currentProfile()) : QString();
 	QMetaObject::invokeMethod(FMatrixNetwork, "setDatabaseProfileDirectory", Qt::QueuedConnection,
 		Q_ARG(QString, profileDirectory));
+	QMetaObject::invokeMethod(FMatrixNetwork, "setHistoryBackupDirectory", Qt::QueuedConnection,
+		Q_ARG(QString, FHistoryBackupDirectory));
 	QMetaObject::invokeMethod(FMatrixNetwork, "setServerUrl", Qt::QueuedConnection,
 		Q_ARG(QString, serverUrl));
 	FDatabaseProfileDirectory = profileDirectory;
@@ -808,6 +1139,12 @@ void Matrix::onAccountShown(IAccount *AAccount)
 		this, SLOT(onRosterChanged(QList<ProtocolRoom>)), Qt::UniqueConnection);
 	connect(FMatrixNetwork, &MatrixNetwork::roomMetadataChanged, this,
 		&Matrix::onRoomMetadataChanged, Qt::UniqueConnection);
+	connect(FMatrixNetwork, &MatrixNetwork::roomPowerLevelsChanged, this,
+		&Matrix::onRoomPowerLevelsChanged, Qt::UniqueConnection);
+	connect(FMatrixNetwork, &MatrixNetwork::memberRedactionFinished, this,
+		&Matrix::onMemberRedactionFinished, Qt::UniqueConnection);
+	connect(FMatrixNetwork, &MatrixNetwork::roomMemberActionFailed, this,
+		&Matrix::onRoomMemberActionFailed, Qt::UniqueConnection);
 	connect(FMatrixNetwork, SIGNAL(messageReceived(BasicMessage)),
 		this, SLOT(onNetworkMessageReceived(BasicMessage)), Qt::UniqueConnection);
 	connect(FMatrixNetwork, &MatrixNetwork::typingChanged,
@@ -881,17 +1218,12 @@ void Matrix::onAccountHidden(IAccount *AAccount)
 		FStreamId.clear();
 		FShow = 0;
 		FStatus.clear();
-		FNetworkLoggedIn = false;
-		FNetworkInitialSyncComplete = false;
 		++FLoginGeneration;
-		FLoginRequested = false;
-		FLoginAccountId.clear();
-		FLoginUserId.clear();
-		FPendingShow = IPresence::Offline;
-		FPendingStatus.clear();
-		FNetworkUserId.clear();
+		FDirectConversationOpenRequests.clear();
+		resetNetworkSessionState();
 		FProtocolRooms.clear();
-		FProtocolEntries.clear();
+		FRoomPowerLevels.clear();
+		FPendingMemberActionObservers.clear();
 		QMetaObject::invokeMethod(FMatrixNetwork, "logout", Qt::QueuedConnection);
 		if (FInitialSyncWindow)
 			FInitialSyncWindow->close();
@@ -902,8 +1234,15 @@ void Matrix::onAccountHidden(IAccount *AAccount)
 
 void Matrix::loadRoomsFromDatabase()
 {
-	if (!FDatabaseWorker || FDatabaseProfileDirectory.isEmpty() ||
-		FDatabaseServerUrl.isEmpty() || FDatabaseUserId.isEmpty())
+	if (FDatabaseProfileDirectory.isEmpty() || FDatabaseServerUrl.isEmpty() ||
+		FDatabaseUserId.isEmpty())
+		return;
+	requestDatabaseRoomsLoad();
+}
+
+void Matrix::requestDatabaseRoomsLoad()
+{
+	if (!FDatabaseWorker)
 		return;
 	QMetaObject::invokeMethod(FDatabaseWorker, "loadRooms", Qt::QueuedConnection,
 		Q_ARG(QString, FDatabaseProfileDirectory), Q_ARG(QString, FDatabaseServerUrl),
@@ -913,31 +1252,12 @@ void Matrix::loadRoomsFromDatabase()
 void Matrix::onCachedRoomsLoaded(const QList<MatrixCachedRoom> &rooms)
 {
 	FProtocolRooms.clear();
-	FProtocolEntries.clear();
 	for (const MatrixCachedRoom &cached : rooms) {
 		const MatrixStoredRoom &stored = cached.room;
 		ProtocolRoom room;
-		room.id = stored.roomId;
-		room.name = stored.name.isEmpty() ? stored.roomId : stored.name;
-		room.subject = stored.topic;
+		MatrixRoomCacheMapping::applyStoredRoom(stored, cached.members, room);
 		room.roomType = stored.roomType;
-		room.membership = stored.membership;
-		room.isJoined = stored.membership == QStringLiteral("join");
-		room.isDirect = stored.isDirect;
-		room.isEncrypted = stored.isEncrypted;
-		room.encryptionStateKnown = stored.encryptionStateKnown;
-		room.isAvailable = true;
-		room.avatarUrl = stored.avatarUrl;
 		room.avatarKey = accountId() + QStringLiteral("\nroom\n") + room.id;
-		for (const MatrixStoredMember &storedMember : cached.members) {
-			ProtocolRosterEntry member;
-			member.id = storedMember.userId;
-			member.name = storedMember.displayName;
-			member.avatarUrl = storedMember.avatarUrl;
-			member.presence = QStringLiteral("unknown");
-			member.isValid = true;
-			room.members.append(member);
-		}
 		if (room.isDirect && room.avatarUrl.isEmpty())
 			for (const ProtocolRosterEntry &member : room.members)
 				if (member.id != FNetworkUserId && !member.avatarUrl.isEmpty()) {
@@ -961,47 +1281,40 @@ void Matrix::onCachedRoomsLoadFailed(const QString &error)
 	qWarning() << "Matrix offline roster database load failed:" << error;
 }
 
+void Matrix::queueHistoricalImageRequests(const QString &roomId,
+	const QList<MatrixTimelineEvent> &events)
+{
+	if (!FMatrixNetwork || events.isEmpty())
+		return;
+	MatrixNetwork *network = FMatrixNetwork;
+	QMetaObject::invokeMethod(network, [network, roomId, events]() {
+		network->requestHistoricalImages(roomId, events);
+	}, Qt::QueuedConnection);
+}
+
 void Matrix::onCachedHistoryLoaded(const QString &roomId,
 	const QList<MatrixTimelineEvent> &events)
 {
-	if (FMatrixNetwork && !events.isEmpty()) {
-		MatrixNetwork *network = FMatrixNetwork;
-		QMetaObject::invokeMethod(network, [network, roomId, events]() {
-			network->requestHistoricalImages(roomId, events);
-		}, Qt::QueuedConnection);
-	}
+	queueHistoricalImageRequests(roomId, events);
 	QList<BasicMessage> cachedMessages;
-	for (const MatrixTimelineEvent &event : events) {
-		BasicMessage message(event.eventId, roomId, event.sender, QString(), event.content,
-			MatrixTimestamps::fromUnixMilliseconds(event.originTs), QStringLiteral("matrix"),
-			BasicMessage::Incoming);
-		QVariantMap metadata;
-		for (auto it = event.metadata.constBegin(); it != event.metadata.constEnd(); ++it)
-			metadata.insert(it.key(), it.value());
-		metadata.insert(QStringLiteral("historical"), true);
-		const bool senderIsSelf = FNetworkUserId.isEmpty()
-			? (event.metadata.value(QStringLiteral("sender_is_self")).toBool() ||
-				MatrixSessionPolicy::matchesLoginUserId(FDatabaseUserId, event.sender))
-			: FNetworkUserId == event.sender;
-		metadata.insert(QStringLiteral("sender_is_self"), senderIsSelf);
-		message.setMetadata(metadata);
-		cachedMessages.append(message);
-	}
+	for (const MatrixTimelineEvent &event : events)
+		cachedMessages.append(makeHistoricalMessage(roomId, event, FNetworkUserId, FDatabaseUserId));
 	const QList<BasicMessage> pendingMessages = FPendingHistoryMessages.take(roomId);
 	const QList<BasicMessage> mergedMessages =
 		mergeHistoryMessagesChronologically(cachedMessages, pendingMessages);
-	if (!mergedMessages.isEmpty() && !FLatestConversationEventIds.contains(roomId))
+	const bool latestEventIdWasUnknown = FLatestConversationEventIds.value(roomId).isEmpty();
+	if (!mergedMessages.isEmpty() && latestEventIdWasUnknown)
 		FLatestConversationEventIds.insert(roomId, mergedMessages.last().messageId());
+	const QString latestEventId = FLatestConversationEventIds.value(roomId);
+	if (roomId == FActiveConversationId && latestEventIdWasUnknown && !latestEventId.isEmpty())
+		markConversationRead(roomId, latestEventId);
 	if (!mergedMessages.isEmpty()) {
 		FCachedHistoryQueue.append(mergedMessages);
 		FCachedHistoryRemainingByRoom[roomId] += mergedMessages.size();
 	} else {
 		finishHistoryLoad(roomId);
 	}
-	if (!FCachedHistoryBatchScheduled) {
-		FCachedHistoryBatchScheduled = true;
-		QTimer::singleShot(0, this, &Matrix::emitCachedHistoryBatch);
-	}
+	scheduleCachedHistoryBatch();
 }
 
 void Matrix::onHistoryPageLoaded(const QString &roomId,
@@ -1015,29 +1328,12 @@ void Matrix::onHistoryPageLoaded(const QString &roomId,
 	page.hasMore = result.hasMore;
 	if (result.success) {
 		for (const MatrixTimelineEvent &event : result.events) {
-			BasicMessage message(event.eventId, roomId, event.sender, QString(), event.content,
-				MatrixTimestamps::fromUnixMilliseconds(event.originTs), QStringLiteral("matrix"),
-				BasicMessage::Incoming);
-			QVariantMap metadata;
-			for (auto it = event.metadata.constBegin(); it != event.metadata.constEnd(); ++it)
-				metadata.insert(it.key(), it.value());
-			metadata.insert(QStringLiteral("historical"), true);
-			const bool senderIsSelf = FNetworkUserId.isEmpty()
-				? (event.metadata.value(QStringLiteral("sender_is_self")).toBool() ||
-					MatrixSessionPolicy::matchesLoginUserId(FDatabaseUserId, event.sender))
-				: FNetworkUserId == event.sender;
-			metadata.insert(QStringLiteral("sender_is_self"), senderIsSelf);
-			message.setMetadata(metadata);
+			BasicMessage message = makeHistoricalMessage(roomId, event,
+				FNetworkUserId, FDatabaseUserId);
 			if (!isDisplayedLocalEchoDuplicate(message))
 				page.messages.append(message);
 		}
-		if (FMatrixNetwork && !result.events.isEmpty()) {
-			MatrixNetwork *network = FMatrixNetwork;
-			const QList<MatrixTimelineEvent> events = result.events;
-			QMetaObject::invokeMethod(network, [network, roomId, events]() {
-				network->requestHistoricalImages(roomId, events);
-			}, Qt::QueuedConnection);
-		}
+		queueHistoricalImageRequests(roomId, result.events);
 	}
 	if (!pending.callbackContext || !pending.callback)
 		return;
@@ -1047,6 +1343,14 @@ void Matrix::onHistoryPageLoaded(const QString &roomId,
 		if (context)
 			callback(page);
 	}, Qt::QueuedConnection);
+}
+
+void Matrix::scheduleCachedHistoryBatch()
+{
+	if (FCachedHistoryBatchScheduled)
+		return;
+	FCachedHistoryBatchScheduled = true;
+	QTimer::singleShot(0, this, &Matrix::emitCachedHistoryBatch);
 }
 
 void Matrix::emitCachedHistoryBatch()
@@ -1073,27 +1377,21 @@ void Matrix::emitCachedHistoryBatch()
 void Matrix::onLoginSuccess(const QString &AUserId, const QString &AAccessToken,
 	const QString &ADeviceId, quint64 ASessionGeneration)
 {
-	if (ASessionGeneration != FLoginGeneration ||
-		!MatrixSessionPolicy::acceptLoginSuccess(FLoginRequested))
+	if (!MatrixSessionPolicy::shouldAcceptLoginResponse(
+			ASessionGeneration == FLoginGeneration, FLoginRequested))
 		return;
 	if (!FMatrixAccount || !FMatrixAccount->isActive() ||
 		FLoginAccountId != accountId() ||
 		!MatrixSessionPolicy::matchesLoginUserId(FLoginUserId, AUserId))
 	{
-		FLoginRequested = false;
-		FLoginAccountId.clear();
-		FLoginUserId.clear();
-		FPendingStatus.clear();
+		clearLoginRequestState();
 		if (FMatrixNetwork)
 			QMetaObject::invokeMethod(FMatrixNetwork, "logout", Qt::QueuedConnection);
 		return;
 	}
 	const int requestedShow = FPendingShow;
 	const QString requestedStatus = FPendingStatus;
-	FLoginRequested = false;
-	FLoginAccountId.clear();
-	FLoginUserId.clear();
-	FPendingStatus.clear();
+	clearLoginRequestState();
 
 	FNetworkUserId = AUserId;
 	if (!ADeviceId.isEmpty())
@@ -1125,10 +1423,7 @@ void Matrix::onLoginSuccess(const QString &AUserId, const QString &AAccessToken,
 		// Only start the worker afterwards; otherwise a fresh database can be
 		// initialized concurrently by two SQLite connections and block the UI
 		// while the initial sync is starting.
-		if (FDatabaseWorker)
-			QMetaObject::invokeMethod(FDatabaseWorker, "loadRooms", Qt::QueuedConnection,
-				Q_ARG(QString, FDatabaseProfileDirectory),
-				Q_ARG(QString, FDatabaseServerUrl), Q_ARG(QString, FDatabaseUserId));
+		requestDatabaseRoomsLoad();
 		FNotificationsReady = false;
 		if (FMatrixAccount)
 		{
@@ -1152,12 +1447,10 @@ void Matrix::onLoginSuccess(const QString &AUserId, const QString &AAccessToken,
 void Matrix::onInitialSyncCompleted()
 {
 	FNetworkInitialSyncComplete = true;
+	emit protocolRosterChanged();
 	if (FInitialSyncWindow)
 		FInitialSyncWindow->close();
-	if (FDatabaseWorker)
-		QMetaObject::invokeMethod(FDatabaseWorker, "loadRooms", Qt::QueuedConnection,
-			Q_ARG(QString, FDatabaseProfileDirectory),
-			Q_ARG(QString, FDatabaseServerUrl), Q_ARG(QString, FDatabaseUserId));
+	requestDatabaseRoomsLoad();
 	if (!FDeferredVerificationTransactionId.isEmpty()) {
 		const QString transactionId = FDeferredVerificationTransactionId;
 		const QString userId = FDeferredVerificationUserId;
@@ -1165,15 +1458,7 @@ void Matrix::onInitialSyncCompleted()
 		FDeferredVerificationTransactionId.clear();
 		FDeferredVerificationUserId.clear();
 		FDeferredVerificationDeviceId.clear();
-		ProtocolNotification notification;
-		notification.id = QStringLiteral("verification:") + transactionId;
-		notification.accountId = accountId();
-		notification.title = userId;
-		notification.body = tr("Matrix device verification requested");
-		notification.protocol = protocol();
-		notification.timestamp = QDateTime::currentDateTimeUtc();
-		notification.kind = ProtocolNotification::Verification;
-		appendNotification(notification);
+		appendVerificationNotification(transactionId, userId);
 		QTimer::singleShot(0, this, [this, transactionId, userId, deviceId]() {
 			showVerificationDialog(transactionId, userId, deviceId);
 			if (FDeferredVerificationSasTransactionId == transactionId) {
@@ -1221,10 +1506,7 @@ bool Matrix::sendMessage(const BasicMessage &message)
 		content = MatrixReply::applyRelation(content,
 			metadata.value(QStringLiteral("reply_to_event_id")).toString());
 		const QString roomId = message.conversationId();
-		QMetaObject::invokeMethod(FMatrixNetwork,
-			[this, roomId, content, transactionId]() {
-				FMatrixNetwork->sendMessageEvent(roomId, content, transactionId);
-			}, Qt::QueuedConnection);
+		queueSendMessageEvent(roomId, content, transactionId);
 		return true;
 	}
 	const QString filePath = metadata.value(QStringLiteral("file_path")).toString();
@@ -1252,10 +1534,7 @@ bool Matrix::sendMessage(const BasicMessage &message)
 		if (!file.isEmpty())
 			content.insert(QStringLiteral("file"), file);
 		const QString roomId = message.conversationId();
-		QMetaObject::invokeMethod(FMatrixNetwork,
-			[this, roomId, content, transactionId]() {
-				FMatrixNetwork->sendMessageEvent(roomId, content, transactionId);
-			}, Qt::QueuedConnection);
+		queueSendMessageEvent(roomId, content, transactionId);
 	} else {
 		const QString roomId = message.conversationId();
 		QMetaObject::invokeMethod(FMatrixNetwork,
@@ -1266,6 +1545,14 @@ bool Matrix::sendMessage(const BasicMessage &message)
 	return true;
 }
 
+void Matrix::queueSendMessageEvent(const QString &roomId, const QJsonObject &content, const QString &transactionId)
+{
+	QMetaObject::invokeMethod(FMatrixNetwork,
+		[this, roomId, content, transactionId]() {
+			FMatrixNetwork->sendMessageEvent(roomId, content, transactionId);
+		}, Qt::QueuedConnection);
+}
+
 bool Matrix::supportsRoomInvites() const
 {
 	return FMatrixNetwork && FNetworkLoggedIn;
@@ -1273,8 +1560,7 @@ bool Matrix::supportsRoomInvites() const
 
 bool Matrix::inviteUserToRoom(const ConversationId &roomId, const UserId &userId)
 {
-	MatrixRoomInvite::Request inviteRequest;
-	if (!supportsRoomInvites() || !MatrixRoomInvite::buildRequest(roomId, userId, inviteRequest))
+	if (!supportsRoomInvites() || !MatrixRoomInvite::isValidRequestTarget(roomId, userId))
 		return false;
 
 	QPointer<MatrixNetwork> network = FMatrixNetwork;
@@ -1393,6 +1679,35 @@ bool Matrix::requestConversationHistorySync(const ConversationId &conversationId
 	}, Qt::QueuedConnection);
 }
 
+bool Matrix::requestLocalHistoryBackup(const ConversationId &conversationId,
+	QObject *callbackContext, ProtocolHistoryPageCallback callback) const
+{
+	if (conversationId.isEmpty() || !callbackContext || !callback || !FMatrixNetwork ||
+		FHistoryBackupDirectory.isEmpty() || FDatabaseServerUrl.isEmpty() || FDatabaseUserId.isEmpty())
+		return false;
+
+	const QPointer<QObject> context(callbackContext);
+	const QString roomId = conversationId;
+	MatrixNetwork *network = FMatrixNetwork;
+	return QMetaObject::invokeMethod(network,
+		[context, network, roomId, callback]() {
+			ProtocolHistoryPage page;
+			QList<MatrixTextEvent> events;
+			page.success = network->loadOrCreateLocalHistoryBackup(roomId, events);
+			if (page.success) {
+				page.messages.reserve(events.size());
+				for (const MatrixTextEvent &event : events)
+					page.messages.append(event.toBasicMessage());
+			} else {
+				page.error = QStringLiteral("Local history backup is unavailable");
+			}
+			if (context)
+				QMetaObject::invokeMethod(context.data(), [context, callback, page]() {
+					if (context) callback(page);
+				}, Qt::QueuedConnection);
+		}, Qt::QueuedConnection);
+}
+
 bool Matrix::requestOlderHistoryPage(const ConversationId &conversationId,
 	const BasicMessage &beforeMessage, int limit, QObject *callbackContext,
 	ProtocolHistoryPageCallback callback)
@@ -1435,6 +1750,9 @@ void Matrix::setActiveConversation(const QString &conversationId) const
 		Q_ARG(QString, conversationId));
 	if (!FNetworkLoggedIn || conversationId.isEmpty())
 		return;
+	const QString latestEventId = FLatestConversationEventIds.value(conversationId);
+	if (!latestEventId.isEmpty())
+		const_cast<Matrix *>(this)->markConversationRead(conversationId, latestEventId);
 
 	const ProtocolRoom currentRoom = room(conversationId);
 	if (currentRoom.id.isEmpty())
@@ -1462,10 +1780,7 @@ void Matrix::loadConversationAvatars(const QString &conversationId) const
 {
 	const ProtocolRoom currentRoom = room(conversationId);
 	enqueueAvatarLoad(currentRoom.avatarKey, currentRoom.avatarUrl);
-	if (!FAvatarLoadScheduled && !FAvatarLoadQueue.isEmpty()) {
-		FAvatarLoadScheduled = true;
-		QTimer::singleShot(0, const_cast<Matrix *>(this), &Matrix::loadNextAvatar);
-	}
+	scheduleNextAvatarLoad();
 }
 
 void Matrix::loadUserAvatar(const QString &conversationId, const QString &userId) const
@@ -1476,10 +1791,7 @@ void Matrix::loadUserAvatar(const QString &conversationId, const QString &userId
 			enqueueAvatarLoad(userAvatarKey(conversationId, userId), member.avatarUrl);
 			break;
 		}
-	if (!FAvatarLoadScheduled && !FAvatarLoadQueue.isEmpty()) {
-		FAvatarLoadScheduled = true;
-		QTimer::singleShot(0, const_cast<Matrix *>(this), &Matrix::loadNextAvatar);
-	}
+	scheduleNextAvatarLoad();
 }
 
 void Matrix::loadRoomAvatar(const QString &roomId) const
@@ -1489,10 +1801,7 @@ void Matrix::loadRoomAvatar(const QString &roomId) const
 		? accountId() + QStringLiteral("\nroom\n") + currentRoom.id
 		: currentRoom.avatarKey;
 	enqueueAvatarLoad(key, currentRoom.avatarUrl);
-	if (!FAvatarLoadScheduled && !FAvatarLoadQueue.isEmpty()) {
-		FAvatarLoadScheduled = true;
-		QTimer::singleShot(0, const_cast<Matrix *>(this), &Matrix::loadNextAvatar);
-	}
+	scheduleNextAvatarLoad();
 }
 
 void Matrix::loadConversationMedia(const BasicMessage &message) const
@@ -1525,6 +1834,14 @@ void Matrix::enqueueAvatarLoad(const QString &key, const QString &url) const
 	if (FAvatarLoadQueue.contains(item))
 		return;
 	FAvatarLoadQueue.append(item);
+}
+
+void Matrix::scheduleNextAvatarLoad() const
+{
+	if (!FAvatarLoadScheduled && !FAvatarLoadQueue.isEmpty()) {
+		FAvatarLoadScheduled = true;
+		QTimer::singleShot(0, const_cast<Matrix *>(this), &Matrix::loadNextAvatar);
+	}
 }
 
 void Matrix::loadNextAvatar()
@@ -1608,10 +1925,7 @@ void Matrix::loadAccountAvatar() const
 	if (avatarUrl.isEmpty())
 		return;
 	enqueueAvatarLoad(accountAvatarKey(), avatarUrl);
-	if (!FAvatarLoadScheduled && !FAvatarLoadQueue.isEmpty()) {
-		FAvatarLoadScheduled = true;
-		QTimer::singleShot(0, const_cast<Matrix *>(this), &Matrix::loadNextAvatar);
-	}
+	scheduleNextAvatarLoad();
 }
 
 bool Matrix::markConversationRead(const QString &conversationId, const QString &eventId)
@@ -1735,6 +2049,13 @@ void Matrix::onNetworkMessageReceived(const BasicMessage &message)
 	normalizedMessage.setMetadata(metadata);
 	if (!normalizedMessage.conversationId().isEmpty() && !normalizedMessage.messageId().isEmpty())
 		FLatestConversationEventIds.insert(normalizedMessage.conversationId(), normalizedMessage.messageId());
+	if (normalizedMessage.direction() == BasicMessage::Incoming &&
+		normalizedMessage.conversationId() == FActiveConversationId &&
+		!normalizedMessage.messageId().isEmpty() &&
+		normalizedMessage.sender() != FNetworkUserId &&
+		!normalizedMessage.metadata().value(QStringLiteral("historical")).toBool())
+		markConversationRead(normalizedMessage.conversationId(), normalizedMessage.messageId());
+
 	if (FNotificationsReady && FMatrixNetwork &&
 		normalizedMessage.metadata().value(QStringLiteral("room_type")).toString() != QStringLiteral("m.space") &&
 		room(normalizedMessage.conversationId()).roomType != QStringLiteral("m.space") &&
@@ -1748,8 +2069,10 @@ void Matrix::onNetworkMessageReceived(const BasicMessage &message)
 		ProtocolNotification notification;
 		notification.id = normalizedMessage.messageId();
 		notification.accountId = accountId();
+		notification.streamId = streamId();
 		notification.conversationId = normalizedMessage.conversationId();
 		notification.title = normalizedMessage.sender();
+		notification.senderId = normalizedMessage.sender();
 		notification.body = normalizedMessage.body();
 		notification.protocol = protocol();
 		notification.timestamp = normalizedMessage.timestamp();
@@ -1827,8 +2150,10 @@ void Matrix::onNetworkNotificationEvent(const MatrixNotificationEvent &event)
 	ProtocolNotification notification;
 	notification.id = event.eventId;
 	notification.accountId = accountId();
+	notification.streamId = streamId();
 	notification.conversationId = event.roomId;
 	notification.title = event.sender;
+	notification.senderId = event.sender;
 	notification.protocol = protocol();
 	notification.timestamp = MatrixTimestamps::fromUnixMilliseconds(event.timestamp);
 	const QString membership = event.content.value(QStringLiteral("membership")).toString();
@@ -1864,16 +2189,10 @@ void Matrix::onNetworkNotificationEvent(const MatrixNotificationEvent &event)
 
 void Matrix::onLoginError(const QString &AError, quint64 ASessionGeneration)
 {
-	if (ASessionGeneration != FLoginGeneration || !FLoginRequested)
+	if (!MatrixSessionPolicy::shouldAcceptLoginResponse(
+			ASessionGeneration == FLoginGeneration, FLoginRequested))
 		return;
-	FLoginRequested = false;
-	FLoginAccountId.clear();
-	FLoginUserId.clear();
-	FPendingShow = IPresence::Offline;
-	FPendingStatus.clear();
-	FNetworkLoggedIn = false;
-	FNetworkInitialSyncComplete = false;
-	FNetworkUserId.clear();
+	resetNetworkSessionState();
 	FShow = 0;
 	FStatus.clear();
 	if (!FStreamId.isEmpty())
@@ -2031,10 +2350,7 @@ void Matrix::finishHistoryLoad(const QString &roomId)
 	if (!orderedPendingMessages.isEmpty()) {
 		FCachedHistoryQueue.append(orderedPendingMessages);
 		FCachedHistoryRemainingByRoom[roomId] += orderedPendingMessages.size();
-		if (!FCachedHistoryBatchScheduled) {
-			FCachedHistoryBatchScheduled = true;
-			QTimer::singleShot(0, this, &Matrix::emitCachedHistoryBatch);
-		}
+		scheduleCachedHistoryBatch();
 		return;
 	}
 	FCachedHistoryRemainingByRoom.remove(roomId);
@@ -2094,6 +2410,7 @@ void Matrix::onRoomMetadataChanged(const ProtocolRoom &updatedRoom)
 			room.avatarUrl != previousAvatarUrl)
 			loadRoomAvatar(room.id);
 		emit protocolRosterChanged();
+		notifyPendingMemberActionObservers(room.id);
 		return;
 	}
 }
@@ -2104,7 +2421,6 @@ void Matrix::onRosterChanged(const QList<ProtocolRoom> &rooms)
 		return;
 	const QList<ProtocolRoom> previousRooms = FProtocolRooms;
 	FProtocolRooms = rooms;
-	FProtocolEntries.clear();
 	for (ProtocolRoom &room : FProtocolRooms) {
 		if (room.roomType.isEmpty())
 			for (const ProtocolRoom &cachedRoom : previousRooms)
@@ -2129,6 +2445,9 @@ void Matrix::onRosterChanged(const QList<ProtocolRoom> &rooms)
 	// Do not expose the other member as a second roster item for the same room.
 
 	emit protocolRosterChanged();
+	const QStringList observedRooms = FPendingMemberActionObservers.keys();
+	for (const QString &roomId : observedRooms)
+		notifyPendingMemberActionObservers(roomId);
 }
 
 // Compile/link check for the official libolm API. Crypto state is added in

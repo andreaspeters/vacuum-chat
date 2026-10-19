@@ -16,21 +16,9 @@ class MeshCoreCodec
 public:
     static QByteArray frameUsbMessage(const QByteArray &payload);
     static QByteArray parseUsbFrame(const QByteArray &data, int &length);
-    static QByteArray encodeBlePayload(const QByteArray &payload);
-    static QByteArray decodeBlePayload(const QByteArray &data);
     static bool isValidMeshCorePacket(const QByteArray &data);
     static bool isUsbFrame(const QByteArray &data);
     static bool isBleFrame(const QByteArray &data);
-};
-
-struct MeshCoreDevice
-{
-    enum DeviceType { Unknown = 0, Node, Relay, Gateway };
-    QString deviceId;
-    QString name;
-    DeviceType deviceType = Unknown;
-    qint64 lastSeen = 0;
-    bool isActive = false;
 };
 
 struct MeshCoreContact
@@ -64,7 +52,6 @@ public:
     bool initialize(const QString &configPath);
     bool connectToDevice();
     bool disconnect();
-    QList<MeshCoreDevice> discoverDevices() const;
     QList<MeshCoreContact> discoverContacts() const;
     QList<MeshCoreChannel> discoverChannels() const;
     QList<int> availableChannelSlots() const;
@@ -75,7 +62,6 @@ public:
 
     State getProtocolState() const { return protocolState; }
     DeviceState getDeviceState() const { return deviceState; }
-    bool canSendSelfAdvert() const { return managementCommandReady(); }
     QString getBackend() const { return backend; }
     void setBackend(const QString &backend) { this->backend = backend; }
     QString localPublicKeyHex() const { return currentPublicKeyHex; }
@@ -140,6 +126,9 @@ private:
     QString messageHistoryDirectory() const;
     bool persistMessage(const BasicMessage &message, bool &inserted) const;
     void removePersistedMessage(const BasicMessage &message) const;
+    bool persistAndSendOutgoingMessage(const BasicMessage &message,
+                                       const QByteArray &command,
+                                       const QString &queueError);
     QString backend;
     QString devicePath;
     QString deviceMacAddress;

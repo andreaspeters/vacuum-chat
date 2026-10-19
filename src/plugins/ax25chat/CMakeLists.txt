@@ -35,9 +35,10 @@ set(USED_LANGS "")
 include("${CMAKE_SOURCE_DIR}/src/plugins/plugins.cmake")
 
 if (BUILD_TESTING)
+    set(AX25CHAT_TEST_SOURCE_DIR "${CMAKE_SOURCE_DIR}/tests/ax25chat")
     # Test executables
     add_executable(aprs_message_engine_tests EXCLUDE_FROM_ALL
-        aprsmessageengine_test.cpp
+        ${AX25CHAT_TEST_SOURCE_DIR}/aprsmessageengine_test.cpp
         aprsmessageengine.cpp
         aprsroomcodec.cpp
         aprsmessagecodec.cpp)
@@ -46,19 +47,19 @@ if (BUILD_TESTING)
     target_link_libraries(aprs_message_engine_tests PRIVATE Qt6::Core)
 
     add_executable(aprs_message_codec_tests EXCLUDE_FROM_ALL
-        aprsmessagecodec_test.cpp aprsmessagecodec.cpp)
+        ${AX25CHAT_TEST_SOURCE_DIR}/aprsmessagecodec_test.cpp aprsmessagecodec.cpp)
     target_include_directories(aprs_message_codec_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     target_compile_features(aprs_message_codec_tests PRIVATE cxx_std_11)
     target_link_libraries(aprs_message_codec_tests PRIVATE Qt6::Core)
 
     add_executable(axcp_codec_tests EXCLUDE_FROM_ALL
-        axcpcodec_test.cpp axcpcodec.cpp)
+        ${AX25CHAT_TEST_SOURCE_DIR}/axcpcodec_test.cpp axcpcodec.cpp)
     target_include_directories(axcp_codec_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     target_compile_features(axcp_codec_tests PRIVATE cxx_std_11)
     target_link_libraries(axcp_codec_tests PRIVATE Qt6::Core)
 
     add_executable(axcp_reliable_engine_tests EXCLUDE_FROM_ALL
-        axcp_reliable_engine_test.cpp
+        ${AX25CHAT_TEST_SOURCE_DIR}/axcp_reliable_engine_test.cpp
         axcp_reliable_engine.h
         axcp_reliable_engine.cpp
         axcpcodec.cpp)
@@ -67,7 +68,7 @@ if (BUILD_TESTING)
     target_link_libraries(axcp_reliable_engine_tests PRIVATE Qt6::Core)
 
     add_executable(ax25kiss_codec_tests EXCLUDE_FROM_ALL
-        ax25kisscodec_test.cpp
+        ${AX25CHAT_TEST_SOURCE_DIR}/ax25kisscodec_test.cpp
         ax25kisscodec.h
         ax25kisscodec.cpp)
     target_include_directories(ax25kiss_codec_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -75,7 +76,7 @@ if (BUILD_TESTING)
     target_link_libraries(ax25kiss_codec_tests PRIVATE Qt6::Core)
 
     add_executable(ax25kiss_serial_transport_tests EXCLUDE_FROM_ALL
-        ax25kissserialtransport_test.cpp
+        ${AX25CHAT_TEST_SOURCE_DIR}/ax25kissserialtransport_test.cpp
         ax25kissserialtransport.h
         ax25kissserialtransport.cpp
         aprsmessagecodec.cpp
@@ -85,7 +86,7 @@ if (BUILD_TESTING)
     target_link_libraries(ax25kiss_serial_transport_tests PRIVATE Qt6::Core Qt6::SerialPort)
 
     add_executable(ax25_flexpacket_pipe_transport_tests EXCLUDE_FROM_ALL
-        ax25flexpacketpipetransport_test.cpp
+        ${AX25CHAT_TEST_SOURCE_DIR}/ax25flexpacketpipetransport_test.cpp
         ax25flexpacketpipetransport.h
         ax25flexpacketpipetransport.cpp
         aprsmessagecodec.h
@@ -97,7 +98,7 @@ if (BUILD_TESTING)
     target_link_libraries(ax25_flexpacket_pipe_transport_tests PRIVATE Qt6::Core)
 
     add_executable(ax25chat_plugin_tests EXCLUDE_FROM_ALL
-        ax25chatplugin_test.cpp
+        ${AX25CHAT_TEST_SOURCE_DIR}/ax25chatplugin_test.cpp
         ax25chatplugin.cpp
         ax25chatplugin.h
         ax25chatmessagerouting.cpp
@@ -116,7 +117,7 @@ if (BUILD_TESTING)
         ${VACUUM_UTILS_NAME} Qt6::Core Qt6::Widgets Qt6::SerialPort Qt6::Xml)
 
     add_executable(ax25chat_message_routing_tests EXCLUDE_FROM_ALL
-        ax25chatmessagerouting_test.cpp
+        ${AX25CHAT_TEST_SOURCE_DIR}/ax25chatmessagerouting_test.cpp
         ax25chatmessagerouting.cpp)
     target_include_directories(ax25chat_message_routing_tests PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_SOURCE_DIR}/src")
@@ -124,11 +125,11 @@ if (BUILD_TESTING)
     target_link_libraries(ax25chat_message_routing_tests PRIVATE Qt6::Core)
 
     add_executable(aprs_room_codec_tests EXCLUDE_FROM_ALL
-        aprsroomcodec_test.cpp
+        ${AX25CHAT_TEST_SOURCE_DIR}/aprsroomcodec_test.cpp
         aprsroomcodec.cpp)
 
     add_executable(aprs_room_store_tests EXCLUDE_FROM_ALL
-        aprsroomstore_test.cpp
+        ${AX25CHAT_TEST_SOURCE_DIR}/aprsroomstore_test.cpp
         aprsroomstore.cpp
         aprsroomcodec.cpp)
     target_include_directories(aprs_room_store_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")

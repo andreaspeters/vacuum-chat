@@ -303,34 +303,34 @@ void AccountManager::onMatrixVerificationRequested(const QUuid &accountId,
 			tr("No active Matrix messaging plugin accepted the verification request."));
 }
 
-void AccountManager::onMatrixSsssRecoveryRequested(const QUuid &accountId)
+static void invokeMatrixMessagingMethod(
+	IPluginManager *pluginManager, const QUuid &accountId,
+	const char *methodName, const QString &warningTitle, const QString &warningMessage)
 {
-	if (!FPluginManager)
+	if (!pluginManager)
 		return;
 	bool invoked = false;
-	for (IPlugin *plugin : FPluginManager->pluginInterface(QStringLiteral("IProtocolMessaging")))
+	for (IPlugin *plugin : pluginManager->pluginInterface(QStringLiteral("IProtocolMessaging")))
 		if (plugin && plugin->instance())
 			invoked = QMetaObject::invokeMethod(plugin->instance(),
-				"requestSsssRecoveryForAccount", Qt::QueuedConnection,
+				methodName, Qt::QueuedConnection,
 				Q_ARG(QString, accountId.toString())) || invoked;
 	if (!invoked)
-		QMessageBox::warning(nullptr, tr("Matrix SSSS recovery"),
-			tr("No active Matrix messaging plugin accepted the SSSS recovery request."));
+		QMessageBox::warning(nullptr, warningTitle, warningMessage);
+}
+
+void AccountManager::onMatrixSsssRecoveryRequested(const QUuid &accountId)
+{
+	invokeMatrixMessagingMethod(FPluginManager, accountId,
+		"requestSsssRecoveryForAccount", tr("Matrix SSSS recovery"),
+		tr("No active Matrix messaging plugin accepted the SSSS recovery request."));
 }
 
 void AccountManager::onMatrixRoomKeyImportRequested(const QUuid &accountId)
 {
-	if (!FPluginManager)
-		return;
-	bool invoked = false;
-	for (IPlugin *plugin : FPluginManager->pluginInterface(QStringLiteral("IProtocolMessaging")))
-		if (plugin && plugin->instance())
-			invoked = QMetaObject::invokeMethod(plugin->instance(),
-				"requestRoomKeyImportForAccount", Qt::QueuedConnection,
-				Q_ARG(QString, accountId.toString())) || invoked;
-	if (!invoked)
-		QMessageBox::warning(nullptr, tr("Matrix room-key import"),
-			tr("No active Matrix messaging plugin accepted the room-key import request."));
+	invokeMatrixMessagingMethod(FPluginManager, accountId,
+		"requestRoomKeyImportForAccount", tr("Matrix room-key import"),
+		tr("No active Matrix messaging plugin accepted the room-key import request."));
 }
 
 void AccountManager::onRosterIndexContextMenu(const QList<IRosterIndex *> &AIndexes, quint32 ALabelId, Menu *AMenu)

@@ -8,8 +8,9 @@ include("messagestyles.cmake")
 include("${CMAKE_SOURCE_DIR}/src/plugins/plugins.cmake")
 
 if (BUILD_TESTING)
+	set(MESSAGESTYLES_TEST_SOURCE_DIR "${CMAKE_SOURCE_DIR}/tests/messagestyles")
 	add_executable(messagestyles_current_local_time_tests EXCLUDE_FROM_ALL
-		currentlocaltimecache_test.cpp
+		${MESSAGESTYLES_TEST_SOURCE_DIR}/currentlocaltimecache_test.cpp
 		../../utils/systemtimezonecache.h)
 	target_compile_features(messagestyles_current_local_time_tests PRIVATE cxx_std_11)
 	target_link_libraries(messagestyles_current_local_time_tests PRIVATE Qt6::Core)

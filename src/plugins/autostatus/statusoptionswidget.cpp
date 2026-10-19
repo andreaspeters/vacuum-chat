@@ -35,13 +35,14 @@ QWidget *Delegate::createEditor(QWidget *AParent, const QStyleOptionViewItem &AO
 	case COL_SHOW:
 	{
 		QComboBox *comboBox = new QComboBox(AParent);
-		comboBox->addItem(FStatusChanger->iconByShow(IPresence::Away),FStatusChanger->nameByShow(IPresence::Away),IPresence::Away);
-		comboBox->addItem(FStatusChanger->iconByShow(IPresence::DoNotDisturb),FStatusChanger->nameByShow(IPresence::DoNotDisturb),IPresence::DoNotDisturb);
-		comboBox->addItem(FStatusChanger->iconByShow(IPresence::ExtendedAway),FStatusChanger->nameByShow(IPresence::ExtendedAway),IPresence::ExtendedAway);
-		comboBox->addItem(FStatusChanger->iconByShow(IPresence::Invisible),FStatusChanger->nameByShow(IPresence::Invisible),IPresence::Invisible);
-		comboBox->addItem(FStatusChanger->iconByShow(IPresence::Online),FStatusChanger->nameByShow(IPresence::Online),IPresence::Online);
-		comboBox->addItem(FStatusChanger->iconByShow(IPresence::Chat),FStatusChanger->nameByShow(IPresence::Chat),IPresence::Chat);
-		comboBox->addItem(FStatusChanger->iconByShow(IPresence::Offline),FStatusChanger->nameByShow(IPresence::Offline),IPresence::Offline);
+		static const IPresence::Show showValues[] = {
+			IPresence::Away, IPresence::DoNotDisturb,
+			IPresence::ExtendedAway, IPresence::Invisible,
+			IPresence::Online, IPresence::Chat, IPresence::Offline
+		};
+		for (IPresence::Show show : showValues)
+			comboBox->addItem(FStatusChanger->iconByShow(show),
+				FStatusChanger->nameByShow(show), show);
 		comboBox->setSizeAdjustPolicy(QComboBox::AdjustToContents);
 		comboBox->setEditable(false);
 		return comboBox;

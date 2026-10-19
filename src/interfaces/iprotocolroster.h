@@ -67,9 +67,9 @@ public:
 	virtual QString accountId() const = 0;
 	virtual QString protocol() const = 0;
 	virtual QString streamId() const = 0;
-	virtual QList<ProtocolRosterEntry> entries() const = 0;
+	virtual QList<ProtocolRosterEntry> entries() const { return {}; }
 	virtual QList<ProtocolRoom> rooms() const = 0;
-	virtual ProtocolRosterEntry entry(const QString &AId) const = 0;
+	virtual ProtocolRosterEntry entry(const QString &) const { return {}; }
 	virtual ProtocolRoom room(const QString &AId) const = 0;
 	virtual void loadRoomAvatar(const QString &roomId) const { (void)roomId; }
 	virtual QString accountAvatarKey() const { return {}; }

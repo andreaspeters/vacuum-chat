@@ -46,11 +46,6 @@ StateWidget::StateWidget(IChatStates *AChatStates, IChatWindow *AWindow, QWidget
 	onUserChatStateChanged(FWindow->streamJid(),FWindow->contactJid(),FChatStates->userChatState(FWindow->streamJid(),FWindow->contactJid()));
 }
 
-StateWidget::~StateWidget()
-{
-
-}
-
 void StateWidget::onStatusActionTriggered(bool)
 {
 	Action *action = qobject_cast<Action *>(sender());

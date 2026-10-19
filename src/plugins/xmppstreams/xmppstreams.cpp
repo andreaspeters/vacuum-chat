@@ -5,8 +5,10 @@
 #include <interfaces/iavatars.h>
 #include <interfaces/imessagearchiver.h>
 #include <interfaces/ifiletransfer.h>
+#include <interfaces/iprotocolmessagingregistry.h>
 #include <interfaces/ivcard.h>
 #include "xmppprofileactionpolicy.h"
+#include "xmpphistorycapabilitypolicy.h"
 
 namespace
 {
@@ -52,11 +54,6 @@ IRoster *openXmppRoster(IPluginManager *pluginManager, IAccount *account)
 XmppStreams::XmppStreams()
 {
 	FPluginManager = NULL;
-}
-
-XmppStreams::~XmppStreams()
-{
-
 }
 
 void XmppStreams::pluginInfo(IPluginInfo *APluginInfo)
@@ -106,6 +103,14 @@ IProtocolCapabilities::Capabilities XmppStreams::capabilitiesForAccount(
 		fileTransfer->isSupported(account->streamJid(), targetJid))
 		capabilities |= IProtocolCapabilities::CapabilitySendImage;
 	IAccount *profileAccount = configuredXmppAccount(FPluginManager, accountId);
+	IPlugin *historyRegistryPlugin = FPluginManager
+		? FPluginManager->pluginInterface("IProtocolMessagingRegistry").value(0, NULL) : NULL;
+	IProtocolMessagingRegistry *historyRegistry = historyRegistryPlugin
+		? qobject_cast<IProtocolMessagingRegistry *>(historyRegistryPlugin->instance()) : NULL;
+	IProtocolMessaging *historyProvider = historyRegistry
+		? historyRegistry->providerForAccount(accountId) : NULL;
+	capabilities |= XmppHistoryCapabilityPolicy::capabilities(profileAccount != NULL,
+		historyProvider != NULL, targetJid.isValid());
 	IVCardPlugin *vcard = vcardPlugin(FPluginManager);
 	capabilities |= XmppProfileActionPolicy::capabilities(account != NULL,
 		profileAccount != NULL && vcard != NULL, targetJid.isValid(),

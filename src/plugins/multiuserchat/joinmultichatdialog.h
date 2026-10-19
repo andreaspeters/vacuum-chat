@@ -25,7 +25,6 @@ class JoinMultiChatDialog :
 public:
 	JoinMultiChatDialog(IMultiUserChatPlugin *AChatPlugin, const Jid &AStreamJid, const Jid &ARoomJid,
 	                    const QString &ANick, const QString &APassword, QWidget *AParent = NULL);
-	~JoinMultiChatDialog();
 protected:
 	void initialize();
 	void updateResolveNickState();

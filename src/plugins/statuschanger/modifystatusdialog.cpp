@@ -1,4 +1,5 @@
 #include "modifystatusdialog.h"
+#include "statusshowcombohelper.h"
 
 ModifyStatusDialog::ModifyStatusDialog(IStatusChanger *AStatusChanger, int AStatusId, const Jid &AStreamJid, QWidget *AParent) : QDialog(AParent)
 {
@@ -10,13 +11,7 @@ ModifyStatusDialog::ModifyStatusDialog(IStatusChanger *AStatusChanger, int AStat
 	FStatusId = AStatusId;
 	FStreamJid = AStreamJid;
 
-	ui.cmbShow->addItem(FStatusChanger->iconByShow(IPresence::Online),FStatusChanger->nameByShow(IPresence::Online),IPresence::Online);
-	ui.cmbShow->addItem(FStatusChanger->iconByShow(IPresence::Chat),FStatusChanger->nameByShow(IPresence::Chat),IPresence::Chat);
-	ui.cmbShow->addItem(FStatusChanger->iconByShow(IPresence::Away),FStatusChanger->nameByShow(IPresence::Away),IPresence::Away);
-	ui.cmbShow->addItem(FStatusChanger->iconByShow(IPresence::DoNotDisturb),FStatusChanger->nameByShow(IPresence::DoNotDisturb),IPresence::DoNotDisturb);
-	ui.cmbShow->addItem(FStatusChanger->iconByShow(IPresence::ExtendedAway),FStatusChanger->nameByShow(IPresence::ExtendedAway),IPresence::ExtendedAway);
-	ui.cmbShow->addItem(FStatusChanger->iconByShow(IPresence::Invisible),FStatusChanger->nameByShow(IPresence::Invisible),IPresence::Invisible);
-	ui.cmbShow->addItem(FStatusChanger->iconByShow(IPresence::Offline),FStatusChanger->nameByShow(IPresence::Offline),IPresence::Offline);
+	StatusChangerPrivate::populateStatusShowCombo(ui.cmbShow, FStatusChanger);
 
 	ui.cmbShow->setCurrentIndex(ui.cmbShow->findData(FStatusChanger->statusItemShow(FStatusId)));
 	ui.cmbShow->setEnabled(AStatusId > STATUS_MAX_STANDART_ID);

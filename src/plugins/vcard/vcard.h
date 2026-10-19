@@ -47,6 +47,9 @@ protected slots:
 	void onVCardPublished(const Jid &AContactJid);
 	void onVCardError(const Jid &AContactJid, const XmppError &AError);
 private:
+	QDomElement firstElementByNameAndTags(
+			const QString &AName, const QStringList &ATags,
+			const QStringList &ATagList) const;
 	VCardPlugin *FVCardPlugin;
 private:
 	Jid FContactJid;

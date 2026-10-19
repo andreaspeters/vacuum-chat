@@ -20,9 +20,9 @@ inline PresenceAction actionForPresence(int show, bool connected)
 	return connected ? PresenceAction::UpdateRemotePresence : PresenceAction::Connect;
 }
 
-inline bool acceptLoginSuccess(bool connectRequested)
+inline bool shouldAcceptLoginResponse(bool sessionGenerationCurrent, bool connectRequested)
 {
-	return connectRequested;
+	return sessionGenerationCurrent && connectRequested;
 }
 
 inline bool matchesLoginUserId(const QString &requestedUserId, const QString &authenticatedUserId)

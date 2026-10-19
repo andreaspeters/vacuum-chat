@@ -95,6 +95,8 @@ protected slots:
 	void onDefaultIconsetChanged();
 	void onSetCustomIconset(bool);
 private:
+	QMap<QString, QString> *ruleMap(RuleType ARuleType);
+	const QMap<QString, QString> *ruleMap(RuleType ARuleType) const;
 	IRosterPlugin *FRosterPlugin;
 	IPresencePlugin *FPresencePlugin;
 	IRostersModel *FRostersModel;

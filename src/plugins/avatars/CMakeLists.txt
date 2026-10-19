@@ -8,14 +8,15 @@ include("avatars.cmake")
 include("${CMAKE_SOURCE_DIR}/src/plugins/plugins.cmake")
 
 if (BUILD_TESTING)
+	set(AVATARS_TEST_SOURCE_DIR "${CMAKE_SOURCE_DIR}/tests/avatars")
 	add_executable(protocol_account_avatar_policy_tests EXCLUDE_FROM_ALL
-		protocolaccountavatarpolicy_test.cpp)
+		${AVATARS_TEST_SOURCE_DIR}/protocolaccountavatarpolicy_test.cpp)
 	target_include_directories(protocol_account_avatar_policy_tests PRIVATE "${CMAKE_SOURCE_DIR}/src")
 	target_compile_features(protocol_account_avatar_policy_tests PRIVATE cxx_std_11)
 	target_link_libraries(protocol_account_avatar_policy_tests PRIVATE Qt6::Core)
 
 	add_executable(avatars_offline_visual_tests EXCLUDE_FROM_ALL
-		avatar_offline_visual_test.cpp)
+		${AVATARS_TEST_SOURCE_DIR}/avatar_offline_visual_test.cpp)
 	target_include_directories(avatars_offline_visual_tests PRIVATE "${CMAKE_SOURCE_DIR}/src")
 	target_compile_features(avatars_offline_visual_tests PRIVATE cxx_std_11)
 	target_link_libraries(avatars_offline_visual_tests PRIVATE

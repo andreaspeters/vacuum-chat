@@ -1,11 +1,15 @@
 #include "matrixnetwork.h"
+#include "matrixhistorybackup.h"
 #include "matrixdatabaseworker.h"
 #include "matrixssss.h"
+#include "matrixroommemberpolicy.h"
 #include "interfaces/iprotocolpresence.h"
 #include "interfaces/ichatstates.h"
 #include "interfaces/matrixreply.h"
 #include <utils/imageloadscheduler.h>
 #include <QRandomGenerator>
+#include <QCoreApplication>
+#include <QDebug>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QUrlQuery>
@@ -31,11 +35,80 @@
 #include <QBuffer>
 #include <QImage>
 #include <QImageReader>
-#include <QUrlQuery>
 #include <algorithm>
 
+namespace {
+bool matrixNetworkTextEventLess(const MatrixTextEvent &left, const MatrixTextEvent &right)
+{
+	const qint64 leftTs = left.timestamp.toLongLong();
+	const qint64 rightTs = right.timestamp.toLongLong();
+	return leftTs == rightTs ? left.eventId < right.eventId : leftTs < rightTs;
+}
+
+QString percentEncodedPathSegment(const QString &pathSegment)
+{
+	return QString::fromUtf8(QUrl::toPercentEncoding(pathSegment));
+}
+
+QString matrixUserProfilePath(const QString &userId, const QString &property)
+{
+	return QStringLiteral("/_matrix/client/v3/profile/%1/%2")
+		.arg(percentEncodedPathSegment(userId), property);
+}
+
+QString roomNameFromStateResponse(const QByteArray &responseBody)
+{
+	const QJsonArray stateEvents = QJsonDocument::fromJson(responseBody).array();
+	for (const QJsonValue &stateValue : stateEvents) {
+		const QJsonObject state = stateValue.toObject();
+		if (state.value(QStringLiteral("type")).toString() == QStringLiteral("m.room.name") &&
+			state.value(QStringLiteral("state_key")).toString().isEmpty())
+			return state.value(QStringLiteral("content")).toObject()
+				.value(QStringLiteral("name")).toString();
+	}
+	return QString();
+}
+
+bool completeImageLoadIfNetworkUnavailable(const QPointer<MatrixNetwork> &network,
+	const ImageLoadScheduler::Completion &done)
+{
+	if (network)
+		return false;
+	done(QImage());
+	return true;
+}
+
+void completeWithTransparentPlaceholder(const ImageLoadScheduler::Completion &done)
+{
+	QImage placeholder(1, 1, QImage::Format_ARGB32);
+	placeholder.fill(Qt::transparent);
+	done(placeholder);
+}
+
+enum class MediaDownloadApiVersion
+{
+	ClientV1,
+	LegacyV3
+};
+
+QString matrixMediaDownloadPath(const QUrl &mxc, MediaDownloadApiVersion version)
+{
+	const QString prefix = version == MediaDownloadApiVersion::LegacyV3
+		? QStringLiteral("/_matrix/media/v3/download/")
+		: QStringLiteral("/_matrix/client/v1/media/download/");
+	return prefix + QStringLiteral("%1/%2")
+		.arg(QString::fromUtf8(QUrl::toPercentEncoding(mxc.host())))
+		.arg(QString::fromUtf8(QUrl::toPercentEncoding(mxc.path().mid(1))));
+}
+}
+
 MatrixNetwork::MatrixNetwork(QObject *parent)
-	: QObject(parent), FNetworkAccessManager(nullptr), FAccesToken(), FSyncToken(), FInFlightRequest(RequestNone), FNormalizedServerUrl()
+	: QObject(parent)
+	, FNetworkAccessManager(nullptr)
+	, FAccesToken()
+	, FSyncToken()
+	, FInFlightRequest(RequestNone)
+	, FNormalizedServerUrl()
 {
 	qRegisterMetaType<MatrixPublicRooms::Result>();
 	FNetworkAccessManager = new QNetworkAccessManager(this);
@@ -124,6 +197,15 @@ void MatrixNetwork::runDatabase(const std::function<void(MatrixDatabase &)> &ope
 		Qt::BlockingQueuedConnection);
 }
 
+QString MatrixNetwork::databaseProfileDirectory()
+{
+	QString profileDirectory;
+	runDatabase([&](MatrixDatabase &database) {
+		profileDirectory = database.profileDirectory();
+	});
+	return profileDirectory;
+}
+
 bool MatrixNetwork::validateAndNormalizeServerUrl(const QString &serverUrl, QString &normalized) const
 {
 	if (serverUrl.trimmed().isEmpty()) {
@@ -197,6 +279,11 @@ void MatrixNetwork::setServerUrl(const QString &serverUrl)
 void MatrixNetwork::setDatabaseProfileDirectory(const QString &profileDirectory)
 {
 	FDatabaseProfileDirectory = profileDirectory;
+}
+
+void MatrixNetwork::setHistoryBackupDirectory(const QString &backupDirectory)
+{
+	FHistoryBackupDirectory = backupDirectory;
 }
 
 void MatrixNetwork::requestSsssRecovery(const QString &passphraseOrRecoveryKey)
@@ -569,11 +656,6 @@ void MatrixNetwork::queryDeviceKeysForRoom(const QString &roomId)
 	}
 }
 
-MatrixNetwork::RequestType MatrixNetwork::currentRequestType() const
-{
-	return FInFlightRequest;
-}
-
 bool MatrixNetwork::isRequestInProgress() const
 {
 	return FInFlightRequest != RequestNone;
@@ -609,9 +691,44 @@ QString MatrixNetwork::constructUrl(const QString &path) const
 	return baseUrl + normalizedPath;
 }
 
+void MatrixNetwork::setDefaultRequestHeaders(QNetworkRequest &request) const
+{
+	request.setAttribute(QNetworkRequest::Http2AllowedAttribute, FUseHttp2);
+	request.setRawHeader("Authorization", QByteArray("Bearer ") + FAccesToken.toUtf8());
+}
+
+void MatrixNetwork::setAuthenticatedJsonRequestHeaders(QNetworkRequest &request) const
+{
+	setDefaultRequestHeaders(request);
+	request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+}
+
+QNetworkReply *MatrixNetwork::postRoomAction(const QString &roomId, const QString &action,
+	const QJsonObject &content, const QString &requestType, const QString &memberId)
+{
+	const QString path = QStringLiteral("/_matrix/client/v3/rooms/%1/%2")
+		.arg(percentEncodedPathSegment(roomId), action);
+	QNetworkRequest request(QUrl(constructUrl(path)));
+	setAuthenticatedJsonRequestHeaders(request);
+	QNetworkReply *reply = FNetworkAccessManager->post(request,
+		QJsonDocument(content).toJson(QJsonDocument::Compact));
+	reply->setProperty("requestType", requestType);
+	reply->setProperty("roomId", roomId);
+	if (!memberId.isEmpty())
+		reply->setProperty("memberId", memberId);
+	reply->setProperty("membershipAction", action);
+	return reply;
+}
+
 QString MatrixNetwork::generateTransactionId() const
 {
 	return QString("m_%1").arg(QDateTime::currentMSecsSinceEpoch());
+}
+
+void MatrixNetwork::emitLoginFailure(const QString &error, quint64 sessionGeneration)
+{
+	emit loginError(error);
+	emit loginErrorForSession(error, sessionGeneration);
 }
 
 QString MatrixNetwork::login(const QString &userId, const QString &password, const QString &deviceId)
@@ -634,16 +751,14 @@ QString MatrixNetwork::loginForSession(const QString &userId, const QString &pas
 	if (userId.trimmed().isEmpty() || password.trimmed().isEmpty())
 	{
 		qWarning() << "MatrixNetwork::login: empty username or password";
-		emit loginError("Username and password cannot be empty");
-		emit loginErrorForSession(QStringLiteral("Username and password cannot be empty"), sessionGeneration);
+		emitLoginFailure(QStringLiteral("Username and password cannot be empty"), sessionGeneration);
 		return QString();
 	}
 	
 	if (FNormalizedServerUrl.isEmpty())
 	{
 		qWarning() << "MatrixNetwork::login: server URL not configured";
-		emit loginError("Server URL not configured");
-		emit loginErrorForSession(QStringLiteral("Server URL not configured"), sessionGeneration);
+		emitLoginFailure(QStringLiteral("Server URL not configured"), sessionGeneration);
 		return QString();
 	}
 	
@@ -663,8 +778,7 @@ QString MatrixNetwork::loginForSession(const QString &userId, const QString &pas
 	// Reject empty normalized localpart
 	if (normalizedUser.trimmed().isEmpty()) {
 		qWarning() << "MatrixNetwork::login: empty normalized user ID after stripping @ and :server";
-		emit loginError("Invalid user ID");
-		emit loginErrorForSession(QStringLiteral("Invalid user ID"), sessionGeneration);
+		emitLoginFailure(QStringLiteral("Invalid user ID"), sessionGeneration);
 		return QString();
 	}
 
@@ -750,26 +864,7 @@ void MatrixNetwork::loginWithAccessTokenForSession(const QString &userId, const 
 	}
 	if (localOlmContextChanged)
 		qWarning() << "[Matrix-E2EE] local device context changed; discarded persisted remote Olm sessions";
-	if (qEnvironmentVariableIsSet("VACUUM_MATRIX_CLEAR_SYNC_CURSOR")) {
-		bool cleared = false;
-		if (FDatabaseWorker)
-			QMetaObject::invokeMethod(FDatabaseWorker, "clearNextBatch", Qt::BlockingQueuedConnection,
-				Q_RETURN_ARG(bool, cleared));
-		Q_UNUSED(cleared);
-	}
-	if (FDatabaseWorker) {
-		QMetaObject::invokeMethod(FDatabaseWorker, "directRooms", Qt::BlockingQueuedConnection,
-			Q_RETURN_ARG(QSet<QString>, FDirectRoomIds));
-	}
-	FHasDirectRoomData = !FDirectRoomIds.isEmpty();
-	restorePersistedRooms();
-	if (FDatabaseWorker) {
-		QMetaObject::invokeMethod(FDatabaseWorker, "nextBatch", Qt::BlockingQueuedConnection,
-			Q_RETURN_ARG(QString, FSyncToken));
-		QMetaObject::invokeMethod(FDatabaseWorker, "syncFilter", Qt::BlockingQueuedConnection,
-			Q_RETURN_ARG(QString, FSyncFilterId));
-	}
-	FFilterCreationAttempted = false;
+	restorePersistedAccountState();
 	FMessageHistory.clear();
 	FHistoryLoadedRooms.clear();
 	// E2EE is an optional build feature. A valid Matrix access-token session
@@ -818,9 +913,7 @@ void MatrixNetwork::logout()
 		setPresence(FUserId, QStringLiteral("offline"));
 	if (!FAccesToken.isEmpty() && FNetworkAccessManager) {
 		QNetworkRequest request(QUrl(constructUrl(QStringLiteral("/_matrix/client/v3/logout"))));
-		request.setAttribute(QNetworkRequest::Http2AllowedAttribute, FUseHttp2);
-		request.setRawHeader("Authorization", QByteArrayLiteral("Bearer ") + FAccesToken.toUtf8());
-		request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+		setAuthenticatedJsonRequestHeaders(request);
 		QNetworkReply *reply = FNetworkAccessManager->post(request, QByteArrayLiteral("{}"));
 		reply->setProperty("requestType", QStringLiteral("logout"));
 	}
@@ -846,6 +939,8 @@ void MatrixNetwork::logout()
 	FAvatarUnavailable.clear();
 	FRoomNameRequests.clear();
 	FRoomEncryptionStateRequests.clear();
+	FRoomPowerLevelsRequests.clear();
+	FMemberRedactionBatches.clear();
 	FPendingRoomEncryptionSends.clear();
 	FJoinedMembersRequests.clear();
 	FJoinedMembersLoaded.clear();
@@ -893,12 +988,10 @@ void MatrixNetwork::setPresence(const QString &userId, const QString &presence,
 {
 	if (FAccesToken.isEmpty() || userId.isEmpty() || presence.isEmpty())
 		return;
-	const QString encodedUserId = QString::fromUtf8(QUrl::toPercentEncoding(userId));
+	const QString encodedUserId = percentEncodedPathSegment(userId);
 	const QString path = QStringLiteral("/_matrix/client/v3/presence/%1/status").arg(encodedUserId);
 	QNetworkRequest request(QUrl(constructUrl(path)));
-	request.setAttribute(QNetworkRequest::Http2AllowedAttribute, FUseHttp2);
-	request.setRawHeader("Authorization", QByteArray("Bearer ") + FAccesToken.toUtf8());
-	request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+	setAuthenticatedJsonRequestHeaders(request);
 	QJsonObject content;
 	content.insert(QStringLiteral("presence"), presence);
 	content.insert(QStringLiteral("status_msg"), statusMessage);
@@ -909,14 +1002,12 @@ void MatrixNetwork::setTyping(const QString &roomId, bool typing)
 {
 	if (FAccesToken.isEmpty() || !roomId.startsWith(QLatin1Char('!')) || FUserId.isEmpty())
 		return;
-	const QString encodedUserId = QString::fromUtf8(QUrl::toPercentEncoding(FUserId));
-	const QString encodedRoomId = QString::fromUtf8(QUrl::toPercentEncoding(roomId));
+	const QString encodedUserId = percentEncodedPathSegment(FUserId);
+	const QString encodedRoomId = percentEncodedPathSegment(roomId);
 	const QString path = QStringLiteral("/_matrix/client/v3/rooms/%1/typing/%2")
 		.arg(encodedRoomId, encodedUserId);
 	QNetworkRequest request(QUrl(constructUrl(path)));
-	request.setAttribute(QNetworkRequest::Http2AllowedAttribute, FUseHttp2);
-	request.setRawHeader("Authorization", QByteArray("Bearer ") + FAccesToken.toUtf8());
-	request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+	setAuthenticatedJsonRequestHeaders(request);
 	QJsonObject content;
 	content.insert(QStringLiteral("typing"), typing);
 	if (typing)
@@ -936,11 +1027,9 @@ void MatrixNetwork::createSyncFilter(bool roomsOnly)
 			{QStringLiteral("ephemeral"), QJsonObject{{QStringLiteral("limit"), 0}}},
 			{QStringLiteral("account_data"), QJsonObject{{QStringLiteral("limit"), 0}}},
 			{QStringLiteral("include_leave"), false}}}};
-	const QString userPath = QString::fromUtf8(QUrl::toPercentEncoding(FUserId));
+	const QString userPath = percentEncodedPathSegment(FUserId);
 	QNetworkRequest request(QUrl(constructUrl(QStringLiteral("/_matrix/client/v3/user/%1/filter").arg(userPath))));
-	request.setAttribute(QNetworkRequest::Http2AllowedAttribute, FUseHttp2);
-	request.setRawHeader("Authorization", QByteArray("Bearer ") + FAccesToken.toUtf8());
-	request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+	setAuthenticatedJsonRequestHeaders(request);
 	QNetworkReply *reply = FNetworkAccessManager->post(request,
 		QJsonDocument(filter).toJson(QJsonDocument::Compact));
 	reply->setProperty("requestType", QStringLiteral("filter_create"));
@@ -1004,8 +1093,7 @@ void MatrixNetwork::sync(bool roomsOnly)
 	
 	QUrl syncUrl(constructUrl(syncPath));
 	QNetworkRequest request(syncUrl);
-	request.setAttribute(QNetworkRequest::Http2AllowedAttribute, FUseHttp2);
-	request.setRawHeader("Authorization", QByteArray("Bearer ") + FAccesToken.toUtf8());
+	setDefaultRequestHeaders(request);
 	QNetworkReply *reply = FNetworkAccessManager->get(request);
 	const int localSyncTimeoutMs = qBound(effectiveSyncTimeoutMs + 10000,
 		10000, 130000);
@@ -1058,6 +1146,28 @@ void MatrixNetwork::startDirectChat(const QString &userId)
 			QStringLiteral("A logged-in Matrix account and a valid Matrix user ID are required"));
 		return;
 	}
+	const ProtocolRoom *existingDirectRoom = nullptr;
+	for (auto roomIt = FRooms.cbegin(); roomIt != FRooms.cend(); ++roomIt) {
+		const ProtocolRoom &room = roomIt.value();
+		if (!room.isDirect || !room.isJoined || !room.isAvailable ||
+			room.membership != QStringLiteral("join"))
+			continue;
+		bool containsCurrentUser = false;
+		bool containsInvitee = false;
+		for (const ProtocolRosterEntry &member : room.members) {
+			if (!member.isValid)
+				continue;
+			containsCurrentUser = containsCurrentUser || member.id == FUserId;
+			containsInvitee = containsInvitee || member.id == inviteeUserId;
+		}
+		if (containsCurrentUser && containsInvitee &&
+			(!existingDirectRoom || room.lastMessageTs > existingDirectRoom->lastMessageTs))
+			existingDirectRoom = &room;
+	}
+	if (existingDirectRoom) {
+		emit directRoomCreated(inviteeUserId, existingDirectRoom->id, QString());
+		return;
+	}
 	const QUrl endpoint(constructUrl(QStringLiteral("/_matrix/client/v3/createRoom")));
 	QNetworkReply *reply = MatrixDirectRoom::requestCreation(FNetworkAccessManager, endpoint,
 		FAccesToken.toUtf8(), inviteeUserId, FUseHttp2, FOlmCrypto.isInitialized());
@@ -1075,21 +1185,175 @@ void MatrixNetwork::leaveRoom(const QString &roomId)
 	changeRoomMembership(roomId, QStringLiteral("leave"));
 }
 
+void MatrixNetwork::changeRoomMember(const QString &roomId, const QString &userId,
+	const QString &action, const QString &reason)
+{
+	if (roomId.isEmpty() || FAccesToken.isEmpty() || !FNetworkAccessManager ||
+		!FRooms.value(roomId).isJoined || !MatrixDirectRoom::isValidUserId(userId) ||
+		(action != QStringLiteral("kick") && action != QStringLiteral("ban")))
+		return;
+	QJsonObject content{{QStringLiteral("user_id"), userId}};
+	if (!reason.isEmpty())
+		content.insert(QStringLiteral("reason"), reason);
+	postRoomAction(roomId, action, content,
+		QStringLiteral("room_member_moderation"), userId);
+}
+
+void MatrixNetwork::updateRoomPowerLevels(const QString &roomId, const QString &memberId,
+	const QJsonObject &content)
+{
+	if (roomId.isEmpty() || memberId.isEmpty() || FAccesToken.isEmpty() || !FNetworkAccessManager ||
+		!FRooms.value(roomId).isJoined || content.isEmpty())
+		return;
+	const QString path = QStringLiteral("/_matrix/client/v3/rooms/%1/state/m.room.power_levels/")
+		.arg(percentEncodedPathSegment(roomId));
+	QNetworkRequest request(QUrl(constructUrl(path)));
+	setAuthenticatedJsonRequestHeaders(request);
+	QNetworkReply *reply = FNetworkAccessManager->put(request,
+		QJsonDocument(content).toJson(QJsonDocument::Compact));
+	reply->setProperty("requestType", QStringLiteral("room_power_levels_update"));
+	reply->setProperty("roomId", roomId);
+	reply->setProperty("memberId", memberId);
+}
+
+void MatrixNetwork::redactMemberMessages(const QString &roomId, const QString &memberId,
+	const QString &reason)
+{
+	if (roomId.isEmpty() || memberId.isEmpty() || FAccesToken.isEmpty() ||
+		!FNetworkAccessManager || !FRooms.value(roomId).isJoined || FUserId.isEmpty()) {
+		emit memberRedactionFinished(roomId, memberId, 0, 0,
+			QStringLiteral("Matrix session or room is unavailable."));
+		return;
+	}
+	for (auto it = FMemberRedactionBatches.cbegin(); it != FMemberRedactionBatches.cend(); ++it)
+		if (it->roomId == roomId && it->memberId == memberId && it->userId == FUserId)
+			return;
+	auto *worker = qobject_cast<MatrixDatabaseWorker *>(FDatabaseWorker);
+	if (!worker) {
+		emit memberRedactionFinished(roomId, memberId, 0, 0,
+			QStringLiteral("Local Matrix history is unavailable."));
+		return;
+	}
+	const QString batchId = generateTransactionId();
+	MemberRedactionBatch batch;
+	batch.roomId = roomId;
+	batch.memberId = memberId;
+	batch.reason = reason;
+	batch.userId = FUserId;
+	batch.loginGeneration = FActiveLoginGeneration;
+	FMemberRedactionBatches.insert(batchId, batch);
+	QPointer<MatrixNetwork> network(this);
+	QPointer<MatrixDatabaseWorker> databaseWorker(worker);
+	const bool queued = QMetaObject::invokeMethod(worker,
+		[network, databaseWorker, batchId, roomId, memberId]() {
+			if (!network || !databaseWorker)
+				return;
+			const QList<MatrixTimelineEvent> cached = databaseWorker->events(roomId);
+			QList<MatrixRoomMemberRedactionPolicy::CachedEvent> candidates;
+			candidates.reserve(cached.size());
+			for (const MatrixTimelineEvent &event : cached)
+				candidates.append({event.roomId, event.eventId, event.sender, event.eventType,
+					event.metadata.value(QStringLiteral("redacted")).toBool()});
+			const QStringList eventIds = MatrixRoomMemberRedactionPolicy::eventIdsToRedact(
+				candidates, roomId, memberId);
+			QMetaObject::invokeMethod(network,
+				[network, batchId, eventIds]() {
+					if (!network)
+						return;
+				auto it = network->FMemberRedactionBatches.find(batchId);
+					if (it == network->FMemberRedactionBatches.end())
+						return;
+					if (it->loginGeneration != network->FActiveLoginGeneration ||
+						it->userId != network->FUserId || it->roomId.isEmpty() ||
+						!network->FRooms.value(it->roomId).isJoined) {
+						network->finishMemberRedaction(batchId,
+							QStringLiteral("Matrix session or room changed before redaction began."));
+						return;
+					}
+					if (eventIds.isEmpty()) {
+						network->finishMemberRedaction(batchId,
+							QStringLiteral("No matching cached messages were found."));
+						return;
+					}
+					it->eventIds = eventIds;
+					network->sendNextMemberRedaction(batchId);
+				}, Qt::QueuedConnection);
+		}, Qt::QueuedConnection);
+	if (!queued)
+		finishMemberRedaction(batchId,
+			QStringLiteral("Could not queue the local Matrix history lookup."));
+}
+
+void MatrixNetwork::sendNextMemberRedaction(const QString &batchId)
+{
+	auto it = FMemberRedactionBatches.find(batchId);
+	if (it == FMemberRedactionBatches.end())
+		return;
+	if (it->loginGeneration != FActiveLoginGeneration || it->userId != FUserId ||
+		FAccesToken.isEmpty() || !FRooms.value(it->roomId).isJoined) {
+		finishMemberRedaction(batchId,
+			QStringLiteral("Matrix session or room changed during redaction."));
+		return;
+	}
+	if (it->nextEvent >= it->eventIds.size()) {
+		finishMemberRedaction(batchId);
+		return;
+	}
+	const QString eventId = it->eventIds.at(it->nextEvent);
+	const QString transactionId = generateTransactionId();
+	const QString path = MatrixRoomMemberRedactionPolicy::redactionPath(
+		it->roomId, eventId, transactionId);
+	if (path.isEmpty()) {
+		finishMemberRedaction(batchId, QStringLiteral("Invalid cached Matrix event identity."));
+		return;
+	}
+	QNetworkRequest request(QUrl(constructUrl(path)));
+	setAuthenticatedJsonRequestHeaders(request);
+	QJsonObject content;
+	if (!it->reason.isEmpty())
+		content.insert(QStringLiteral("reason"), it->reason);
+	QNetworkReply *reply = FNetworkAccessManager->put(request,
+		QJsonDocument(content).toJson(QJsonDocument::Compact));
+	reply->setProperty("requestType", QStringLiteral("room_member_redaction"));
+	reply->setProperty("redactionBatchId", batchId);
+	++it->nextEvent;
+}
+
+void MatrixNetwork::finishMemberRedaction(const QString &batchId, const QString &error)
+{
+	const auto it = FMemberRedactionBatches.find(batchId);
+	if (it == FMemberRedactionBatches.end())
+		return;
+	const QString roomId = it->roomId;
+	const QString memberId = it->memberId;
+	const int succeeded = it->succeeded;
+	const int total = it->eventIds.size();
+	FMemberRedactionBatches.erase(it);
+	emit memberRedactionFinished(roomId, memberId, succeeded, total, error);
+	if (succeeded > 0)
+		sync();
+}
+
+void MatrixNetwork::onMemberRedactionFinished(QNetworkReply *reply)
+{
+	const QString batchId = reply->property("redactionBatchId").toString();
+	auto it = FMemberRedactionBatches.find(batchId);
+	if (it == FMemberRedactionBatches.end())
+		return;
+	if (reply->error() != QNetworkReply::NoError) {
+		finishMemberRedaction(batchId, reply->errorString());
+		return;
+	}
+	++it->succeeded;
+	sendNextMemberRedaction(batchId);
+}
+
 void MatrixNetwork::changeRoomMembership(const QString &roomId, const QString &action)
 {
 	if (roomId.isEmpty() || FAccesToken.isEmpty() || (action != QStringLiteral("join") &&
 		action != QStringLiteral("leave")))
 		return;
-	const QString path = QStringLiteral("/_matrix/client/v3/rooms/%1/%2")
-		.arg(QString::fromUtf8(QUrl::toPercentEncoding(roomId)), action);
-	QNetworkRequest request(QUrl(constructUrl(path)));
-	request.setAttribute(QNetworkRequest::Http2AllowedAttribute, FUseHttp2);
-	request.setRawHeader("Authorization", QByteArray("Bearer ") + FAccesToken.toUtf8());
-	request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
-	QNetworkReply *reply = FNetworkAccessManager->post(request, QByteArray("{}"));
-	reply->setProperty("requestType", QStringLiteral("room_membership"));
-	reply->setProperty("roomId", roomId);
-	reply->setProperty("membershipAction", action);
+	postRoomAction(roomId, action, QJsonObject(), QStringLiteral("room_membership"));
 }
 
 void MatrixNetwork::retryFailedOutbox()
@@ -1109,10 +1373,7 @@ void MatrixNetwork::requestAvatar(const QString &key, const QString &mxcUrl)
 	if (key.isEmpty() || mxc.scheme() != QStringLiteral("mxc") || mxc.host().isEmpty() ||
 		mxc.path().isEmpty() || FAvatarRequestsInFlight.contains(requestKey))
 		return;
-	QString profileDirectory;
-	runDatabase([&](MatrixDatabase &database) {
-		profileDirectory = database.profileDirectory();
-	});
+	const QString profileDirectory = databaseProfileDirectory();
 	const QString cacheDirectory = profileDirectory.isEmpty()
 		? QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + QStringLiteral("/matrix-avatars")
 		: profileDirectory + QStringLiteral("/avatars");
@@ -1129,10 +1390,8 @@ void MatrixNetwork::requestAvatar(const QString &key, const QString &mxcUrl)
 	}
 	scheduler->submit(ImageLoadScheduler::fileKey(cachePath),
 		[network, key, mxcUrl, requestKey, cachePath](ImageLoadScheduler::Completion done) {
-			if (!network) {
-				done(QImage());
+			if (completeImageLoadIfNetworkUnavailable(network, done))
 				return;
-			}
 			ImageLoadScheduler *queue = ImageLoadScheduler::instance();
 			if (!queue) {
 				done(QImage());
@@ -1141,10 +1400,8 @@ void MatrixNetwork::requestAvatar(const QString &key, const QString &mxcUrl)
 			connect(network, &QObject::destroyed, queue, [done]() { done(QImage()); });
 			queue->decodeFileAsync(cachePath,
 				[network, key, mxcUrl, requestKey, cachePath, done](const QImage &cachedImage) {
-					if (!network) {
-						done(QImage());
+					if (completeImageLoadIfNetworkUnavailable(network, done))
 						return;
-					}
 					if (!cachedImage.isNull()) {
 						done(cachedImage);
 						return;
@@ -1152,28 +1409,20 @@ void MatrixNetwork::requestAvatar(const QString &key, const QString &mxcUrl)
 					QFile::remove(cachePath);
 					QMetaObject::invokeMethod(network,
 						[network, key, mxcUrl, requestKey, cachePath, done]() {
-							if (!network) {
-								done(QImage());
+							if (completeImageLoadIfNetworkUnavailable(network, done))
 								return;
-							}
 							if (network->FAvatarUnavailable.contains(requestKey) ||
 								network->FAccesToken.isEmpty()) {
 								done(QImage());
 								return;
 							}
 							const QUrl mxc(mxcUrl);
-							const QString mediaId = mxc.path().mid(1);
 							const bool legacyMediaApi = network->FAvatarLegacyFallbacks.contains(requestKey);
-							const QString mediaPrefix = legacyMediaApi
-								? QStringLiteral("/_matrix/media/v3/download/")
-								: QStringLiteral("/_matrix/client/v1/media/download/");
-							const QString path = mediaPrefix + QStringLiteral("%1/%2")
-								.arg(QString::fromUtf8(QUrl::toPercentEncoding(mxc.host())))
-								.arg(QString::fromUtf8(QUrl::toPercentEncoding(mediaId)));
+							const QString path = matrixMediaDownloadPath(mxc,
+								legacyMediaApi ? MediaDownloadApiVersion::LegacyV3
+									: MediaDownloadApiVersion::ClientV1);
 							QNetworkRequest request(QUrl(network->constructUrl(path)));
-							request.setAttribute(QNetworkRequest::Http2AllowedAttribute, network->FUseHttp2);
-							request.setRawHeader("Authorization",
-								QByteArray("Bearer ") + network->FAccesToken.toUtf8());
+							network->setDefaultRequestHeaders(request);
 							QNetworkReply *reply = network->FNetworkAccessManager->get(request);
 							connect(reply, &QNetworkReply::finished, network,
 								[network, reply, key, mxcUrl, requestKey, cachePath, done]() {
@@ -1260,10 +1509,7 @@ void MatrixNetwork::requestImage(const MatrixTextEvent &event)
 	if (event.eventId.isEmpty() || mxc.scheme() != QStringLiteral("mxc") ||
 		mxc.host().isEmpty() || mxc.path().isEmpty())
 		return;
-	QString profileDirectory;
-	runDatabase([&](MatrixDatabase &database) {
-		profileDirectory = database.profileDirectory();
-	});
+	const QString profileDirectory = databaseProfileDirectory();
 	const QString cacheDirectory = profileDirectory.isEmpty()
 		? QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + QStringLiteral("/matrix-media")
 		: profileDirectory + QStringLiteral("/media");
@@ -1285,10 +1531,8 @@ void MatrixNetwork::requestImage(const MatrixTextEvent &event)
 		ImageLoadScheduler::fileKey(cachePath);
 	scheduler->submit(schedulerKey,
 		[network, event, mxcUrl, cachePath, isImageEvent](ImageLoadScheduler::Completion done) {
-			if (!network) {
-				done(QImage());
+			if (completeImageLoadIfNetworkUnavailable(network, done))
 				return;
-			}
 			ImageLoadScheduler *queue = ImageLoadScheduler::instance();
 			if (!queue) {
 				done(QImage());
@@ -1297,59 +1541,51 @@ void MatrixNetwork::requestImage(const MatrixTextEvent &event)
 			connect(network, &QObject::destroyed, queue, [done]() { done(QImage()); });
 			queue->decodeFileAsync(cachePath,
 				[network, event, mxcUrl, cachePath, isImageEvent, done](const QImage &cachedImage) {
-					if (!network) {
-						done(QImage());
+					if (completeImageLoadIfNetworkUnavailable(network, done))
 						return;
-					}
 					if (!cachedImage.isNull()) {
 						done(cachedImage);
 						return;
 					}
 					if (!isImageEvent && QFileInfo(cachePath).exists() && QFileInfo(cachePath).size() > 0) {
-						QImage ready(1, 1, QImage::Format_ARGB32);
-						ready.fill(Qt::transparent);
-						done(ready);
+						completeWithTransparentPlaceholder(done);
 						return;
 					}
 					if (isImageEvent)
 						QFile::remove(cachePath);
 					QMetaObject::invokeMethod(network,
 						[network, event, mxcUrl, cachePath, isImageEvent, done]() {
-							if (!network) {
-								done(QImage());
+							if (completeImageLoadIfNetworkUnavailable(network, done))
 								return;
-							}
 							if (network->FAccesToken.isEmpty()) {
 								done(QImage());
 								return;
 							}
 							const QUrl mxc(mxcUrl);
-							const QString path = QStringLiteral("/_matrix/client/v1/media/download/%1/%2")
-								.arg(QString::fromUtf8(QUrl::toPercentEncoding(mxc.host())))
-								.arg(QString::fromUtf8(QUrl::toPercentEncoding(mxc.path().mid(1))));
+							const QString path = matrixMediaDownloadPath(
+								mxc, MediaDownloadApiVersion::ClientV1);
 							QNetworkRequest request(QUrl(network->constructUrl(path)));
-							request.setAttribute(QNetworkRequest::Http2AllowedAttribute, network->FUseHttp2);
-							request.setRawHeader("Authorization",
-								QByteArray("Bearer ") + network->FAccesToken.toUtf8());
+							network->setDefaultRequestHeaders(request);
 							QNetworkReply *reply = network->FNetworkAccessManager->get(request);
 							const auto finishMediaReply = [network, cachePath, isImageEvent, done](QNetworkReply *mediaReply) {
-								if (!network) {
+								const auto failMediaReply = [&]() {
 									mediaReply->deleteLater();
 									done(QImage());
+								};
+								if (!network) {
+									failMediaReply();
 									return;
 								}
 								if (mediaReply->error() != QNetworkReply::NoError) {
 									qWarning() << "Matrix image download failed:" << mediaReply->errorString()
 										<< "httpStatus:"
 										<< mediaReply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-									mediaReply->deleteLater();
-									done(QImage());
+									failMediaReply();
 									return;
 								}
 								const QByteArray data = mediaReply->readAll();
 								if (data.isEmpty()) {
-									mediaReply->deleteLater();
-									done(QImage());
+									failMediaReply();
 									return;
 								}
 								QSaveFile output(cachePath);
@@ -1366,23 +1602,18 @@ void MatrixNetwork::requestImage(const MatrixTextEvent &event)
 									queue->decodeDataAsync(data, [done](const QImage &image) {
 										if (!image.isNull()) {
 											done(image);
-										return;
+											return;
 										}
-										QImage ready(1, 1, QImage::Format_ARGB32);
-										ready.fill(Qt::transparent);
-										done(ready);
+										completeWithTransparentPlaceholder(done);
 									});
 								}
 							};
 							const auto requestLegacyMedia = [network, mxcUrl, finishMediaReply, done]() {
-								if (!network) {
-									done(QImage());
+								if (completeImageLoadIfNetworkUnavailable(network, done))
 									return;
-								}
 								const QUrl legacyMxc(mxcUrl);
-								const QString legacyPath = QStringLiteral("/_matrix/media/v3/download/%1/%2")
-									.arg(QString::fromUtf8(QUrl::toPercentEncoding(legacyMxc.host())))
-									.arg(QString::fromUtf8(QUrl::toPercentEncoding(legacyMxc.path().mid(1))));
+								const QString legacyPath = matrixMediaDownloadPath(
+									legacyMxc, MediaDownloadApiVersion::LegacyV3);
 								QNetworkRequest legacyRequest(QUrl(network->constructUrl(legacyPath)));
 								legacyRequest.setAttribute(QNetworkRequest::Http2AllowedAttribute, network->FUseHttp2);
 								QNetworkReply *legacyReply = network->FNetworkAccessManager->get(legacyRequest);
@@ -1477,6 +1708,22 @@ void MatrixNetwork::requestHistoricalImages(const QString &roomId,
 	}
 }
 
+void MatrixNetwork::issueRoomStateRequest(const QString &roomId, const QString &statePath,
+	const QString &requestType, quint64 requestId)
+{
+	const QString path = QStringLiteral("/_matrix/client/v3/rooms/%1/%2")
+		.arg(percentEncodedPathSegment(roomId), statePath);
+	QNetworkRequest request(QUrl(constructUrl(path)));
+	setDefaultRequestHeaders(request);
+	QNetworkReply *reply = FNetworkAccessManager->get(request);
+	reply->setProperty("requestType", requestType);
+	reply->setProperty("roomId", roomId);
+	reply->setProperty("requestId", QVariant::fromValue(requestId));
+	reply->setProperty("userId", FUserId);
+	reply->setProperty("serverUrl", FNormalizedServerUrl);
+	reply->setProperty("loginGeneration", QVariant::fromValue(FActiveLoginGeneration));
+}
+
 void MatrixNetwork::refreshRoomMetadata(const QString &roomId)
 {
 	if (roomId.isEmpty() || FAccesToken.isEmpty() || !FRooms.contains(roomId))
@@ -1487,18 +1734,8 @@ void MatrixNetwork::refreshRoomMetadata(const QString &roomId)
 		return;
 	const quint64 requestId = ++FRoomMetadataRequestCounter;
 	FRoomMetadataRequests.insert(roomId, requestId);
-	const QString path = QStringLiteral("/_matrix/client/v3/rooms/%1/state")
-		.arg(QString::fromUtf8(QUrl::toPercentEncoding(roomId)));
-	QNetworkRequest request(QUrl(constructUrl(path)));
-	request.setAttribute(QNetworkRequest::Http2AllowedAttribute, FUseHttp2);
-	request.setRawHeader("Authorization", QByteArray("Bearer ") + FAccesToken.toUtf8());
-	QNetworkReply *reply = FNetworkAccessManager->get(request);
-	reply->setProperty("requestType", QStringLiteral("room_metadata_state"));
-	reply->setProperty("roomId", roomId);
-	reply->setProperty("requestId", QVariant::fromValue(requestId));
-	reply->setProperty("userId", FUserId);
-	reply->setProperty("serverUrl", FNormalizedServerUrl);
-	reply->setProperty("loginGeneration", QVariant::fromValue(FActiveLoginGeneration));
+	issueRoomStateRequest(roomId, QStringLiteral("state"),
+		QStringLiteral("room_metadata_state"), requestId);
 }
 
 void MatrixNetwork::requestRoomName(const QString &roomId)
@@ -1506,27 +1743,17 @@ void MatrixNetwork::requestRoomName(const QString &roomId)
 	if (roomId.isEmpty() || FAccesToken.isEmpty() || FRoomNameRequests.contains(roomId))
 		return;
 	FRoomNameRequests.insert(roomId);
-	const QString encodedRoomId = QString::fromUtf8(QUrl::toPercentEncoding(roomId));
+	const QString encodedRoomId = percentEncodedPathSegment(roomId);
 	const auto requestFullState = [this, roomId, encodedRoomId]() {
 		const QString path = QStringLiteral("/_matrix/client/v3/rooms/%1/state")
 			.arg(encodedRoomId);
 		QNetworkRequest request(QUrl(constructUrl(path)));
-		request.setAttribute(QNetworkRequest::Http2AllowedAttribute, FUseHttp2);
-		request.setRawHeader("Authorization", QByteArray("Bearer ") + FAccesToken.toUtf8());
+		setDefaultRequestHeaders(request);
 		QNetworkReply *reply = FNetworkAccessManager->get(request);
 		connect(reply, &QNetworkReply::finished, this, [this, reply, roomId]() {
 			QString roomName;
 			if (reply->error() == QNetworkReply::NoError) {
-				const QJsonDocument document = QJsonDocument::fromJson(reply->readAll());
-				for (const QJsonValue &stateValue : document.array()) {
-					const QJsonObject state = stateValue.toObject();
-					if (state.value(QStringLiteral("type")).toString() == QStringLiteral("m.room.name") &&
-						state.value(QStringLiteral("state_key")).toString().isEmpty()) {
-						roomName = state.value(QStringLiteral("content")).toObject()
-							.value(QStringLiteral("name")).toString();
-						break;
-					}
-				}
+				roomName = roomNameFromStateResponse(reply->readAll());
 			} else {
 				qWarning() << "Matrix room-state request failed:" << reply->errorString()
 					<< "httpStatus:"
@@ -1540,8 +1767,7 @@ void MatrixNetwork::requestRoomName(const QString &roomId)
 	const QString path = QStringLiteral("/_matrix/client/v3/rooms/%1/state/m.room.name")
 		.arg(encodedRoomId);
 	QNetworkRequest request(QUrl(constructUrl(path)));
-	request.setAttribute(QNetworkRequest::Http2AllowedAttribute, FUseHttp2);
-	request.setRawHeader("Authorization", QByteArray("Bearer ") + FAccesToken.toUtf8());
+	setDefaultRequestHeaders(request);
 	QNetworkReply *reply = FNetworkAccessManager->get(request);
 	connect(reply, &QNetworkReply::finished, this,
 		[this, reply, roomId, requestFullState]() {
@@ -1584,6 +1810,27 @@ void MatrixNetwork::requestRoomEncryptionState(const QString &roomId)
 	reply->setProperty("userId", FUserId);
 	reply->setProperty("serverUrl", FNormalizedServerUrl);
 	reply->setProperty("loginGeneration", QVariant::fromValue(FActiveLoginGeneration));
+}
+
+void MatrixNetwork::requestRoomPowerLevels(const QString &roomId)
+{
+	const bool debugEnabled = QCoreApplication::arguments().contains(QStringLiteral("--debug"));
+	const bool requestInFlight = FRoomPowerLevelsRequests.contains(roomId);
+	const bool roomJoined = FRooms.value(roomId).isJoined;
+	if (roomId.isEmpty() || FAccesToken.isEmpty() || !FNetworkAccessManager ||
+		requestInFlight || !roomJoined) {
+		if (debugEnabled)
+			qDebug() << "[Matrix-powerlevels] request skipped; room-key" << qHash(roomId)
+				<< "has-token" << !FAccesToken.isEmpty() << "network-manager" << bool(FNetworkAccessManager)
+				<< "in-flight" << requestInFlight << "joined" << roomJoined;
+		return;
+	}
+	const quint64 requestId = ++FRoomPowerLevelsRequestCounter;
+	FRoomPowerLevelsRequests.insert(roomId, requestId);
+	issueRoomStateRequest(roomId, QStringLiteral("state/m.room.power_levels/"),
+		QStringLiteral("room_power_levels_state"), requestId);
+	if (debugEnabled)
+		qDebug() << "[Matrix-powerlevels] request sent; room-key" << qHash(roomId);
 }
 
 void MatrixNetwork::onRoomMetadataStateFinished(QNetworkReply *reply)
@@ -1710,6 +1957,56 @@ void MatrixNetwork::onRoomEncryptionStateFinished(QNetworkReply *reply)
 	reply->deleteLater();
 }
 
+void MatrixNetwork::onRoomPowerLevelsStateFinished(QNetworkReply *reply)
+{
+	if (!reply)
+		return;
+	const bool debugEnabled = QCoreApplication::arguments().contains(QStringLiteral("--debug"));
+	const QString roomId = reply->property("roomId").toString();
+	const quint64 requestId = reply->property("requestId").toULongLong();
+	if (FRoomPowerLevelsRequests.value(roomId) != requestId) {
+		if (debugEnabled)
+			qDebug() << "[Matrix-powerlevels] stale request response; room-key" << qHash(roomId);
+		reply->deleteLater();
+		return;
+	}
+	FRoomPowerLevelsRequests.remove(roomId);
+	const bool currentSession =
+		reply->property("loginGeneration").toULongLong() == FActiveLoginGeneration &&
+		reply->property("userId").toString() == FUserId &&
+		reply->property("serverUrl").toString() == FNormalizedServerUrl;
+	const bool roomJoined = FRooms.value(roomId).isJoined;
+	if (!currentSession || !roomJoined) {
+		if (debugEnabled)
+			qDebug() << "[Matrix-powerlevels] stale response discarded; room-key" << qHash(roomId)
+				<< "current-session" << currentSession << "joined" << roomJoined;
+		reply->deleteLater();
+		return;
+	}
+
+	QJsonObject content;
+	bool stateKnown = false;
+	const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+	if (statusCode == 404) {
+		const QJsonObject error = QJsonDocument::fromJson(reply->readAll()).object();
+		stateKnown = error.value(QStringLiteral("errcode")).toString() == QStringLiteral("M_NOT_FOUND");
+	} else if (statusCode == 200 && reply->error() == QNetworkReply::NoError) {
+		QJsonParseError parseError;
+		const QJsonDocument document = QJsonDocument::fromJson(reply->readAll(), &parseError);
+		if (parseError.error == QJsonParseError::NoError && document.isObject()) {
+			content = document.object();
+			stateKnown = true;
+		}
+	}
+	if (debugEnabled)
+		qDebug() << "[Matrix-powerlevels] response; room-key" << qHash(roomId)
+			<< "http-status" << statusCode << "state-known" << stateKnown
+			<< "network-error" << int(reply->error());
+	if (stateKnown)
+		emit roomPowerLevelsChanged(roomId, content);
+	reply->deleteLater();
+}
+
 void MatrixNetwork::requestJoinedMembers(const QString &roomId, bool forceRefresh)
 {
 	if (roomId.isEmpty() || FAccesToken.isEmpty() || FJoinedMembersRequests.contains(roomId) ||
@@ -1717,10 +2014,9 @@ void MatrixNetwork::requestJoinedMembers(const QString &roomId, bool forceRefres
 		return;
 	FJoinedMembersRequests.insert(roomId);
 	const QString path = QStringLiteral("/_matrix/client/v3/rooms/%1/joined_members")
-		.arg(QString::fromUtf8(QUrl::toPercentEncoding(roomId)));
+		.arg(percentEncodedPathSegment(roomId));
 	QNetworkRequest request(QUrl(constructUrl(path)));
-	request.setAttribute(QNetworkRequest::Http2AllowedAttribute, FUseHttp2);
-	request.setRawHeader("Authorization", QByteArray("Bearer ") + FAccesToken.toUtf8());
+	setDefaultRequestHeaders(request);
 	QNetworkReply *reply = FNetworkAccessManager->get(request);
 	reply->setProperty("requestType", QStringLiteral("joined_members"));
 	reply->setProperty("roomId", roomId);
@@ -1811,11 +2107,9 @@ void MatrixNetwork::requestDisplayName(const QString &userId)
 	if (userId.isEmpty() || FAccesToken.isEmpty() || FDisplayNameRequests.contains(userId))
 		return;
 	FDisplayNameRequests.insert(userId);
-	const QString path = QStringLiteral("/_matrix/client/v3/profile/%1/displayname")
-		.arg(QString::fromUtf8(QUrl::toPercentEncoding(userId)));
+	const QString path = matrixUserProfilePath(userId, QStringLiteral("displayname"));
 	QNetworkRequest request(QUrl(constructUrl(path)));
-	request.setAttribute(QNetworkRequest::Http2AllowedAttribute, FUseHttp2);
-	request.setRawHeader("Authorization", QByteArray("Bearer ") + FAccesToken.toUtf8());
+	setDefaultRequestHeaders(request);
 	QNetworkReply *reply = FNetworkAccessManager->get(request);
 	reply->setProperty("requestType", QStringLiteral("display_name"));
 	reply->setProperty("displayNameUserId", userId);
@@ -1832,12 +2126,9 @@ void MatrixNetwork::setOwnDisplayName(const QString &displayName)
 		return;
 	}
 
-	const QString path = QStringLiteral("/_matrix/client/v3/profile/%1/displayname")
-		.arg(QString::fromUtf8(QUrl::toPercentEncoding(userId)));
+	const QString path = matrixUserProfilePath(userId, QStringLiteral("displayname"));
 	QNetworkRequest request(QUrl(constructUrl(path)));
-	request.setAttribute(QNetworkRequest::Http2AllowedAttribute, FUseHttp2);
-	request.setRawHeader("Authorization", QByteArray("Bearer ") + FAccesToken.toUtf8());
-	request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+	setAuthenticatedJsonRequestHeaders(request);
 	QJsonObject content;
 	content.insert(QStringLiteral("displayname"), displayName);
 	QNetworkReply *reply = FNetworkAccessManager->put(request,
@@ -1882,8 +2173,7 @@ void MatrixNetwork::setOwnAvatar(const QByteArray &imageData)
 		: QStringLiteral("image/%1").arg(QString::fromLatin1(format));
 
 	QNetworkRequest request(QUrl(constructUrl(QStringLiteral("/_matrix/media/v3/upload"))));
-	request.setAttribute(QNetworkRequest::Http2AllowedAttribute, FUseHttp2);
-	request.setRawHeader("Authorization", QByteArray("Bearer ") + FAccesToken.toUtf8());
+	setDefaultRequestHeaders(request);
 	request.setHeader(QNetworkRequest::ContentTypeHeader, mimeType);
 	QNetworkReply *reply = FNetworkAccessManager->post(request, imageData);
 	reply->setProperty("requestType", QStringLiteral("account_avatar_upload"));
@@ -1898,12 +2188,9 @@ void MatrixNetwork::updateOwnAvatarProfile(const QString &userId, const QString 
 			QStringLiteral("Matrix account changed before its avatar could be updated"));
 		return;
 	}
-	const QString path = QStringLiteral("/_matrix/client/v3/profile/%1/avatar_url")
-		.arg(QString::fromUtf8(QUrl::toPercentEncoding(userId)));
+	const QString path = matrixUserProfilePath(userId, QStringLiteral("avatar_url"));
 	QNetworkRequest request(QUrl(constructUrl(path)));
-	request.setAttribute(QNetworkRequest::Http2AllowedAttribute, FUseHttp2);
-	request.setRawHeader("Authorization", QByteArray("Bearer ") + FAccesToken.toUtf8());
-	request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+	setAuthenticatedJsonRequestHeaders(request);
 	QJsonObject content;
 	content.insert(QStringLiteral("avatar_url"), avatarUrl);
 	QNetworkReply *reply = FNetworkAccessManager->put(request,
@@ -1931,8 +2218,7 @@ void MatrixNetwork::uploadFileAndSend(const QString &roomId, const QString &file
 	QUrl url(constructUrl(QStringLiteral("/_matrix/media/v3/upload")));
 	url.setQuery(query);
 	QNetworkRequest request(url);
-	request.setAttribute(QNetworkRequest::Http2AllowedAttribute, FUseHttp2);
-	request.setRawHeader("Authorization", QByteArray("Bearer ") + FAccesToken.toUtf8());
+	setDefaultRequestHeaders(request);
 	request.setHeader(QNetworkRequest::ContentTypeHeader, mimeType.isEmpty()
 		? QStringLiteral("application/octet-stream") : mimeType);
 	QNetworkReply *reply = FNetworkAccessManager->post(request, data);
@@ -2154,6 +2440,7 @@ void MatrixNetwork::sendRoomEvent(const QString &roomId, const QString &eventTyp
 		pending.metadata.insert(QStringLiteral("reaction_key"), relation.value(QStringLiteral("key")).toString());
 	}
 	mergeMessageEvent(pending);
+	saveMessageHistory(roomId);
 	MatrixTimelineEvent pendingStored;
 	pendingStored.roomId = pending.roomId;
 	pendingStored.eventId = pending.eventId;
@@ -2174,9 +2461,7 @@ void MatrixNetwork::sendRoomEvent(const QString &roomId, const QString &eventTyp
 	
 	QUrl sendUrl(constructUrl(sendPath));
 	QNetworkRequest request(sendUrl);
-	request.setAttribute(QNetworkRequest::Http2AllowedAttribute, FUseHttp2);
-	request.setRawHeader("Authorization", QByteArray("Bearer ") + FAccesToken.toUtf8());
-	request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+	setAuthenticatedJsonRequestHeaders(request);
 	
 	QJsonDocument doc(wireContent);
 	const bool messageEvent = eventType == QStringLiteral("m.room.message");
@@ -2428,14 +2713,13 @@ bool MatrixNetwork::markRoomRead(const QString &roomId, const QString &eventId)
 {
 	if (roomId.isEmpty() || eventId.isEmpty() || FAccesToken.isEmpty())
 		return false;
-	QNetworkRequest request(QUrl(constructUrl(QStringLiteral("/rooms/%1/read_markers").arg(roomId))));
-	request.setAttribute(QNetworkRequest::Http2AllowedAttribute, FUseHttp2);
-	request.setRawHeader("Authorization", QByteArray("Bearer ") + FAccesToken.toUtf8());
-	request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+	QNetworkRequest request(QUrl(constructUrl(QStringLiteral(
+		"/_matrix/client/v3/rooms/%1/read_markers").arg(roomId))));
+	setAuthenticatedJsonRequestHeaders(request);
 	QJsonObject payload;
 	payload.insert(QStringLiteral("m.fully_read"), eventId);
 	payload.insert(QStringLiteral("m.read"), eventId);
-	QNetworkReply *reply = FNetworkAccessManager->put(request, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+	QNetworkReply *reply = FNetworkAccessManager->post(request, QJsonDocument(payload).toJson(QJsonDocument::Compact));
 	connect(reply, &QNetworkReply::finished, this, [this, reply, roomId, eventId]() {
 		if (reply->error() == QNetworkReply::NoError)
 			runDatabase([&](MatrixDatabase &database) {
@@ -2462,6 +2746,8 @@ void MatrixNetwork::onReplyFinished(QNetworkReply *reply)
 		onSendFinished(reply);
 	} else if (type == "room_encryption_state") {
 		onRoomEncryptionStateFinished(reply);
+	} else if (type == "room_power_levels_state") {
+		onRoomPowerLevelsStateFinished(reply);
 	} else if (type == "filter_create") {
 		const bool roomsOnly = reply->property("roomsOnly").toBool();
 		if (reply->error() == QNetworkReply::NoError) {
@@ -2481,6 +2767,26 @@ void MatrixNetwork::onReplyFinished(QNetworkReply *reply)
 		qWarning() << "Matrix server-side filter creation failed; using inline filter"
 			<< reply->errorString();
 		sync(roomsOnly);
+	} else if (type == "room_member_moderation") {
+		const QString roomId = reply->property("roomId").toString();
+		const QString userId = reply->property("memberId").toString();
+		const QString action = reply->property("membershipAction").toString();
+		if (reply->error() != QNetworkReply::NoError)
+			emit roomMemberActionFailed(roomId, userId, action, reply->errorString());
+		else {
+			Q_UNUSED(roomId);
+			sync();
+		}
+	} else if (type == "room_member_redaction") {
+		onMemberRedactionFinished(reply);
+	} else if (type == "room_power_levels_update") {
+		const QString roomId = reply->property("roomId").toString();
+		const QString memberId = reply->property("memberId").toString();
+		if (reply->error() != QNetworkReply::NoError)
+			emit roomMemberActionFailed(roomId, memberId, QStringLiteral("role"),
+				reply->errorString());
+		else
+			sync();
 	} else if (type == "room_membership") {
 		const QString roomId = reply->property("roomId").toString();
 		const QString action = reply->property("membershipAction").toString();
@@ -2567,10 +2873,9 @@ void MatrixNetwork::onReplyFinished(QNetworkReply *reply)
 		}
 		if (!roomId.isEmpty()) {
 			const QString accountPath = QStringLiteral("/_matrix/client/v3/user/%1/account_data/m.direct")
-				.arg(QString::fromUtf8(QUrl::toPercentEncoding(FUserId)));
+				.arg(percentEncodedPathSegment(FUserId));
 			QNetworkRequest request(QUrl(constructUrl(accountPath)));
-			request.setAttribute(QNetworkRequest::Http2AllowedAttribute, FUseHttp2);
-			request.setRawHeader("Authorization", QByteArray("Bearer ") + FAccesToken.toUtf8());
+			setDefaultRequestHeaders(request);
 			QNetworkReply *accountReply = FNetworkAccessManager->get(request);
 			accountReply->setProperty("requestType", QStringLiteral("direct_room_account_data_get"));
 			accountReply->setProperty("directUserId", userId);
@@ -2603,11 +2908,9 @@ void MatrixNetwork::onReplyFinished(QNetworkReply *reply)
 		}
 		const QJsonObject updatedMapping = MatrixDirectRoom::addRoomToDirectMapping(mapping, userId, roomId);
 		const QString accountPath = QStringLiteral("/_matrix/client/v3/user/%1/account_data/m.direct")
-			.arg(QString::fromUtf8(QUrl::toPercentEncoding(FUserId)));
+			.arg(percentEncodedPathSegment(FUserId));
 		QNetworkRequest request(QUrl(constructUrl(accountPath)));
-		request.setAttribute(QNetworkRequest::Http2AllowedAttribute, FUseHttp2);
-		request.setRawHeader("Authorization", QByteArray("Bearer ") + FAccesToken.toUtf8());
-		request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+		setAuthenticatedJsonRequestHeaders(request);
 		QNetworkReply *accountReply = FNetworkAccessManager->put(request,
 			QJsonDocument(updatedMapping).toJson(QJsonDocument::Compact));
 		accountReply->setProperty("requestType", QStringLiteral("direct_room_account_data_put"));
@@ -3335,6 +3638,8 @@ void MatrixNetwork::onLoginFinished(QNetworkReply *reply)
 	FRoomNameRequests.clear();
 	FJoinedMembersRequests.clear();
 	FRoomEncryptionStateRequests.clear();
+	FRoomPowerLevelsRequests.clear();
+	FMemberRedactionBatches.clear();
 	FPendingRoomEncryptionSends.clear();
 	FJoinedMembersLoaded.clear();
 	FDeviceKeyQueries.clear();
@@ -3383,27 +3688,7 @@ void MatrixNetwork::onLoginFinished(QNetworkReply *reply)
 	}
 	if (localOlmContextChanged)
 		qWarning() << "[Matrix-E2EE] local device context changed; discarded persisted remote Olm sessions";
-	if (qEnvironmentVariableIsSet("VACUUM_MATRIX_CLEAR_SYNC_CURSOR")) {
-		bool cleared = false;
-		if (FDatabaseWorker)
-			QMetaObject::invokeMethod(FDatabaseWorker, "clearNextBatch", Qt::BlockingQueuedConnection,
-				Q_RETURN_ARG(bool, cleared));
-		Q_UNUSED(cleared);
-	}
-	if (FDatabaseWorker)
-		QMetaObject::invokeMethod(FDatabaseWorker, "directRooms", Qt::BlockingQueuedConnection,
-			Q_RETURN_ARG(QSet<QString>, FDirectRoomIds));
-	FHasDirectRoomData = !FDirectRoomIds.isEmpty();
-	restorePersistedRooms();
-	// Resume from the last atomically persisted Matrix cursor after the
-	// account-specific database connection has been opened.
-	if (FDatabaseWorker) {
-		QMetaObject::invokeMethod(FDatabaseWorker, "nextBatch", Qt::BlockingQueuedConnection,
-			Q_RETURN_ARG(QString, FSyncToken));
-		QMetaObject::invokeMethod(FDatabaseWorker, "syncFilter", Qt::BlockingQueuedConnection,
-			Q_RETURN_ARG(QString, FSyncFilterId));
-	}
-	FFilterCreationAttempted = false;
+	restorePersistedAccountState();
 	QByteArray olmPickle;
 	QByteArray olmPickleKey;
 	bool olmAccountLoaded = false;
@@ -3659,6 +3944,7 @@ void MatrixNetwork::onSyncFinished(QNetworkReply *reply)
 	QString nextBatch = obj.value("next_batch").toString();
 	QList<MatrixTextEvent> events;
 	QSet<QString> limitedTimelineRooms;
+	QMap<QString, QJsonObject> roomPowerLevelsUpdates;
 	const QJsonObject rooms = obj.value("rooms").toObject();
 	const QJsonObject joined = rooms.value("join").toObject();
 
@@ -4804,6 +5090,9 @@ void MatrixNetwork::onSyncFinished(QNetworkReply *reply)
 				if (!memberHistorySaved)
 					qWarning() << "Failed to persist Matrix member history" << roomId << userId;
 			}
+			else if (stateType == QStringLiteral("m.room.power_levels") &&
+				stateEvent.value(QStringLiteral("state_key")).toString().isEmpty())
+				roomPowerLevelsUpdates.insert(roomId, content);
 		}
 
 		// Parse ephemeral events
@@ -5048,22 +5337,15 @@ void MatrixNetwork::onSyncFinished(QNetworkReply *reply)
 						redacted->content = QStringLiteral("message deleted");
 						redacted->messageType = QStringLiteral("m.text");
 						redacted->attachments.clear();
-						redacted->metadata.remove(QStringLiteral("body"));
-						redacted->metadata.remove(QStringLiteral("format"));
-						redacted->metadata.remove(QStringLiteral("formatted_body"));
-						redacted->metadata.remove(QStringLiteral("m.new_content"));
-						redacted->metadata.remove(QStringLiteral("m.relates_to"));
-						redacted->metadata.remove(QStringLiteral("url"));
-						redacted->metadata.remove(QStringLiteral("file"));
-						redacted->metadata.remove(QStringLiteral("thumbnail_url"));
-						redacted->metadata.remove(QStringLiteral("filename"));
-						redacted->metadata.remove(QStringLiteral("attachments"));
-						redacted->metadata.remove(QStringLiteral("attachment_url"));
-						redacted->metadata.remove(QStringLiteral("attachment_file"));
-						redacted->metadata.remove(QStringLiteral("attachment_thumbnail_url"));
-						redacted->metadata.remove(QStringLiteral("image_data"));
-						redacted->metadata.remove(QStringLiteral("image_url"));
-						redacted->metadata.remove(QStringLiteral("file_path"));
+						static const QStringList redactedMetadataKeys = {
+							QStringLiteral("body"), QStringLiteral("format"), QStringLiteral("formatted_body"),
+							QStringLiteral("m.new_content"), QStringLiteral("m.relates_to"), QStringLiteral("url"),
+							QStringLiteral("file"), QStringLiteral("thumbnail_url"), QStringLiteral("filename"),
+							QStringLiteral("attachments"), QStringLiteral("attachment_url"),
+							QStringLiteral("attachment_file"), QStringLiteral("attachment_thumbnail_url"),
+							QStringLiteral("image_data"), QStringLiteral("image_url"), QStringLiteral("file_path")};
+						for (const QString &key : redactedMetadataKeys)
+							redacted->metadata.remove(key);
 						redacted->metadata.insert(QStringLiteral("msgtype"), QStringLiteral("m.text"));
 						redacted->metadata.insert(QStringLiteral("redacted"), true);
 						MatrixTimelineEvent replacement;
@@ -5097,10 +5379,7 @@ void MatrixNetwork::onSyncFinished(QNetworkReply *reply)
 						matrixEvent.metadata.insert(QStringLiteral("sender_name"), member.name);
 					if (!member.avatarUrl.isEmpty())
 					{
-						QString profileDirectory;
-						runDatabase([&](MatrixDatabase &database) {
-							profileDirectory = database.profileDirectory();
-						});
+						const QString profileDirectory = databaseProfileDirectory();
 						const QString avatarDirectory = profileDirectory.isEmpty()
 							? QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + QStringLiteral("/matrix-avatars")
 							: profileDirectory + QStringLiteral("/avatars");
@@ -5284,6 +5563,9 @@ void MatrixNetwork::onSyncFinished(QNetworkReply *reply)
 			return;
 		}
 		FSyncToken = nextBatch;
+		for (auto powerIt = roomPowerLevelsUpdates.constBegin();
+			powerIt != roomPowerLevelsUpdates.constEnd(); ++powerIt)
+			emit roomPowerLevelsChanged(powerIt.key(), powerIt.value());
 	}
 	// A limited /sync timeline means the server omitted an older part of this
 	// room's timeline. Start Matrix /messages recovery independently of whether
@@ -5302,11 +5584,11 @@ void MatrixNetwork::onSyncFinished(QNetworkReply *reply)
 	if (!wasInitialSync)
 		emitRosterSnapshot();
 
-	if (!wasInitialSync && !events.isEmpty()) {
-		saveMessageHistory();
-		dispatchSyncEventBatch(events);
+	if (!events.isEmpty()) {
+		saveSyncHistoryBackup(events);
+		if (!wasInitialSync)
+			dispatchSyncEventBatch(events);
 	}
-	
 
 	// Keep a one-second floor between completed sync requests. The server-side
 	// long-poll remains 30 seconds, while quick empty responses cannot spin the loop.
@@ -5480,8 +5762,7 @@ QList<MatrixTextEvent> MatrixNetwork::historyBackfill(const QString &roomId, int
 	url.setQuery(query);
 
 	QNetworkRequest request(url);
-	request.setAttribute(QNetworkRequest::Http2AllowedAttribute, FUseHttp2);
-	request.setRawHeader("Authorization", QByteArray("Bearer ").append(FAccesToken.toUtf8()));
+	setDefaultRequestHeaders(request);
 
 	QNetworkReply *reply = FNetworkAccessManager->get(request);
 	QPointer<MatrixNetwork> networkGuard(this);
@@ -5588,7 +5869,7 @@ QList<MatrixTextEvent> MatrixNetwork::historyBackfill(const QString &roomId, int
 		FRoomPrevBatch[roomId] = nextToken;
 
 	if (!result.isEmpty())
-		saveMessageHistory();
+		saveMessageHistory(roomId);
 	emit messageHistoryChanged(roomId, FMessageHistory.value(roomId));
 
 	// Continue from the next opaque Matrix token until reaching an event already
@@ -5612,11 +5893,7 @@ bool MatrixNetwork::mergeMessageEvent(const MatrixTextEvent &event, bool fromHis
 		if (existing.eventId == event.eventId)
 			return false;
 	history.append(event);
-	std::sort(history.begin(), history.end(), [](const MatrixTextEvent &left, const MatrixTextEvent &right) {
-		const qint64 leftTs = left.timestamp.toLongLong();
-		const qint64 rightTs = right.timestamp.toLongLong();
-		return leftTs == rightTs ? left.eventId < right.eventId : leftTs < rightTs;
-	});
+	std::sort(history.begin(), history.end(), matrixNetworkTextEventLess);
 
 	// A history snapshot replays every event to the UI; new events should be incremental.
 	if (!fromHistoryBackfill)
@@ -5632,11 +5909,7 @@ bool MatrixNetwork::replacePendingEvent(const QString &roomId, const QString &tr
 		if (existing.eventId != transactionId)
 			continue;
 		existing = serverEvent;
-		std::sort(history.begin(), history.end(), [](const MatrixTextEvent &left, const MatrixTextEvent &right) {
-			const qint64 leftTs = left.timestamp.toLongLong();
-			const qint64 rightTs = right.timestamp.toLongLong();
-			return leftTs == rightTs ? left.eventId < right.eventId : leftTs < rightTs;
-		});
+		std::sort(history.begin(), history.end(), matrixNetworkTextEventLess);
 		runDatabase([&](MatrixDatabase &database) {
 			database.replaceTimelineEventId(roomId, transactionId, serverEvent.eventId);
 		});
@@ -5645,6 +5918,32 @@ bool MatrixNetwork::replacePendingEvent(const QString &roomId, const QString &tr
 		return true;
 	}
 	return false;
+}
+
+namespace MatrixRoomCacheMapping {
+void applyStoredRoom(const MatrixStoredRoom &stored,
+	const QList<MatrixStoredMember> &members, ProtocolRoom &room)
+{
+	room.id = stored.roomId;
+	room.name = stored.name.isEmpty() ? stored.roomId : stored.name;
+	room.subject = stored.topic;
+	room.avatarUrl = stored.avatarUrl;
+	room.membership = stored.membership;
+	room.isJoined = stored.membership == QStringLiteral("join");
+	room.isDirect = stored.isDirect;
+	room.isEncrypted = stored.isEncrypted;
+	room.encryptionStateKnown = stored.encryptionStateKnown;
+	room.isAvailable = true;
+	for (const MatrixStoredMember &storedMember : members) {
+		ProtocolRosterEntry member;
+		member.id = storedMember.userId;
+		member.name = storedMember.displayName;
+		member.avatarUrl = storedMember.avatarUrl;
+		member.presence = QStringLiteral("unknown");
+		member.isValid = true;
+		room.members.append(member);
+	}
+}
 }
 
 void MatrixNetwork::restorePersistedRooms()
@@ -5659,29 +5958,11 @@ void MatrixNetwork::restorePersistedRooms()
 		if (stored.roomId.isEmpty() || stored.membership == QStringLiteral("leave"))
 			continue;
 		ProtocolRoom &room = FRooms[stored.roomId];
-		room.id = stored.roomId;
-		room.name = stored.name.isEmpty() ? stored.roomId : stored.name;
-		room.subject = stored.topic;
-		room.avatarUrl = stored.avatarUrl;
-		room.membership = stored.membership;
-		room.isJoined = stored.membership == QStringLiteral("join");
-		room.isDirect = stored.isDirect;
-		room.isEncrypted = stored.isEncrypted;
-		room.encryptionStateKnown = stored.encryptionStateKnown;
-		room.isAvailable = true;
+		MatrixRoomCacheMapping::applyStoredRoom(stored, cached.members, room);
 		if (!cached.previousBatch.isEmpty()) {
 			FRoomPrevBatch.insert(stored.roomId, cached.previousBatch);
 			if (cached.limited)
 				FLimitedRooms.insert(stored.roomId);
-		}
-		for (const MatrixStoredMember &storedMember : cached.members) {
-			ProtocolRosterEntry member;
-			member.id = storedMember.userId;
-			member.name = storedMember.displayName;
-			member.avatarUrl = storedMember.avatarUrl;
-			member.presence = QStringLiteral("unknown");
-			member.isValid = true;
-			room.members.append(member);
 		}
 		++restored;
 	}
@@ -5692,6 +5973,29 @@ void MatrixNetwork::restorePersistedRooms()
 			rooms.append(room);
 		emit rosterChanged(rooms);
 	}
+}
+
+void MatrixNetwork::restorePersistedAccountState()
+{
+	if (qEnvironmentVariableIsSet("VACUUM_MATRIX_CLEAR_SYNC_CURSOR")) {
+		bool cleared = false;
+		if (FDatabaseWorker)
+			QMetaObject::invokeMethod(FDatabaseWorker, "clearNextBatch", Qt::BlockingQueuedConnection,
+				Q_RETURN_ARG(bool, cleared));
+		Q_UNUSED(cleared);
+	}
+	if (FDatabaseWorker)
+		QMetaObject::invokeMethod(FDatabaseWorker, "directRooms", Qt::BlockingQueuedConnection,
+			Q_RETURN_ARG(QSet<QString>, FDirectRoomIds));
+	FHasDirectRoomData = !FDirectRoomIds.isEmpty();
+	restorePersistedRooms();
+	if (FDatabaseWorker) {
+		QMetaObject::invokeMethod(FDatabaseWorker, "nextBatch", Qt::BlockingQueuedConnection,
+			Q_RETURN_ARG(QString, FSyncToken));
+		QMetaObject::invokeMethod(FDatabaseWorker, "syncFilter", Qt::BlockingQueuedConnection,
+			Q_RETURN_ARG(QString, FSyncFilterId));
+	}
+	FFilterCreationAttempted = false;
 }
 
 void MatrixNetwork::loadMessageHistory()
@@ -5728,19 +6032,88 @@ void MatrixNetwork::loadMessageHistory()
 			history.append(event);
 			++eventCount;
 		}
-		std::sort(history.begin(), history.end(), [](const MatrixTextEvent &left, const MatrixTextEvent &right) {
-			const qint64 leftTs = left.timestamp.toLongLong();
-			const qint64 rightTs = right.timestamp.toLongLong();
-			return leftTs == rightTs ? left.eventId < right.eventId : leftTs < rightTs;
-		});
+		std::sort(history.begin(), history.end(), matrixNetworkTextEventLess);
 		emit messageHistoryChanged(roomId, history);
+		saveMessageHistory(roomId);
 	}
 
 }
 
-void MatrixNetwork::saveMessageHistory() const
+void MatrixNetwork::saveMessageHistory(const QString &roomId) const
 {
-	// SQLite timeline_events is the single source of truth.
+	if (FHistoryBackupDirectory.isEmpty() || FNormalizedServerUrl.isEmpty() ||
+		FUserId.isEmpty() || roomId.isEmpty())
+		return;
+
+	const MatrixHistoryBackup backup(FHistoryBackupDirectory, FNormalizedServerUrl, FUserId);
+	QList<MatrixTextEvent> historyToSave;
+	const auto history = FMessageHistory.constFind(roomId);
+	if (history != FMessageHistory.constEnd())
+		historyToSave = history.value();
+	if (!FDatabaseProfileDirectory.isEmpty() && FDatabaseProfileDirectory != FHistoryBackupDirectory) {
+		const MatrixHistoryBackup legacyBackup(FDatabaseProfileDirectory, FNormalizedServerUrl, FUserId);
+		QList<MatrixTextEvent> legacyHistory;
+		if (legacyBackup.loadMessageHistory(roomId, legacyHistory))
+			historyToSave.append(legacyHistory);
+	}
+	if (!historyToSave.isEmpty())
+		backup.saveMessageHistory(roomId, historyToSave);
+}
+
+void MatrixNetwork::saveSyncHistoryBackup(const QList<MatrixTextEvent> &events) const
+{
+	QSet<QString> backupRooms;
+	for (const MatrixTextEvent &event : events)
+		if (!event.roomId.isEmpty() && !backupRooms.contains(event.roomId)) {
+			backupRooms.insert(event.roomId);
+			saveMessageHistory(event.roomId);
+		}
+}
+
+bool MatrixNetwork::loadOrCreateLocalHistoryBackup(const QString &roomId,
+	QList<MatrixTextEvent> &history)
+{
+	history.clear();
+	if (roomId.isEmpty() || FHistoryBackupDirectory.isEmpty() ||
+		FNormalizedServerUrl.isEmpty() || FUserId.isEmpty())
+		return false;
+
+	const MatrixHistoryBackup backup(FHistoryBackupDirectory, FNormalizedServerUrl, FUserId);
+	QList<MatrixTextEvent> merged;
+	QHash<QString, qsizetype> positions;
+	const auto mergeEvent = [&merged, &positions, &roomId](const MatrixTextEvent &event) {
+		if (event.roomId != roomId || event.eventId.isEmpty())
+			return;
+		const auto existing = positions.constFind(event.eventId);
+		if (existing == positions.constEnd()) {
+			positions.insert(event.eventId, merged.size());
+			merged.append(event);
+		} else {
+			merged[existing.value()] = event;
+		}
+	};
+
+	QList<MatrixTextEvent> existingBackup;
+	if (backup.loadMessageHistory(roomId, existingBackup))
+		for (const MatrixTextEvent &event : std::as_const(existingBackup))
+			mergeEvent(event);
+	if (!FDatabaseProfileDirectory.isEmpty() && FDatabaseProfileDirectory != FHistoryBackupDirectory) {
+		const MatrixHistoryBackup legacyBackup(FDatabaseProfileDirectory, FNormalizedServerUrl, FUserId);
+		QList<MatrixTextEvent> legacyHistory;
+		if (legacyBackup.loadMessageHistory(roomId, legacyHistory))
+			for (const MatrixTextEvent &event : std::as_const(legacyHistory))
+				mergeEvent(event);
+	}
+
+	const auto currentHistory = FMessageHistory.constFind(roomId);
+	if (currentHistory != FMessageHistory.constEnd())
+		for (const MatrixTextEvent &event : currentHistory.value())
+			mergeEvent(event);
+
+	if (merged.isEmpty() || !backup.saveMessageHistory(roomId, merged))
+		return false;
+	history = std::move(merged);
+	return true;
 }
 
 void MatrixNetwork::onSendFinished(QNetworkReply *reply)
@@ -6259,13 +6632,5 @@ bool MatrixNetwork::distributeOutboundRoomKey(const QString &roomId, const QStri
 		reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() < 300;
 	reply->deleteLater();
 	return delivered;
-}
-
-void MatrixNetwork::onReplyError(QNetworkReply *reply)
-{
-	Q_UNUSED(reply);
-	
-	// This is a fallback error handler for all reply types
-	// The actual errors are handled in the specific_*Finished methods above
 }
 

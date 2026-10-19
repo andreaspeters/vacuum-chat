@@ -28,7 +28,6 @@ class XmppStreams :
 	Q_INTERFACES(IPlugin IXmppStreams IProtocolCapabilities IProtocolContactActions IProtocolProfileActions IProtocolAccountAvatarActions);
 public:
 	XmppStreams();
-	~XmppStreams();
 	virtual QObject *instance() {return this;}
 	//IPlugin
 	virtual QUuid pluginUuid() const { return XMPPSTREAMS_UUID;}

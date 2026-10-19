@@ -8,8 +8,9 @@ include("privacylists.cmake")
 include("${CMAKE_SOURCE_DIR}/src/plugins/plugins.cmake")
 
 if (BUILD_TESTING)
+	set(PRIVACYLISTS_TEST_SOURCE_DIR "${CMAKE_SOURCE_DIR}/tests/privacylists")
 	add_executable(privacylists_request_result_tests EXCLUDE_FROM_ALL
-		privacylists_request_result_test.cpp)
+		"${PRIVACYLISTS_TEST_SOURCE_DIR}/privacylists_request_result_test.cpp")
 	target_include_directories(privacylists_request_result_tests PRIVATE
 		"${CMAKE_SOURCE_DIR}/src")
 	target_compile_features(privacylists_request_result_tests PRIVATE cxx_std_11)

@@ -1,6 +1,6 @@
 #include "matrixjoinroomchatdialog.h"
 
-#include "matrixdirectroom.h"
+#include "matrixroomapi.h"
 
 #include <QDialogButtonBox>
 #include <QFormLayout>

@@ -631,7 +631,9 @@ bool RecentContacts::recentItemValid(const IRecentItem &AItem) const
 {
 	if (!AItem.accountId.isEmpty() && !AItem.conversationId.isEmpty())
 		return true;
-	return !AItem.reference.isEmpty() && AItem.streamJid.pBare()!=AItem.reference && !Jid(AItem.reference).node().isEmpty();
+	return !AItem.reference.isEmpty()
+		&& AItem.streamJid.pBare() != AItem.reference
+		&& !Jid(AItem.reference).node().isEmpty();
 }
 
 bool RecentContacts::recentItemCanShow(const IRecentItem &AItem) const

@@ -8,6 +8,7 @@
 #include <QStringList>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
+#include <QNetworkRequest>
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QVector>
@@ -41,9 +42,12 @@ struct MatrixTextEvent {
 
 	BasicMessage toBasicMessage() const
 	{
+		const BasicMessage::Direction direction =
+			metadata.value(QStringLiteral("sender_is_self")).toBool() ?
+			BasicMessage::Outgoing : BasicMessage::Incoming;
 		return BasicMessage(eventId, roomId, userId, QString(), content,
 			MatrixTimestamps::fromUnixMilliseconds(timestamp.toLongLong()),
-			QStringLiteral("matrix"), BasicMessage::Incoming).setMetadata(metadata);
+			QStringLiteral("matrix"), direction).setMetadata(metadata);
 	}
 };
 
@@ -82,10 +86,15 @@ struct MatrixNotificationEvent {
 Q_DECLARE_METATYPE(MatrixNotificationEvent)
 
 #include "matrixdatabase.h"
+
+namespace MatrixRoomCacheMapping {
+void applyStoredRoom(const MatrixStoredRoom &stored,
+	const QList<MatrixStoredMember> &members, ProtocolRoom &room);
+}
+
 #include <functional>
 #include "matrixolm.h"
-#include "matrixdirectroom.h"
-#include "matrixpublicrooms.h"
+#include "matrixroomapi.h"
 class MatrixNetwork : public QObject
 {
 	Q_OBJECT
@@ -102,14 +111,9 @@ public:
 	// Set server URL - validates and normalizes it
 	Q_INVOKABLE void setServerUrl(const QString &serverUrl);
 	Q_INVOKABLE void setDatabaseProfileDirectory(const QString &profileDirectory);
+	Q_INVOKABLE void setHistoryBackupDirectory(const QString &backupDirectory);
 
 	// Getters for current state
-	QString serverUrl() const { return FServerUrl; }
-	QString normalizedServerUrl() const { return FNormalizedServerUrl; }
-	bool isLoggedIn() const { return !FAccesToken.isEmpty(); }
-	bool initialSyncComplete() const { return FInitialSyncComplete; }
-	bool isLoginInProgress() const { return FInFlightRequest == RequestLogin; }
-	QString deviceId() const { return FDeviceId; }
 	QString userId() const { return FUserId; }
 
 	Q_INVOKABLE QString login(const QString &userId, const QString &password, const QString &deviceId = QString());
@@ -133,6 +137,8 @@ public:
 		const QByteArray &userSigningSeed);
 	Q_INVOKABLE void setActiveRoom(const QString &roomId);
 	Q_INVOKABLE void setDatabaseWorker(QObject *worker);
+	bool loadOrCreateLocalHistoryBackup(const QString &roomId,
+		QList<MatrixTextEvent> &history);
 	Q_INVOKABLE void setPresence(const QString &userId, const QString &presence,
 		const QString &statusMessage = QString());
 	Q_INVOKABLE void setTyping(const QString &roomId, bool typing);
@@ -146,6 +152,12 @@ public:
 	Q_INVOKABLE void startDirectChat(const QString &userId);
 	Q_INVOKABLE void inviteUserToRoom(const QString &roomId, const QString &userId);
 	Q_INVOKABLE void leaveRoom(const QString &roomId);
+	Q_INVOKABLE void changeRoomMember(const QString &roomId, const QString &userId,
+		const QString &action, const QString &reason = QString());
+	Q_INVOKABLE void updateRoomPowerLevels(const QString &roomId, const QString &memberId,
+		const QJsonObject &content);
+	Q_INVOKABLE void redactMemberMessages(const QString &roomId, const QString &memberId,
+		const QString &reason = QString());
 	Q_INVOKABLE void uploadFileAndSend(const QString &roomId, const QString &filePath, const QString &mimeType,
 		const QString &messageType, const QString &body, const QString &txnId);
 	Q_INVOKABLE void retryFailedOutbox();
@@ -154,6 +166,7 @@ public:
 	Q_INVOKABLE void requestDisplayName(const QString &userId);
 	Q_INVOKABLE void requestRoomName(const QString &roomId);
 	Q_INVOKABLE void refreshRoomMetadata(const QString &roomId);
+	Q_INVOKABLE void requestRoomPowerLevels(const QString &roomId);
 	Q_INVOKABLE void requestJoinedMembers(const QString &roomId, bool forceRefresh = false);
 	Q_INVOKABLE void refreshRosterSnapshot();
 	Q_INVOKABLE void setKnownRoomTypes(const QVariantMap &roomTypes);
@@ -208,6 +221,11 @@ signals:
 	void directRoomCreated(const QString &userId, const QString &roomId, const QString &error);
 	void rosterChanged(const QList<ProtocolRoom> &rooms);
 	void roomMetadataChanged(const ProtocolRoom &room);
+	void roomPowerLevelsChanged(const QString &roomId, const QJsonObject &content);
+	void memberRedactionFinished(const QString &roomId, const QString &memberId,
+		int succeeded, int total, const QString &error);
+	void roomMemberActionFailed(const QString &roomId, const QString &memberId,
+		const QString &action, const QString &error);
 	void roomKeyRequestReceived(const QString &sender, const QString &deviceId,
 		const QString &roomId, const QString &sessionId, const QString &requestId);
 	void deviceKeysReceived(const QString &userId, const QString &deviceId,
@@ -232,28 +250,39 @@ private slots:
 	void onSyncFinished(QNetworkReply *reply);
 	void dispatchSyncEventBatch(const QList<MatrixTextEvent> &events);
 	void onSendFinished(QNetworkReply *reply);
-	void onReplyError(QNetworkReply *reply);
 	void onRoomEncryptionStateFinished(QNetworkReply *reply);
+	void onRoomPowerLevelsStateFinished(QNetworkReply *reply);
 	void onRoomMetadataStateFinished(QNetworkReply *reply);
+	void onMemberRedactionFinished(QNetworkReply *reply);
 
 private:
 	friend class MatrixNetworkTestAccess;
 
 	void runDatabase(const std::function<void(MatrixDatabase &)> &operation);
+	QString databaseProfileDirectory();
 	bool validateAndNormalizeServerUrl(const QString &serverUrl, QString &normalized) const;
 	QString constructUrl(const QString &path) const;
+	void setDefaultRequestHeaders(QNetworkRequest &request) const;
+	void setAuthenticatedJsonRequestHeaders(QNetworkRequest &request) const;
+	void issueRoomStateRequest(const QString &roomId, const QString &statePath,
+		const QString &requestType, quint64 requestId);
+	void restorePersistedAccountState();
+	QNetworkReply *postRoomAction(const QString &roomId, const QString &action,
+		const QJsonObject &content, const QString &requestType,
+		const QString &memberId = QString());
 	void updateOwnAvatarProfile(const QString &userId, const QString &avatarUrl);
 	QString generateTransactionId() const;
+	void emitLoginFailure(const QString &error, quint64 sessionGeneration);
 
 	// In-flight request tracking
-	RequestType currentRequestType() const;
 	bool isRequestInProgress() const;
 	void setRequestType(RequestType type);
 
 	void cleanupReply(QNetworkReply *reply);
 	void scheduleSyncRetry(int delayMs = 1000);
 	void loadMessageHistory();
-	void saveMessageHistory() const;
+	void saveMessageHistory(const QString &roomId) const;
+	void saveSyncHistoryBackup(const QList<MatrixTextEvent> &events) const;
 	void restorePersistedRooms();
 	void emitRosterSnapshot();
 	void emitRoomMetadataUpdate(const QString &roomId);
@@ -285,10 +314,24 @@ private:
 	void changeRoomMembership(const QString &roomId, const QString &action);
 	void requestRoomEncryptionState(const QString &roomId);
 	void queryDeviceKeysForRoom(const QString &roomId);
+	void sendNextMemberRedaction(const QString &batchId);
+	void finishMemberRedaction(const QString &batchId, const QString &error = QString());
+	struct MemberRedactionBatch
+	{
+		QString roomId;
+		QString memberId;
+		QString reason;
+		QString userId;
+		QStringList eventIds;
+		int nextEvent = 0;
+		int succeeded = 0;
+		quint64 loginGeneration = 0;
+	};
 
 	QString FServerUrl;
 	QString FNormalizedServerUrl;
 	QString FDatabaseProfileDirectory;
+	QString FHistoryBackupDirectory;
 	QString FAccesToken;
 	QString FDeviceId;
 	MatrixOlmCrypto FOlmCrypto;
@@ -307,6 +350,9 @@ private:
 	quint64 FRoomMetadataRequestCounter = 0;
 	QMap<QString, quint64> FRoomEncryptionStateRequests;
 	quint64 FRoomEncryptionStateQueryCounter = 0;
+	QMap<QString, quint64> FRoomPowerLevelsRequests;
+	quint64 FRoomPowerLevelsRequestCounter = 0;
+	QMap<QString, MemberRedactionBatch> FMemberRedactionBatches;
 	QMap<QString, QJsonArray> FPendingRoomEncryptionSends;
 	QSet<QString> FPendingOlmRecoveryDevices;
 	QMap<QString, QPair<QString, QJsonObject>> FPendingForcedOlmEvents;

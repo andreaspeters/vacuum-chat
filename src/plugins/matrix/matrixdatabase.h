@@ -53,18 +53,6 @@ struct MatrixStoredMember
     QString avatarUrl;
 };
 
-// Timeline query result with window controls
-struct MatrixTimelineCursor {
-    qint64 syncToken;                     // Sync token from Matrix Sync API
-    qint64 prevBatchTs;                    // TS of prev_batch boundary in API
-    QList<MatrixTimelineEvent> events;     // Loaded timeline events
-    bool hasMore;                          // True if more events exist
-    QString nextToken;                     // Sync token for continuation
-
-    MatrixTimelineCursor() : syncToken(0), prevBatchTs(0), hasMore(false) {}
-    bool isValid() const { return !events.isEmpty() || hasMore; }
-};
-
 // History page result for keyset pagination
 struct MatrixHistoryPageResult {
     QList<MatrixTimelineEvent> events;
@@ -91,15 +79,12 @@ public:
     bool openForAccount(const QString &serverUrl, const QString &userId);
     void setProfileDirectory(const QString &profileDirectory);
     QString profileDirectory() const;
-    bool updateRoomName(const QString &roomId, const QString &name);
     void close();
 
     // Timeline queries
-    MatrixTimelineCursor loadTimeline(const QString &roomId, qint64 afterTs, int limit = 100);
     MatrixHistoryPageResult loadHistoryPage(const QString &roomId, int limit,
                                             qint64 beforeOriginTs = 0,
                                             const QString &beforeEventId = QString()) const;
-    bool saveTimeline(const QString &roomId, const QList<MatrixTimelineEvent> &events);
     bool appendTimelineEvents(const QString &roomId, const QList<MatrixTimelineEvent> &events);
     bool persistHistoryBackfillPage(const QString &roomId,
                                     const QList<MatrixTimelineEvent> &events,
@@ -111,7 +96,6 @@ public:
     bool replaceTimelineEventId(const QString &roomId, const QString &oldEventId,
                                 const QString &newEventId);
     bool updateTimelineEvent(const MatrixTimelineEvent &event);
-    bool removeTimelineEvent(const QString &roomId, const QString &eventId);
     
     // Event deduplication and ordering
     bool hasEvent(const QString &roomId, const QString &eventId) const;
@@ -121,8 +105,6 @@ public:
     QList<MatrixStoredMember> roomMembers(const QString &roomId) const;
     
     // Sync state
-    bool setSyncToken(const QString &roomId, qint64 token);
-    qint64 getSyncToken(const QString &roomId) const;
     bool setNextBatch(const QString &nextBatch);
     QString nextBatch() const;
     bool saveSyncFilter(const QString &filterId);
@@ -161,9 +143,6 @@ public:
                            const QString &body, const QString &status);
     bool removeOutboxMessage(const QString &transactionId);
     QList<MatrixOutboxEntry> failedOutboxMessages() const;
-    bool saveSentNotification(const QString &roomId, const QString &eventId);
-    bool hasSentNotification(const QString &eventId) const;
-    bool removeSentNotifications(const QString &roomId);
     bool saveOlmAccount(const QString &userId, const QString &deviceId,
                        const QByteArray &pickleKey, const QByteArray &pickle);
     bool hasOlmAccount(const QString &userId, const QString &deviceId) const;
@@ -227,11 +206,6 @@ public:
                                                        const QString &deviceId) const;
     bool checkAndSaveMegolmMessageIndex(const QString &sessionId, quint32 messageIndex,
                                         const QString &eventId, bool &replayDetected);
-    
-    // Message history helpers
-    bool saveRawContent(const QString &roomId, const QString &eventId, 
-                        const QString &serverUrl, const QString &userId);
-    bool clearOldEvents(const QString &roomId, int maxAgeDays = 7);
 
 private:
     // Database management
@@ -241,7 +215,6 @@ private:
     // Internal helpers
     bool createConnection();
     bool insertEvent(const MatrixTimelineEvent &event);
-    bool updateMetadata(const QString &eventId, const QHash<QString, QVariant> &metadata);
     bool updateSyncTokenOnEvent(const QString &roomId, const QString &eventId, qint64 ts);
     
     QSqlDatabase FDatabase;

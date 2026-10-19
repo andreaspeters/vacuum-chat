@@ -79,11 +79,6 @@ ClientInfo::ClientInfo()
 	FActivityHandler = 0;
 }
 
-ClientInfo::~ClientInfo()
-{
-
-}
-
 void ClientInfo::pluginInfo(IPluginInfo *APluginInfo)
 {
 	APluginInfo->name = tr("Client Information");

@@ -40,6 +40,26 @@ void appendLittleEndian32(std::vector<std::uint8_t> &payload, std::uint32_t valu
     payload.push_back(static_cast<std::uint8_t>((value >> 16) & 0xffu));
     payload.push_back(static_cast<std::uint8_t>((value >> 24) & 0xffu));
 }
+
+std::uint32_t readLittleEndian32(const std::vector<std::uint8_t> &packet,
+                                 std::size_t offset)
+{
+    return static_cast<std::uint32_t>(packet[offset]) |
+           (static_cast<std::uint32_t>(packet[offset + 1]) << 8) |
+           (static_cast<std::uint32_t>(packet[offset + 2]) << 16) |
+           (static_cast<std::uint32_t>(packet[offset + 3]) << 24);
+}
+
+std::int32_t readSignedLittleEndian32(const std::vector<std::uint8_t> &packet,
+                                      std::size_t offset)
+{
+    const std::uint32_t value = readLittleEndian32(packet, offset);
+    if (value <= static_cast<std::uint32_t>(
+                     std::numeric_limits<std::int32_t>::max()))
+        return static_cast<std::int32_t>(value);
+    return static_cast<std::int32_t>(
+        -1 - static_cast<std::int32_t>(~value));
+}
 }
 
 std::vector<std::uint8_t> MeshCoreCompanionCodec::encodeFrame(
@@ -367,24 +387,10 @@ bool MeshCoreCompanionCodec::decodeContactRecord(
         if (packet[i] != 0)
             decoded.advertisedName.push_back(static_cast<char>(packet[i]));
 
-    const auto readLE32 = [&packet](std::size_t offset) {
-        return static_cast<std::uint32_t>(packet[offset]) |
-               (static_cast<std::uint32_t>(packet[offset + 1]) << 8) |
-               (static_cast<std::uint32_t>(packet[offset + 2]) << 16) |
-               (static_cast<std::uint32_t>(packet[offset + 3]) << 24);
-    };
-    const auto readSignedLE32 = [&readLE32](std::size_t offset) {
-        const std::uint32_t value = readLE32(offset);
-        if (value <= static_cast<std::uint32_t>(
-                         std::numeric_limits<std::int32_t>::max()))
-            return static_cast<std::int32_t>(value);
-        return static_cast<std::int32_t>(
-            -1 - static_cast<std::int32_t>(~value));
-    };
-    decoded.lastAdvert = readLE32(132);
-    decoded.latitudeMicrodegrees = readSignedLE32(136);
-    decoded.longitudeMicrodegrees = readSignedLE32(140);
-    decoded.lastModified = readLE32(144);
+    decoded.lastAdvert = readLittleEndian32(packet, 132);
+    decoded.latitudeMicrodegrees = readSignedLittleEndian32(packet, 136);
+    decoded.longitudeMicrodegrees = readSignedLittleEndian32(packet, 140);
+    decoded.lastModified = readLittleEndian32(packet, 144);
 
     result = decoded;
     return true;
@@ -397,21 +403,6 @@ bool MeshCoreCompanionCodec::decodeSelfInfo(
     if (packet.size() < 58 || packet[0] != 5)
         return false;
 
-    const auto readLE32 = [&packet](std::size_t offset) {
-        return static_cast<std::uint32_t>(packet[offset]) |
-               (static_cast<std::uint32_t>(packet[offset + 1]) << 8) |
-               (static_cast<std::uint32_t>(packet[offset + 2]) << 16) |
-               (static_cast<std::uint32_t>(packet[offset + 3]) << 24);
-    };
-    const auto readSignedLE32 = [&readLE32](std::size_t offset) {
-        const std::uint32_t value = readLE32(offset);
-        if (value <= static_cast<std::uint32_t>(
-                         std::numeric_limits<std::int32_t>::max()))
-            return static_cast<std::int32_t>(value);
-        return static_cast<std::int32_t>(
-            -1 - static_cast<std::int32_t>(~value));
-    };
-
     MeshCoreSelfInfo decoded;
     decoded.advertType = packet[1];
     decoded.txPower = packet[2];
@@ -422,8 +413,8 @@ bool MeshCoreCompanionCodec::decodeSelfInfo(
         decoded.publicKeyHex.push_back(hex[packet[i] >> 4]);
         decoded.publicKeyHex.push_back(hex[packet[i] & 0x0f]);
     }
-    decoded.latitudeMicrodegrees = readSignedLE32(36);
-    decoded.longitudeMicrodegrees = readSignedLE32(40);
+    decoded.latitudeMicrodegrees = readSignedLittleEndian32(packet, 36);
+    decoded.longitudeMicrodegrees = readSignedLittleEndian32(packet, 40);
     decoded.multiAcks = packet[44];
     decoded.advertLocationPolicy = packet[45];
     decoded.telemetryMode = packet[46];
@@ -431,8 +422,8 @@ bool MeshCoreCompanionCodec::decodeSelfInfo(
     decoded.telemetryLocation = (decoded.telemetryMode >> 2) & 0x03;
     decoded.telemetryBase = decoded.telemetryMode & 0x03;
     decoded.manualAddContacts = packet[47] > 0;
-    decoded.radioFrequencyHz = readLE32(48);
-    decoded.radioBandwidthHz = readLE32(52);
+    decoded.radioFrequencyHz = readLittleEndian32(packet, 48);
+    decoded.radioBandwidthHz = readLittleEndian32(packet, 52);
     decoded.radioSpreadingFactor = packet[56];
     decoded.radioCodingRate = packet[57];
     decoded.name.assign(packet.begin() + 58, packet.end());

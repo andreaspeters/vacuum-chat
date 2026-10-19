@@ -1,6 +1,6 @@
 #include "matrixnetwork.h"
 
-#include "matrixroominvite.h"
+#include "matrixroomapi.h"
 
 #include <QDebug>
 #include <QJsonDocument>
@@ -18,9 +18,7 @@ void MatrixNetwork::inviteUserToRoom(const QString &roomId, const QString &userI
     }
 
     QNetworkRequest request(QUrl(constructUrl(inviteRequest.path)));
-    request.setAttribute(QNetworkRequest::Http2AllowedAttribute, FUseHttp2);
-    request.setRawHeader("Authorization", QByteArrayLiteral("Bearer ") + FAccesToken.toUtf8());
-    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    setAuthenticatedJsonRequestHeaders(request);
 
     QNetworkReply *reply = FNetworkAccessManager->post(request, inviteRequest.body);
     reply->setProperty("requestType", QStringLiteral("room_invite"));

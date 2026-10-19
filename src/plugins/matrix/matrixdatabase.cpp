@@ -1,3 +1,5 @@
+#include <algorithm>
+
 #include "matrixdatabase.h"
 #include <QThread>
 #include <QSqlQuery>
@@ -11,6 +13,42 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QJsonValue>
+
+namespace
+{
+MatrixTimelineEvent timelineEventFromRecord(const QSqlRecord &record)
+{
+    MatrixTimelineEvent event;
+    event.roomId = record.value(QStringLiteral("room_id")).toString();
+    event.eventId = record.value(QStringLiteral("event_id")).toString();
+    event.eventType = record.value(QStringLiteral("event_type")).toString();
+    event.sender = record.value(QStringLiteral("sender")).toString();
+    event.originTs = record.value(QStringLiteral("origin_ts")).toLongLong();
+    event.messageType = record.value(QStringLiteral("message_type")).toString();
+    event.content = record.value(QStringLiteral("content")).toString();
+
+    const QByteArray metadataJson = record.value(QStringLiteral("metadata")).toByteArray();
+    if (!metadataJson.isEmpty()) {
+        const QJsonDocument document = QJsonDocument::fromJson(metadataJson);
+        if (document.isObject()) {
+            const QJsonObject metadata = document.object();
+            for (auto it = metadata.begin(); it != metadata.end(); ++it)
+                event.metadata.insert(it.key(), it.value().toVariant());
+        }
+    }
+    if (!event.messageType.isEmpty() && !event.metadata.contains(QStringLiteral("msgtype")))
+        event.metadata.insert(QStringLiteral("msgtype"), event.messageType);
+    return event;
+}
+
+QJsonObject timelineMetadataObject(const QHash<QString, QVariant> &metadata)
+{
+    QJsonObject object;
+    for (auto it = metadata.constBegin(); it != metadata.constEnd(); ++it)
+        object.insert(it.key(), QJsonValue::fromVariant(it.value()));
+    return object;
+}
+}
 
 MatrixDatabase &MatrixDatabase::instance()
 {
@@ -75,17 +113,6 @@ void MatrixDatabase::setProfileDirectory(const QString &profileDirectory)
 QString MatrixDatabase::profileDirectory() const
 {
     return FProfileDirectory;
-}
-
-bool MatrixDatabase::updateRoomName(const QString &roomId, const QString &name)
-{
-    if (roomId.isEmpty())
-        return false;
-    QSqlQuery query(FDatabase);
-    query.prepare(QStringLiteral("UPDATE rooms SET name = :name WHERE room_id = :room_id"));
-    query.bindValue(QStringLiteral(":name"), name);
-    query.bindValue(QStringLiteral(":room_id"), roomId);
-    return query.exec();
 }
 
 void MatrixDatabase::close()
@@ -306,14 +333,6 @@ void MatrixDatabase::createTables()
     }
 
     if (!query.exec(
-        "CREATE TABLE IF NOT EXISTS sent_notifications ("
-        "event_id TEXT PRIMARY KEY,"
-        "room_id TEXT NOT NULL"
-        ")")) {
-        qWarning() << "Failed to create sent_notifications table:" << query.lastError();
-    }
-
-    if (!query.exec(
         "CREATE TABLE IF NOT EXISTS olm_accounts ("
         "user_id TEXT NOT NULL,"
         "device_id TEXT NOT NULL,"
@@ -468,148 +487,6 @@ void MatrixDatabase::createTables()
     }
 }
 
-MatrixTimelineCursor MatrixDatabase::loadTimeline(const QString &roomId, qint64 afterTs, int limit)
-{
-    MatrixTimelineCursor cursor;
-    
-    QSqlQuery query(FDatabase);
-    QString sql = "SELECT room_id, event_id, event_type, sender, origin_ts, "
-                  "message_type, content, metadata FROM timeline_events "
-                  "WHERE room_id = :room_id";
-    
-    // Apply offset based on afterTs (descending by origin_ts)
-    if (afterTs > 0) {
-        sql += " AND origin_ts < :after_ts ORDER BY origin_ts DESC, event_id DESC LIMIT :limit";
-    } else {
-        sql += " ORDER BY origin_ts DESC, event_id DESC LIMIT :limit";
-    }
-    
-    if (!query.prepare(sql)) {
-        qWarning() << "Failed to prepare timeline query:" << query.lastError();
-        return cursor;
-    }
-    
-    query.bindValue(":room_id", roomId);
-    query.bindValue(":after_ts", afterTs);
-    query.bindValue(":limit", limit);
-    
-    if (!query.exec()) {
-        qWarning() << "Failed to execute timeline query:" << query.lastError();
-        return cursor;
-    }
-    
-    // Load events
-    while (query.next()) {
-        QSqlRecord rec = query.record();
-        MatrixTimelineEvent event;
-        
-        event.roomId = rec.value("room_id").toString();
-        event.eventId = rec.value("event_id").toString();
-        event.eventType = rec.value("event_type").toString();
-        event.sender = rec.value("sender").toString();
-        event.originTs = rec.value("origin_ts").toLongLong();
-        event.messageType = rec.value("message_type").toString();
-        event.content = rec.value("content").toString();
-        
-        // Parse metadata JSON
-        const QByteArray metaJson = rec.value("metadata").toByteArray();
-        if (!metaJson.isEmpty()) {
-            QJsonDocument doc = QJsonDocument::fromJson(metaJson);
-            if (doc.isObject()) {
-                QJsonObject metaObj = doc.object();
-                for (auto it = metaObj.begin(); it != metaObj.end(); ++it) {
-                    event.metadata.insert(it.key(), it.value().toVariant());
-                }
-            }
-        }
-        if (!event.messageType.isEmpty() &&
-            !event.metadata.contains(QStringLiteral("msgtype")))
-            event.metadata.insert(QStringLiteral("msgtype"), event.messageType);
-        
-        cursor.events.append(event);
-        
-        // Track latest sync token from loaded events (max)
-        qint64 syncToken = rec.value("sync_token").toLongLong();
-        if (syncToken > cursor.syncToken) {
-            cursor.syncToken = syncToken;
-            cursor.nextToken = QString::number(syncToken); // Approximation
-        }
-    }
-    
-    // Check for more events after the loaded window
-    qint64 oldestTs = 0;
-    if (!cursor.events.isEmpty()) {
-        // Inverse order in SQL, so oldest is last
-        const auto &oldest = cursor.events.last();
-        oldestTs = oldest.originTs;
-    }
-    
-    // Detect more: count all before oldest + limit window size
-    if (oldestTs > 0) {
-        QSqlQuery countQuery(FDatabase);
-        if (countQuery.exec(
-                QString("SELECT COUNT(*) FROM timeline_events WHERE room_id = :room_id "
-                       "AND origin_ts < :after_ts OR (origin_ts = :after_ts AND "
-                       "event_id < :last_event_id ORDER BY event_id DESC LIMIT 1)"))) {
-            countQuery.bindValue(":room_id", roomId);
-            countQuery.bindValue(":after_ts", oldestTs);
-            countQuery.bindValue(":last_event_id", cursor.events.last().eventId);
-            
-            if (countQuery.next()) {
-                int total = countQuery.value(0).toInt();
-                cursor.hasMore = total > cursor.events.size();
-            }
-        }
-    } else {
-        // No events loaded yet, more exists if total > 0
-        QSqlQuery countQuery(FDatabase);
-        if (countQuery.exec(
-                QString("SELECT COUNT(*) FROM timeline_events WHERE room_id = :room_id"))) {
-            countQuery.bindValue(":room_id", roomId);
-            
-            if (countQuery.next()) {
-                cursor.hasMore = countQuery.value(0).toInt() > 0;
-            }
-        }
-    }
-    
-    return cursor;
-}
-
-bool MatrixDatabase::saveTimeline(const QString &roomId, 
-                                   const QList<MatrixTimelineEvent> &events)
-{
-    if (!FDatabase.transaction()) {
-        qWarning() << "Failed to begin transaction:" << FDatabase.lastError();
-        return false;
-    }
-    
-    bool success = true;
-    
-    for (const auto &event : events) {
-        if (!event.isValid()) {
-            qWarning() << "Skipped invalid event in timeline save:" << event.eventId;
-            continue;
-        }
-        
-        if (!insertEvent(event)) {
-            success = false;
-            break;
-        }
-    }
-    
-    if (success) {
-        if (!FDatabase.commit()) {
-            qWarning() << "Failed to commit transaction:" << FDatabase.lastError();
-            success = false;
-        }
-    } else {
-        FDatabase.rollback();
-    }
-    
-    return success;
-}
-
 bool MatrixDatabase::appendTimelineEvents(const QString &roomId,
                                            const QList<MatrixTimelineEvent> &events)
 {
@@ -668,9 +545,10 @@ bool MatrixDatabase::persistHistoryBackfillPage(const QString &roomId,
 {
     if (!FisOpen || !FDatabase.isOpen() || roomId.isEmpty())
         return false;
-    for (const MatrixTimelineEvent &event : events)
-        if (!event.isValid() || event.roomId != roomId)
-            return false;
+    if (!std::all_of(events.cbegin(), events.cend(), [&roomId](const MatrixTimelineEvent &event) {
+            return event.isValid() && event.roomId == roomId;
+        }))
+        return false;
     if (!FDatabase.transaction())
         return false;
 
@@ -759,51 +637,11 @@ bool MatrixDatabase::replaceTimelineEventId(const QString &roomId, const QString
     return query.exec();
 }
 
-bool MatrixDatabase::removeTimelineEvent(const QString &roomId, const QString &eventId)
-{
-    if (roomId.isEmpty() || eventId.isEmpty())
-        return false;
-    const bool ownTransaction = !FSyncMetadataTransactionActive;
-    if (ownTransaction && !FDatabase.transaction())
-        return false;
-    bool success = true;
-    QSqlQuery relations(FDatabase);
-    relations.prepare(QStringLiteral(
-        "DELETE FROM timeline_relations WHERE source_event_id = :event_id "
-        "OR target_event_id = :event_id"));
-    relations.bindValue(QStringLiteral(":event_id"), eventId);
-    success = relations.exec();
-    if (success) {
-        QSqlQuery message(FDatabase);
-        message.prepare(QStringLiteral("DELETE FROM messages "
-            "WHERE room_id = :room_id AND event_id = :event_id"));
-        message.bindValue(QStringLiteral(":room_id"), roomId);
-        message.bindValue(QStringLiteral(":event_id"), eventId);
-        success = message.exec();
-    }
-    if (success) {
-        QSqlQuery timeline(FDatabase);
-        timeline.prepare(QStringLiteral(
-            "DELETE FROM timeline_events WHERE room_id = :room_id AND event_id = :event_id"));
-        timeline.bindValue(QStringLiteral(":room_id"), roomId);
-        timeline.bindValue(QStringLiteral(":event_id"), eventId);
-        success = timeline.exec();
-    }
-    if (ownTransaction) {
-        if (success)
-            success = FDatabase.commit();
-        else
-            FDatabase.rollback();
-    }
-    return success;
-}
 bool MatrixDatabase::updateTimelineEvent(const MatrixTimelineEvent &event)
 {
     if (!event.isValid())
         return false;
-    QJsonObject metaObj;
-    for (auto it = event.metadata.constBegin(); it != event.metadata.constEnd(); ++it)
-        metaObj.insert(it.key(), QJsonValue::fromVariant(it.value()));
+    const QJsonObject metaObj = timelineMetadataObject(event.metadata);
     QSqlQuery query(FDatabase);
     query.prepare(QStringLiteral(
         "UPDATE timeline_events SET event_type = :event_type, sender = :sender, "
@@ -825,12 +663,8 @@ bool MatrixDatabase::insertEvent(const MatrixTimelineEvent &event)
 {
     QSqlQuery query(FDatabase);
     
-    // Serialize metadata JSON
-    QJsonObject metaObj;
-    for (auto it = event.metadata.begin(); it != event.metadata.end(); ++it) {
-        metaObj.insert(it.key(), QJsonValue::fromVariant(it.value()));
-    }
-    QByteArray metaJson = QJsonDocument(metaObj).toJson(QJsonDocument::Compact);
+    const QJsonObject metaObj = timelineMetadataObject(event.metadata);
+    const QByteArray metaJson = QJsonDocument(metaObj).toJson(QJsonDocument::Compact);
     
     query.prepare(
         "INSERT OR IGNORE INTO timeline_events "
@@ -895,7 +729,7 @@ bool MatrixDatabase::insertEvent(const MatrixTimelineEvent &event)
         relationQuery.bindValue(":room", event.roomId);
         relationQuery.bindValue(":target", targetEventId);
         relationQuery.bindValue(":type", relationType);
-        relationQuery.bindValue(":json", QString::fromUtf8(QJsonDocument(metaObj).toJson(QJsonDocument::Compact)));
+        relationQuery.bindValue(":json", QString::fromUtf8(metaJson));
         if (!relationQuery.exec())
             qWarning() << "Failed to insert timeline relation:" << relationQuery.lastError();
 
@@ -977,35 +811,8 @@ QList<MatrixTimelineEvent> MatrixDatabase::getEvents(const QString &roomId, int 
         return events;
     }
     
-    while (query.next()) {
-        QSqlRecord rec = query.record();
-        MatrixTimelineEvent event;
-        
-        event.roomId = rec.value("room_id").toString();
-        event.eventId = rec.value("event_id").toString();
-        event.eventType = rec.value("event_type").toString();
-        event.sender = rec.value("sender").toString();
-        event.originTs = rec.value("origin_ts").toLongLong();
-        event.messageType = rec.value("message_type").toString();
-        event.content = rec.value("content").toString();
-        
-        // Parse metadata JSON
-        const QByteArray metaJson = rec.value("metadata").toByteArray();
-        if (!metaJson.isEmpty()) {
-            QJsonDocument doc = QJsonDocument::fromJson(metaJson);
-            if (doc.isObject()) {
-                QJsonObject metaObj = doc.object();
-                for (auto it = metaObj.begin(); it != metaObj.end(); ++it) {
-                    event.metadata.insert(it.key(), it.value().toVariant());
-                }
-            }
-        }
-        if (!event.messageType.isEmpty() &&
-            !event.metadata.contains(QStringLiteral("msgtype")))
-            event.metadata.insert(QStringLiteral("msgtype"), event.messageType);
-        
-        events.append(event);
-    }
+    while (query.next())
+        events.append(timelineEventFromRecord(query.record()));
     
     return events;
 }
@@ -1051,31 +858,8 @@ MatrixHistoryPageResult MatrixDatabase::loadHistoryPage(const QString &roomId, i
             break;
         }
 
-        const QSqlRecord record = query.record();
-        MatrixTimelineEvent event;
-        event.roomId = record.value(QStringLiteral("room_id")).toString();
-        event.eventId = record.value(QStringLiteral("event_id")).toString();
-        event.eventType = record.value(QStringLiteral("event_type")).toString();
-        event.sender = record.value(QStringLiteral("sender")).toString();
-        event.originTs = record.value(QStringLiteral("origin_ts")).toLongLong();
-        event.messageType = record.value(QStringLiteral("message_type")).toString();
-        event.content = record.value(QStringLiteral("content")).toString();
-
-        const QByteArray metadataJson = record.value(QStringLiteral("metadata")).toByteArray();
-        if (!metadataJson.isEmpty()) {
-            const QJsonDocument document = QJsonDocument::fromJson(metadataJson);
-            if (document.isObject()) {
-                const QJsonObject metadata = document.object();
-                for (auto it = metadata.begin(); it != metadata.end(); ++it)
-                    event.metadata.insert(it.key(), it.value().toVariant());
-            }
-        }
-        if (!event.messageType.isEmpty() &&
-            !event.metadata.contains(QStringLiteral("msgtype")))
-            event.metadata.insert(QStringLiteral("msgtype"), event.messageType);
-
         // Rows are queried newest-first; prepend to return a chronological page.
-        result.events.prepend(event);
+        result.events.prepend(timelineEventFromRecord(query.record()));
         ++loaded;
     }
     return result;
@@ -1122,7 +906,9 @@ QList<MatrixStoredMember> MatrixDatabase::roomMembers(const QString &roomId) con
 {
     QList<MatrixStoredMember> result;
     QSqlQuery query(FDatabase);
-    query.prepare(QStringLiteral("SELECT user_id, membership, display_name, avatar_url FROM room_members WHERE room_id = :room_id ORDER BY user_id"));
+    query.prepare(QStringLiteral(
+        "SELECT user_id, membership, display_name, avatar_url "
+        "FROM room_members WHERE room_id = :room_id ORDER BY user_id"));
     query.bindValue(QStringLiteral(":room_id"), roomId);
     if (!query.exec())
         return result;
@@ -1136,33 +922,6 @@ QList<MatrixStoredMember> MatrixDatabase::roomMembers(const QString &roomId) con
             result.append(member);
     }
     return result;
-}
-
-bool MatrixDatabase::setSyncToken(const QString &roomId, qint64 token)
-{
-    QSqlQuery query(FDatabase);
-    query.prepare("INSERT OR REPLACE INTO sync_state (room_id, sync_token) VALUES (:room_id, :token)");
-    query.bindValue(":room_id", roomId);
-    query.bindValue(":token", token);
-    
-    return query.exec();
-}
-
-qint64 MatrixDatabase::getSyncToken(const QString &roomId) const
-{
-    QSqlQuery query(FDatabase);
-    query.prepare("SELECT sync_token FROM sync_state WHERE room_id = :room_id");
-    query.bindValue(":room_id", roomId);
-    
-    if (!query.exec()) {
-        return 0;
-    }
-    
-    if (query.next()) {
-        return query.value("sync_token").toLongLong();
-    }
-    
-    return 0;
 }
 
 bool MatrixDatabase::setNextBatch(const QString &nextBatch)
@@ -1498,34 +1257,6 @@ QList<MatrixOutboxEntry> MatrixDatabase::failedOutboxMessages() const
         entries.append(entry);
     }
     return entries;
-}
-
-bool MatrixDatabase::saveSentNotification(const QString &roomId, const QString &eventId)
-{
-    QSqlQuery query(FDatabase);
-    query.prepare("INSERT OR IGNORE INTO sent_notifications (event_id, room_id) "
-                  "VALUES (:event_id, :room_id)");
-    query.bindValue(":event_id", eventId);
-    query.bindValue(":room_id", roomId);
-    return query.exec();
-}
-
-bool MatrixDatabase::hasSentNotification(const QString &eventId) const
-{
-    QSqlQuery query(FDatabase);
-    query.prepare("SELECT COUNT(*) FROM sent_notifications WHERE event_id = :event_id");
-    query.bindValue(":event_id", eventId);
-    if (!query.exec() || !query.next())
-        return false;
-    return query.value(0).toInt() > 0;
-}
-
-bool MatrixDatabase::removeSentNotifications(const QString &roomId)
-{
-    QSqlQuery query(FDatabase);
-    query.prepare("DELETE FROM sent_notifications WHERE room_id = :room_id");
-    query.bindValue(":room_id", roomId);
-    return query.exec();
 }
 
 bool MatrixDatabase::saveOlmAccount(const QString &userId, const QString &deviceId,
@@ -2192,24 +1923,4 @@ bool MatrixDatabase::updateSyncTokenOnEvent(const QString &roomId, const QString
     query.bindValue(":sync_token", ts);
     
     return query.exec();
-}
-
-bool MatrixDatabase::clearOldEvents(const QString &roomId, int maxAgeDays)
-{
-    QSqlQuery query(FDatabase);
-    query.prepare(
-        "DELETE FROM timeline_events WHERE room_id = :room_id "
-        "AND origin_ts < :cutoff_ts"
-    );
-    
-    const qint64 cutoffTs = QDateTime::currentDateTime().addDays(-maxAgeDays).toMSecsSinceEpoch();
-    query.bindValue(":room_id", roomId);
-    query.bindValue(":cutoff_ts", cutoffTs);
-    
-    if (!query.exec()) {
-        qWarning() << "Failed to clear old events:" << query.lastError();
-        return false;
-    }
-    
-    return true;
 }

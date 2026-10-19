@@ -1,3 +1,3 @@
-set(SOURCES archivestreamoptions.cpp archiveenginesoptions.cpp messagearchiver.cpp archiveviewwindow.cpp chatwindowmenu.cpp selectpagewidget.cpp)
-set(HEADERS archivestreamoptions.h archiveenginesoptions.h messagearchiver.h archiveviewwindow.h chatwindowmenu.h selectpagewidget.h)
+set(SOURCES archivestreamoptions.cpp archiveenginesoptions.cpp messagearchiver.cpp archiveviewwindow.cpp protocolhistoryviewmodel.cpp chatwindowmenu.cpp selectpagewidget.cpp localfilehistoryloader.cpp xmpplocalhistoryprovider.cpp archivehistoryconverter.cpp)
+set(HEADERS archivestreamoptions.h archiveenginesoptions.h messagearchiver.h archiveviewwindow.h protocolhistoryviewmodel.h chatwindowmenu.h selectpagewidget.h localfilehistoryloader.h xmpplocalhistoryprovider.h archivehistoryconverter.h)
 set(UIS archivestreamoptions.ui archiveviewwindow.ui selectpagewidget.ui)

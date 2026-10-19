@@ -20,13 +20,15 @@ set(USED_LANGS "")
 include("${CMAKE_SOURCE_DIR}/src/plugins/plugins.cmake")
 
 if (BUILD_TESTING)
+	set(MESHCORE_TEST_SOURCE_DIR ${CMAKE_SOURCE_DIR}/tests/meshcore)
 	add_executable(meshcore_codec_tests EXCLUDE_FROM_ALL
-		meshcorecodec_test.cpp
+		${MESHCORE_TEST_SOURCE_DIR}/meshcorecodec_test.cpp
 		meshcorecodec.cpp)
 	target_compile_features(meshcore_codec_tests PRIVATE cxx_std_11)
+	target_include_directories(meshcore_codec_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
 
 	add_executable(meshcore_protocol_tests EXCLUDE_FROM_ALL
-		meshcoreprotocol_test.cpp
+		${MESHCORE_TEST_SOURCE_DIR}/meshcoreprotocol_test.cpp
 		meshcoreplugin.cpp
 		meshcoreplugin.h
 		meshcorejoindialog.cpp
@@ -39,12 +41,15 @@ if (BUILD_TESTING)
 		meshcoreserialtransport.cpp)
 	target_compile_features(meshcore_protocol_tests PRIVATE cxx_std_11)
 	target_link_libraries(meshcore_protocol_tests PRIVATE ${VACUUM_UTILS_NAME} Qt6::SerialPort Qt6::Widgets Qt6::Xml)
+	target_include_directories(meshcore_protocol_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${MESHCORE_TEST_SOURCE_DIR})
+
 	add_executable(meshcore_join_dialog_tests EXCLUDE_FROM_ALL
-		meshcorejoindialog_test.cpp
+		${MESHCORE_TEST_SOURCE_DIR}/meshcorejoindialog_test.cpp
 		meshcorejoindialog.cpp
 		meshcorejoindialog.h)
 	target_compile_features(meshcore_join_dialog_tests PRIVATE cxx_std_11)
 	target_link_libraries(meshcore_join_dialog_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets)
+	target_include_directories(meshcore_join_dialog_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${MESHCORE_TEST_SOURCE_DIR})
 	if (NOT OS2)
 		target_sources(meshcore_protocol_tests PRIVATE
 			meshcorebletransport.h

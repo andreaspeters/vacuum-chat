@@ -14,7 +14,6 @@ class SortFilterProxyModel :
 	Q_OBJECT;
 public:
 	SortFilterProxyModel(IRostersViewPlugin *ARostersViewPlugin, QObject *AParent = NULL);
-	~SortFilterProxyModel();
 public slots:
 	void invalidate();
 protected:

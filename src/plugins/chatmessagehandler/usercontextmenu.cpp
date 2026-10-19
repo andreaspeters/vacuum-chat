@@ -17,11 +17,6 @@ UserContextMenu::UserContextMenu(IRostersModel *AModel, IRostersView *AView, ICh
 	onRosterIndexRemoved(FRosterIndex);
 }
 
-UserContextMenu::~UserContextMenu()
-{
-
-}
-
 bool UserContextMenu::isAcceptedIndex(IRosterIndex *AIndex)
 {
 	if (AIndex!=NULL && FChatWindow->streamJid()==AIndex->data(RDR_STREAM_JID).toString())

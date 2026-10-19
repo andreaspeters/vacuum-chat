@@ -68,11 +68,6 @@ JoinMultiChatDialog::JoinMultiChatDialog(IMultiUserChatPlugin *AChatPlugin, cons
 	connect(ui.btbButtons,SIGNAL(accepted()),SLOT(onDialogAccepted()));
 }
 
-JoinMultiChatDialog::~JoinMultiChatDialog()
-{
-
-}
-
 void JoinMultiChatDialog::initialize()
 {
 	IPlugin *plugin = FChatPlugin->pluginManager()->pluginInterface("IXmppStreams").value(0,NULL);

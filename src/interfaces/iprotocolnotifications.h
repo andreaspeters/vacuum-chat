@@ -26,6 +26,7 @@ struct ProtocolNotification
 	QString streamId;
 	QString conversationId;
 	QString title;
+	QString senderId;
 	QString body;
 	QString protocol;
 	QDateTime timestamp;

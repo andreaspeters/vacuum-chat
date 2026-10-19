@@ -810,18 +810,23 @@ QString RosterChanger::protocolAccountIdForRoot(IRosterIndex *AIndex) const
 	return account && account->isActive() ? account->accountId().toString() : QString();
 }
 
-bool RosterChanger::showProtocolAddContactDialog(const QString &AAccountId)
+static bool hasActiveAccount(IPluginManager *APluginManager, const QString &AAccountId)
 {
-	if (!FPluginManager || AAccountId.isEmpty())
-		return false;
-
-	IPlugin *accountPlugin = FPluginManager->pluginInterface("IAccountManager").value(0, NULL);
+	IPlugin *accountPlugin = APluginManager->pluginInterface("IAccountManager").value(0, NULL);
 	IAccountManager *accountManager = accountPlugin
 		? qobject_cast<IAccountManager *>(accountPlugin->instance()) : NULL;
 	const QUuid persistentAccountId = QUuid::fromString(AAccountId);
 	IAccount *account = accountManager && !persistentAccountId.isNull()
 		? accountManager->accountById(persistentAccountId) : NULL;
-	if (!account || !account->isActive() || account->accountId() != persistentAccountId)
+	return account && account->isActive() && account->accountId() == persistentAccountId;
+}
+
+bool RosterChanger::showProtocolAddContactDialog(const QString &AAccountId)
+{
+	if (!FPluginManager || AAccountId.isEmpty())
+		return false;
+
+	if (!hasActiveAccount(FPluginManager, AAccountId))
 		return false;
 
 	for (IPlugin *plugin : FPluginManager->pluginInterface("IProtocolCapabilities"))
@@ -842,13 +847,7 @@ bool RosterChanger::showProtocolJoinRoomDialog(const QString &AAccountId)
 	if (!FPluginManager || AAccountId.isEmpty())
 		return false;
 
-	IPlugin *accountPlugin = FPluginManager->pluginInterface("IAccountManager").value(0, NULL);
-	IAccountManager *accountManager = accountPlugin
-		? qobject_cast<IAccountManager *>(accountPlugin->instance()) : NULL;
-	const QUuid persistentAccountId = QUuid::fromString(AAccountId);
-	IAccount *account = accountManager && !persistentAccountId.isNull()
-		? accountManager->accountById(persistentAccountId) : NULL;
-	if (!account || !account->isActive() || account->accountId() != persistentAccountId)
+	if (!hasActiveAccount(FPluginManager, AAccountId))
 		return false;
 
 	for (IPlugin *plugin : FPluginManager->pluginInterface("IProtocolCapabilities"))
@@ -870,13 +869,7 @@ bool RosterChanger::leaveProtocolRoom(const QString &AAccountId,
 	if (!FPluginManager || AAccountId.isEmpty() || AStreamId.isEmpty() || ARoomId.isEmpty())
 		return false;
 
-	IPlugin *accountPlugin = FPluginManager->pluginInterface("IAccountManager").value(0, NULL);
-	IAccountManager *accountManager = accountPlugin
-		? qobject_cast<IAccountManager *>(accountPlugin->instance()) : NULL;
-	const QUuid persistentAccountId = QUuid::fromString(AAccountId);
-	IAccount *account = accountManager && !persistentAccountId.isNull()
-		? accountManager->accountById(persistentAccountId) : NULL;
-	if (!account || !account->isActive() || account->accountId() != persistentAccountId)
+	if (!hasActiveAccount(FPluginManager, AAccountId))
 		return false;
 
 	for (IPlugin *plugin : FPluginManager->pluginInterface("IProtocolRoster"))
@@ -899,13 +892,7 @@ bool RosterChanger::sendProtocolSelfAdvert(const QString &AAccountId,
 	if (!FPluginManager || AAccountId.isEmpty() || AStreamId.isEmpty())
 		return false;
 
-	IPlugin *accountPlugin = FPluginManager->pluginInterface("IAccountManager").value(0, NULL);
-	IAccountManager *accountManager = accountPlugin
-		? qobject_cast<IAccountManager *>(accountPlugin->instance()) : NULL;
-	const QUuid persistentAccountId = QUuid::fromString(AAccountId);
-	IAccount *account = accountManager && !persistentAccountId.isNull()
-		? accountManager->accountById(persistentAccountId) : NULL;
-	if (!account || !account->isActive() || account->accountId() != persistentAccountId)
+	if (!hasActiveAccount(FPluginManager, AAccountId))
 		return false;
 
 	for (IPlugin *plugin : FPluginManager->pluginInterface("IProtocolRoster"))

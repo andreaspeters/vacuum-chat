@@ -144,7 +144,10 @@ QTextDocumentFragment SimpleMessageStyle::textUnderPosition(const QPoint &APosit
 			return bubbleFragment;
 
 		QTextCursor cursor = view->cursorForPosition(APosition);
-		if (view->textCursor().selection().isEmpty() || view->textCursor().selectionStart()>cursor.position() || view->textCursor().selectionEnd()<cursor.position())
+		const QTextCursor viewCursor = view->textCursor();
+		if (viewCursor.selection().isEmpty() ||
+			viewCursor.selectionStart() > cursor.position() ||
+			viewCursor.selectionEnd() < cursor.position())
 		{
 			if (!view->anchorAt(APosition).isEmpty())
 			{

@@ -23,6 +23,8 @@
 #include <definitions/internalerrors.h>
 #include <interfaces/ipluginmanager.h>
 #include <interfaces/imessagearchiver.h>
+#include <interfaces/iprotocolhistoryviewer.h>
+#include <interfaces/iprotocolmessagingregistry.h>
 #include <interfaces/imessagewidgets.h>
 #include <interfaces/imessagestyles.h>
 #include <interfaces/imessageprocessor.h>
@@ -80,10 +82,14 @@ struct CollectionRequest {
 	IArchiveCollection collection;
 };
 
+class XmppLocalHistoryProviderRegistry;
+
 class MessageArchiver :
 	public QObject,
 	public IPlugin,
 	public IMessageArchiver,
+	public IProtocolHistoryViewer,
+	public IProtocolMessagingRegistry,
 	public IStanzaHandler,
 	public IStanzaRequestOwner,
 	public IOptionsHolder,
@@ -91,10 +97,9 @@ class MessageArchiver :
 {
 	Q_OBJECT;
 	Q_PLUGIN_METADATA(IID "org.vacuum-im.messagearchiver")
-	Q_INTERFACES(IPlugin IMessageArchiver IStanzaHandler IStanzaRequestOwner IOptionsHolder ISessionNegotiator);
+	Q_INTERFACES(IPlugin IMessageArchiver IProtocolHistoryViewer IProtocolMessagingRegistry IStanzaHandler IStanzaRequestOwner IOptionsHolder ISessionNegotiator);
 public:
 	MessageArchiver();
-	~MessageArchiver();
 	//IPlugin
 	virtual QObject *instance() { return this; }
 	virtual QUuid pluginUuid() const { return MESSAGEARCHIVER_UUID; }
@@ -121,6 +126,9 @@ public:
 	virtual bool isArchiveAutoSave(const Jid &AStreamJid) const;
 	virtual bool isArchivingAllowed(const Jid &AStreamJid, const Jid &AItemJid, const QString &AThreadId) const;
 	virtual QWidget *showArchiveWindow(const Jid &AStreamJid, const Jid &AContactJid = Jid::null);
+	QWidget *showConversationHistory(const AccountId &accountId, const ConversationId &conversationId,
+		const QString &conversationName, const QList<BasicMessage> &messages) override;
+	IProtocolMessaging *providerForAccount(const AccountId &accountId) override;
   //Preferences
 	virtual QString prefsNamespace(const Jid &AStreamJid) const;
 	virtual IArchiveStreamPrefs archivePrefs(const Jid &AStreamJid) const;
@@ -233,6 +241,7 @@ private:
 	IOptionsManager *FOptionsManager;
 	IPrivateStorage *FPrivateStorage;
 	IAccountManager *FAccountManager;
+	XmppLocalHistoryProviderRegistry *FLocalHistoryProviderRegistry;
 	IRosterPlugin *FRosterPlugin;
 	IRostersViewPlugin *FRostersViewPlugin;
 	IServiceDiscovery *FDiscovery;

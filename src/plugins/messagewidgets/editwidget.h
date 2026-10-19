@@ -82,6 +82,7 @@ protected slots:
 	void onEditorContentsChanged(int APosition, int ARemoved, int AAdded);
 	void onEditorCustomContextMenuRequested(const QPoint &APosition);
 private:
+	void initEditor();
 	Ui::EditWidgetClass ui;
 private:
 	IMessageWidgets *FMessageWidgets;

@@ -8,8 +8,9 @@ include("notifications.cmake")
 include("${CMAKE_SOURCE_DIR}/src/plugins/plugins.cmake")
 
 if (BUILD_TESTING)
+	set(NOTIFICATIONS_TEST_SOURCE_DIR "${CMAKE_SOURCE_DIR}/tests/notifications")
 	add_executable(protocol_notification_roster_stream_id_tests EXCLUDE_FROM_ALL
-		protocolnotificationrosterstreamid_test.cpp)
+		${NOTIFICATIONS_TEST_SOURCE_DIR}/protocolnotificationrosterstreamid_test.cpp)
 	target_include_directories(protocol_notification_roster_stream_id_tests PRIVATE
 		"${CMAKE_SOURCE_DIR}/src")
 	target_link_libraries(protocol_notification_roster_stream_id_tests PRIVATE Qt6::Core)

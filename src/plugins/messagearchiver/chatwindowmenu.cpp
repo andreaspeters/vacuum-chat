@@ -21,11 +21,6 @@ ChatWindowMenu::ChatWindowMenu(IMessageArchiver *AArchiver, IPluginManager *APlu
 	updateMenu();
 }
 
-ChatWindowMenu::~ChatWindowMenu()
-{
-
-}
-
 Jid ChatWindowMenu::streamJid() const
 {
 	return FEditWidget->streamJid();

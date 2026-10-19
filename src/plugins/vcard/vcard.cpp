@@ -49,23 +49,7 @@ QDateTime VCard::loadDateTime() const
 
 QString VCard::value(const QString &AName, const QStringList &ATags, const QStringList &ATagList) const
 {
-	bool tagsFaild = true;
-	QDomElement elem = firstElementByName(AName);
-	while (!elem.isNull() && tagsFaild)
-	{
-		tagsFaild = false;
-		QDomElement parentElem = elem.parentNode().toElement();
-		foreach(QString tag, ATagList)
-		{
-			QDomElement tagElem = parentElem.firstChildElement(tag);
-			if ((tagElem.isNull() && ATags.contains(tag)) || (!tagElem.isNull() && !ATags.contains(tag)))
-			{
-				tagsFaild = true;
-				elem = nextElementByName(AName,elem);
-				break;
-			}
-		}
-	}
+	QDomElement elem = firstElementByNameAndTags(AName, ATags, ATagList);
 	return elem.text();
 }
 
@@ -121,23 +105,7 @@ void VCard::setTagsForValue(const QString &AName, const QString &AValue, const Q
 
 void VCard::setValueForTags(const QString &AName, const QString &AValue, const QStringList &ATags, const QStringList &ATagList)
 {
-	bool tagsFaild = true;
-	QDomElement elem = firstElementByName(AName);
-	while (!elem.isNull() && tagsFaild)
-	{
-		tagsFaild = false;
-		QDomElement parentElem = elem.parentNode().toElement();
-		foreach(QString tag, ATagList)
-		{
-			QDomElement tagElem = parentElem.firstChildElement(tag);
-			if ((tagElem.isNull() && ATags.contains(tag)) || (!tagElem.isNull() && !ATags.contains(tag)))
-			{
-				tagsFaild = true;
-				elem = nextElementByName(AName,elem);
-				break;
-			}
-		}
-	}
+	QDomElement elem = firstElementByNameAndTags(AName, ATags, ATagList);
 
 	if (elem.isNull())
 		elem = createElementByName(AName,ATags,ATagList);
@@ -253,6 +221,30 @@ QDomElement VCard::nextElementByName(const QString &AName, const QDomElement &AP
 	elem = elem.nextSiblingElement(elem.tagName());
 	while (!elem.isNull() && index < tagTree.count())
 		elem = elem.firstChildElement(tagTree.at(index++));
+	return elem;
+}
+
+QDomElement VCard::firstElementByNameAndTags(
+		const QString &AName, const QStringList &ATags,
+		const QStringList &ATagList) const
+{
+	bool tagsFaild = true;
+	QDomElement elem = firstElementByName(AName);
+	while (!elem.isNull() && tagsFaild)
+	{
+		tagsFaild = false;
+		QDomElement parentElem = elem.parentNode().toElement();
+		foreach(QString tag, ATagList)
+		{
+			QDomElement tagElem = parentElem.firstChildElement(tag);
+			if ((tagElem.isNull() && ATags.contains(tag)) || (!tagElem.isNull() && !ATags.contains(tag)))
+			{
+				tagsFaild = true;
+				elem = nextElementByName(AName,elem);
+				break;
+			}
+		}
+	}
 	return elem;
 }
 

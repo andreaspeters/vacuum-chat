@@ -6,17 +6,25 @@
 #include "matriximagedisplay.h"
 #include <interfaces/iemoticons.h>
 #include <interfaces/iprotocolcapabilities.h>
+#include <interfaces/iprotocolhistoryviewer.h>
+#include <interfaces/iprotocolmessagingregistry.h>
+#include <interfaces/iprotocolroommemberactions.h>
 #include <interfaces/protocolhistoryactionpolicy.h>
 #include <utils/systemtimezonecache.h>
+#include "protocolhistoryproviderbinding.h"
 #include <utils/imageloadscheduler.h>
 #include <utils/animatedtextbrowser.h>
 #include <QKeyEvent>
+#include <QPointer>
 #include <utils/roundedavatar.h>
 #include <utils/messagenotificationmute.h>
 #include <interfaces/iemoticons.h>
 
 #include <QMouseEvent>
 #include <QApplication>
+#include <QClipboard>
+#include <QCheckBox>
+#include <QComboBox>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFile>
@@ -25,6 +33,7 @@
 #include <QMenu>
 #include <QLineEdit>
 #include <algorithm>
+#include <functional>
 #include <utility>
 #include <memory>
 
@@ -50,6 +59,7 @@
 #include <QUrl>
 #include <QUrlQuery>
 #include <QPointer>
+
 #include <QHash>
 #include <QThreadPool>
 #include <QRunnable>
@@ -243,11 +253,6 @@ ChatMessageHandler::ChatMessageHandler()
 	FProtocolHistorySyncClock.start();
 }
 
-ChatMessageHandler::~ChatMessageHandler()
-{
-
-}
-
 void ChatMessageHandler::pluginInfo(IPluginInfo *APluginInfo)
 {
 	APluginInfo->name = tr("Chat Messages");
@@ -279,10 +284,12 @@ bool ChatMessageHandler::initConnections(IPluginManager *APluginManager, int &AI
 	plugin = APluginManager->pluginInterface("IFileTransfer").value(0,NULL);
 	if (plugin)
 		FFileTransfer = qobject_cast<IFileTransfer *>(plugin->instance());
-	plugin = APluginManager->pluginInterface("IProtocolRoster").value(0,NULL);
-	if (plugin) {
-		FProtocolRoster = qobject_cast<IProtocolRoster *>(plugin->instance());
-		connect(plugin->instance(), SIGNAL(protocolRosterChanged()),
+	foreach (IPlugin *rosterPlugin, APluginManager->pluginInterface("IProtocolRoster")) {
+		if (!rosterPlugin || !rosterPlugin->instance())
+			continue;
+		if (!FProtocolRoster)
+			FProtocolRoster = qobject_cast<IProtocolRoster *>(rosterPlugin->instance());
+		connect(rosterPlugin->instance(), SIGNAL(protocolRosterChanged()),
 			this, SLOT(onProtocolRosterChanged()), Qt::UniqueConnection);
 	}
 
@@ -506,13 +513,13 @@ bool ChatMessageHandler::rosterIndexDoubleClicked(int AOrder, IRosterIndex *AInd
 bool ChatMessageHandler::startPlugin()
 {
 	if (FPluginManager) {
-		if (!FProtocolRoster) {
-			IPlugin *rosterPlugin = FPluginManager->pluginInterface("IProtocolRoster").value(0, NULL);
-			if (rosterPlugin) {
+		foreach (IPlugin *rosterPlugin, FPluginManager->pluginInterface("IProtocolRoster")) {
+			if (!rosterPlugin || !rosterPlugin->instance())
+				continue;
+			if (!FProtocolRoster)
 				FProtocolRoster = qobject_cast<IProtocolRoster *>(rosterPlugin->instance());
-				connect(rosterPlugin->instance(), SIGNAL(protocolRosterChanged()),
-					this, SLOT(onProtocolRosterChanged()), Qt::UniqueConnection);
-			}
+			connect(rosterPlugin->instance(), SIGNAL(protocolRosterChanged()),
+				this, SLOT(onProtocolRosterChanged()), Qt::UniqueConnection);
 		}
 
 		foreach (IPlugin *plugin, FPluginManager->pluginInterface("IProtocolMessaging"))
@@ -654,9 +661,14 @@ void ChatMessageHandler::onProtocolViewContextMenu(const QPoint &APosition,
 
 void ChatMessageHandler::onProtocolRosterChanged()
 {
+	if (FMessageWidgets)
+		for (IChatWindow *window : FMessageWidgets->chatWindows())
+			setupLocalHistoryAction(window);
+
 	for (IChatWindow *window : FWindows) {
 		if (!window)
 			continue;
+		setupLocalHistoryAction(window);
 		for (IProtocolMessaging *messaging : FProtocolMessaging)
 			if (messaging && messaging->streamId() == window->accountId()) {
 				setupRoomSidebar(window, messaging);
@@ -1163,6 +1175,9 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 		addProtocolReaction(AWindow, AMessaging, AMessage);
 		return;
 	}
+	if (AMessage.direction() == BasicMessage::Incoming &&
+		messageNotificationIgnored(AMessaging->streamId(), AMessage.sender()))
+		return;
 	const QString eventKey = prefix + AMessage.messageId();
 	if (AMessage.metadata().value(QStringLiteral("redacted")).toBool()) {
 		FProtocolRedactedMessages.insert(eventKey);
@@ -1969,7 +1984,8 @@ void ChatMessageHandler::setupRoomSidebar(IChatWindow *AWindow, IProtocolMessagi
 	IProtocolRoster *roster = nullptr;
 	if (FPluginManager) {
 		for (IPlugin *plugin : FPluginManager->pluginInterface("IProtocolRoster")) {
-			IProtocolRoster *candidate = qobject_cast<IProtocolRoster *>(plugin->instance());
+			QObject *object = plugin ? plugin->instance() : nullptr;
+			IProtocolRoster *candidate = qobject_cast<IProtocolRoster *>(object);
 			if (candidate && candidate->streamId() == AMessaging->streamId()) {
 				roster = candidate;
 				break;
@@ -1984,6 +2000,19 @@ void ChatMessageHandler::setupRoomSidebar(IChatWindow *AWindow, IProtocolMessagi
 			AWindow->setSidebarWidget(nullptr);
 		}
 		return;
+	}
+	QObject *memberActionsObject = nullptr;
+	const AccountId persistentAccountId = roster->accountId();
+	if (FPluginManager && !persistentAccountId.isEmpty()) {
+		for (IPlugin *plugin : FPluginManager->pluginInterface("IProtocolRoomMemberActions")) {
+			QObject *object = plugin ? plugin->instance() : nullptr;
+			IProtocolRoomMemberActions *actions = qobject_cast<IProtocolRoomMemberActions *>(object);
+			if (actions && actions->accountId() == persistentAccountId &&
+				actions->streamId() == AMessaging->streamId()) {
+				memberActionsObject = object;
+				break;
+			}
+		}
 	}
 	AMessaging->loadConversationAvatars(AWindow->conversationId());
 	const ProtocolRoom currentRoom = roster->room(AWindow->conversationId());
@@ -2123,8 +2152,11 @@ void ChatMessageHandler::setupRoomSidebar(IChatWindow *AWindow, IProtocolMessagi
 		row->setAccessibleName(verificationLabel.isEmpty() ? name->text()
 			: name->text() + QStringLiteral(", ") + verificationLabel);
 		row->setStyleSheet(QStringLiteral("text-align:left; padding:4px;"));
-		connect(row, &QPushButton::clicked, sidebar, [this, AWindow, AMessaging, currentRoom, member]() {
-			showRoomMemberProfile(AWindow->instance(), AMessaging, currentRoom, member);
+		connect(row, &QPushButton::clicked, sidebar,
+			[this, AWindow, AMessaging, currentRoom, member,
+				persistentAccountId, memberActionsObject]() {
+			showRoomMemberProfile(AWindow->instance(), AMessaging, currentRoom, member,
+				persistentAccountId, memberActionsObject);
 		});
 		memberLayout->addWidget(row);
 	}
@@ -2179,38 +2211,230 @@ void ChatMessageHandler::setupRoomSidebar(IChatWindow *AWindow, IProtocolMessagi
 }
 
 void ChatMessageHandler::showRoomMemberProfile(QWidget *AParent, IProtocolMessaging *AMessaging,
-	const ProtocolRoom &ARoom, const ProtocolRosterEntry &AMember)
+	const ProtocolRoom &ARoom, const ProtocolRosterEntry &AMember,
+	const AccountId &AAccountId, QObject *AProtocolObject)
 {
+	if (!AParent || !AMessaging || AMember.id.isEmpty())
+		return;
 	AMessaging->loadUserAvatar(ARoom.id, AMember.id);
+	IProtocolRoomMemberActions *memberActions = qobject_cast<IProtocolRoomMemberActions *>(AProtocolObject);
+	const IProtocolRoomMemberActions::MemberActions availableActions = memberActions
+		? memberActions->actionsForMember(AAccountId, ARoom.id, AMember.id)
+		: IProtocolRoomMemberActions::MemberActions();
 	QDialog *dialog = new QDialog(AParent);
 	dialog->setAttribute(Qt::WA_DeleteOnClose);
-	dialog->setWindowTitle(tr("Show Profile"));
+	dialog->setWindowTitle(tr("Member details"));
 	QVBoxLayout *layout = new QVBoxLayout(dialog);
+	layout->setContentsMargins(24, 20, 24, 20);
+	layout->setSpacing(12);
+	QLabel *avatar = new QLabel(dialog);
+	avatar->setFixedSize(96, 96);
+	avatar->setObjectName(QStringLiteral("protocolMemberProfileAvatar"));
+	avatar->setProperty("avatarKey", AMessaging->userAvatarKey(ARoom.id, AMember.id));
+	avatar->setProperty("accountId", AMessaging->streamId());
+	avatar->setProperty("roomId", ARoom.id);
+	avatar->setProperty("userId", AMember.id);
+	avatar->setAlignment(Qt::AlignCenter);
+	const QString avatarPath = AMessaging->userAvatarPath(ARoom.id, AMember.id);
+	if (!avatarPath.isEmpty())
+		loadImagePixmapAsync(avatar, avatarPath, QSize(96, 96));
+	else {
+		QImage placeholder(96, 96, QImage::Format_ARGB32_Premultiplied);
+		placeholder.fill(QColor(QStringLiteral("#c8d0d9")));
+		avatar->setPixmap(QPixmap::fromImage(RoundedAvatar::roundImageScaled(placeholder, avatar->size())));
+	}
+	layout->addWidget(avatar, 0, Qt::AlignHCenter);
 	QLabel *name = new QLabel(AMember.name.isEmpty() ? AMember.id : AMember.name, dialog);
+	name->setAlignment(Qt::AlignCenter);
+	name->setWordWrap(true);
 	name->setStyleSheet(QStringLiteral("font-size:16px; font-weight:600;"));
 	layout->addWidget(name);
-	const QString avatarPath = AMessaging->userAvatarPath(ARoom.id, AMember.id);
-	if (!avatarPath.isEmpty()) {
-		QLabel *avatar = new QLabel(dialog);
-		avatar->setFixedSize(96, 96);
-		avatar->setObjectName(QStringLiteral("protocolMemberProfileAvatar"));
-		avatar->setProperty("avatarKey", AMessaging->userAvatarKey(ARoom.id, AMember.id));
-		avatar->setProperty("accountId", AMessaging->streamId());
-		avatar->setProperty("roomId", ARoom.id);
-		avatar->setProperty("userId", AMember.id);
-		loadImagePixmapAsync(avatar, avatarPath, QSize(96, 96));
-		avatar->setAlignment(Qt::AlignCenter);
-		layout->addWidget(avatar);
-	}
-	QLabel *id = new QLabel(tr("Matrix ID: %1").arg(AMember.id), dialog);
-	id->setTextInteractionFlags(Qt::TextSelectableByMouse);
-	layout->addWidget(id);
-	QLabel *presence = new QLabel(tr("Presence: %1").arg(AMember.presence), dialog);
+	QLabel *presence = new QLabel(AMember.presence.isEmpty()
+		? tr("Presence unavailable") : AMember.presence, dialog);
+	presence->setAlignment(Qt::AlignCenter);
 	layout->addWidget(presence);
+	QWidget *identifierRow = new QWidget(dialog);
+	QHBoxLayout *identifierLayout = new QHBoxLayout(identifierRow);
+	identifierLayout->setContentsMargins(0, 0, 0, 0);
+	QLabel *id = new QLabel(AMember.id, identifierRow);
+	id->setTextInteractionFlags(Qt::TextSelectableByMouse);
+	id->setWordWrap(true);
+	identifierLayout->addWidget(id, 1);
+	QPushButton *copyId = new QPushButton(tr("Copy"), identifierRow);
+	copyId->setToolTip(tr("Copy user ID"));
+	connect(copyId, &QPushButton::clicked, dialog, [userId = AMember.id]() {
+		QApplication::clipboard()->setText(userId);
+	});
+	identifierLayout->addWidget(copyId);
+	layout->addWidget(identifierRow);
+	if (AMember.hasVerificationState) {
+		QLabel *verification = new QLabel(AMember.isVerified ? tr("Verified") : tr("Unverified"), dialog);
+		verification->setAlignment(Qt::AlignCenter);
+		verification->setAccessibleName(verification->text());
+		layout->addWidget(verification);
+	}
+	QPointer<QObject> actionObject(AProtocolObject);
+	auto dispatchMemberAction = [actionObject, AAccountId, roomId = ARoom.id,
+		memberId = AMember.id](IProtocolRoomMemberActions::Action action,
+		const std::function<bool(IProtocolRoomMemberActions *)> &invoke) {
+		IProtocolRoomMemberActions *actions = actionObject
+			? qobject_cast<IProtocolRoomMemberActions *>(actionObject.data()) : nullptr;
+		return actions && actions->actionsForMember(AAccountId, roomId, memberId).testFlag(action)
+			&& invoke(actions);
+	};
+	if (memberActions && availableActions.testFlag(IProtocolRoomMemberActions::ActionSetRole)) {
+		const QList<ProtocolRoomMemberRole> roles = memberActions->memberRoles(AAccountId, ARoom.id, AMember.id);
+		if (!roles.isEmpty()) {
+			QWidget *roleRow = new QWidget(dialog);
+			QHBoxLayout *roleLayout = new QHBoxLayout(roleRow);
+			roleLayout->setContentsMargins(0, 0, 0, 0);
+			roleLayout->addWidget(new QLabel(tr("Room role"), roleRow));
+			QComboBox *roleSelector = new QComboBox(roleRow);
+			for (const ProtocolRoomMemberRole &role : roles)
+				roleSelector->addItem(role.label, role.id);
+			const int currentRoleIndex = roleSelector->findData(
+				memberActions->memberRole(AAccountId, ARoom.id, AMember.id));
+			if (currentRoleIndex >= 0)
+				roleSelector->setCurrentIndex(currentRoleIndex);
+			roleLayout->addWidget(roleSelector, 1);
+			QPushButton *applyRole = new QPushButton(tr("Apply"), roleRow);
+			roleLayout->addWidget(applyRole);
+			connect(applyRole, &QPushButton::clicked, dialog,
+				[dialog, dispatchMemberAction, roleSelector, AAccountId,
+					roomId = ARoom.id, memberId = AMember.id]() {
+					const QString roleId = roleSelector->currentData().toString();
+					if (roleId.isEmpty() || QMessageBox::question(dialog,
+						QObject::tr("Change room role"), QObject::tr("Apply this role to the member?"))
+						!= QMessageBox::Yes)
+						return;
+					if (!dispatchMemberAction(IProtocolRoomMemberActions::ActionSetRole,
+						[accountId = AAccountId, roomId, memberId, roleId]
+						(IProtocolRoomMemberActions *actions) {
+							return actions->setMemberRole(accountId, roomId, memberId, roleId);
+						}))
+						QMessageBox::warning(dialog, QObject::tr("Room role"),
+							QObject::tr("The room role could not be changed."));
+				});
+			layout->addWidget(roleRow);
+		}
+	}
+	auto addMemberActionButton = [dialog, dispatchMemberAction](QVBoxLayout *targetLayout,
+		const QString &label, IProtocolRoomMemberActions::Action action,
+		const std::function<bool(IProtocolRoomMemberActions *)> &invoke, bool confirm) {
+		QWidget *parent = targetLayout->parentWidget() ? targetLayout->parentWidget() : dialog;
+		QPushButton *button = new QPushButton(label, parent);
+		connect(button, &QPushButton::clicked, dialog, [dialog, dispatchMemberAction,
+			label, action, invoke, confirm]() {
+			if (confirm && QMessageBox::question(dialog, label,
+				QObject::tr("Are you sure you want to continue?")) != QMessageBox::Yes)
+				return;
+			if (!dispatchMemberAction(action, invoke))
+				QMessageBox::warning(dialog, label, QObject::tr("This action is no longer available."));
+		});
+		targetLayout->addWidget(button);
+	};
+	auto addActionSeparator = [dialog](QVBoxLayout *targetLayout) {
+		QWidget *parent = targetLayout->parentWidget() ? targetLayout->parentWidget() : dialog;
+		QFrame *separator = new QFrame(parent);
+		separator->setFrameShape(QFrame::HLine);
+		separator->setFrameShadow(QFrame::Sunken);
+		targetLayout->addWidget(separator);
+	};
+	if (availableActions.testFlag(IProtocolRoomMemberActions::ActionOpenDirectConversation))
+		addMemberActionButton(layout, tr("Send message"), IProtocolRoomMemberActions::ActionOpenDirectConversation,
+			[AAccountId, memberId = AMember.id](IProtocolRoomMemberActions *actions) {
+				return actions->openDirectConversation(AAccountId, memberId);
+			}, false);
+	if (availableActions.testFlag(IProtocolRoomMemberActions::ActionJumpToReadReceipt))
+		addMemberActionButton(layout, tr("Jump to read receipt"), IProtocolRoomMemberActions::ActionJumpToReadReceipt,
+			[AAccountId, roomId = ARoom.id, memberId = AMember.id](IProtocolRoomMemberActions *actions) {
+				return actions->jumpToMemberReadReceipt(AAccountId, roomId, memberId);
+			}, false);
+	if (availableActions.testFlag(IProtocolRoomMemberActions::ActionShareProfile))
+		addMemberActionButton(layout, tr("Share profile"), IProtocolRoomMemberActions::ActionShareProfile,
+			[AAccountId, memberId = AMember.id](IProtocolRoomMemberActions *actions) {
+				return actions->shareMemberProfile(AAccountId, memberId);
+			}, false);
+	if (availableActions.testFlag(IProtocolRoomMemberActions::ActionMentionMember))
+		addMemberActionButton(layout, tr("Mention"), IProtocolRoomMemberActions::ActionMentionMember,
+			[AAccountId, roomId = ARoom.id, memberId = AMember.id](IProtocolRoomMemberActions *actions) {
+				return actions->mentionMember(AAccountId, roomId, memberId);
+			}, false);
+	if (availableActions.testFlag(IProtocolRoomMemberActions::ActionOpenDirectConversation) ||
+		availableActions.testFlag(IProtocolRoomMemberActions::ActionJumpToReadReceipt) ||
+		availableActions.testFlag(IProtocolRoomMemberActions::ActionShareProfile) ||
+		availableActions.testFlag(IProtocolRoomMemberActions::ActionMentionMember))
+		addActionSeparator(layout);
+	QCheckBox *muteMember = new QCheckBox(tr("Mute notifications from this member"), dialog);
+	muteMember->setChecked(messageNotificationMuted(AMessaging->streamId(), AMember.id));
+	connect(muteMember, &QCheckBox::toggled, dialog,
+		[streamId = AMessaging->streamId(), memberId = AMember.id](bool muted) {
+			setMessageNotificationMuted(streamId, memberId, muted);
+		});
+	layout->addWidget(muteMember);
+	QWidget *moderationActionsWidget = new QWidget(dialog);
+	QVBoxLayout *moderationLayout = new QVBoxLayout(moderationActionsWidget);
+	moderationLayout->setContentsMargins(0, 0, 0, 0);
+	layout->addWidget(moderationActionsWidget);
+	auto refreshModerationActions = [moderationActionsWidget, moderationLayout,
+		addMemberActionButton, addActionSeparator, AAccountId,
+		roomId = ARoom.id, memberId = AMember.id](
+		IProtocolRoomMemberActions::MemberActions actions) {
+		while (QLayoutItem *item = moderationLayout->takeAt(0)) {
+			delete item->widget();
+			delete item;
+		}
+		bool hasModerationAction = false;
+		if (actions.testFlag(IProtocolRoomMemberActions::ActionRedactMessages)) {
+			addMemberActionButton(moderationLayout, QObject::tr("Remove messages"),
+				IProtocolRoomMemberActions::ActionRedactMessages,
+				[accountId = AAccountId, roomId, memberId](IProtocolRoomMemberActions *provider) {
+					return provider->redactMemberMessages(accountId, roomId, memberId);
+				}, true);
+			hasModerationAction = true;
+		}
+		if (actions.testFlag(IProtocolRoomMemberActions::ActionKick)) {
+			addMemberActionButton(moderationLayout, QObject::tr("Remove from room"),
+				IProtocolRoomMemberActions::ActionKick,
+				[accountId = AAccountId, roomId, memberId](IProtocolRoomMemberActions *provider) {
+					return provider->kickMember(accountId, roomId, memberId);
+				}, true);
+			hasModerationAction = true;
+		}
+		if (actions.testFlag(IProtocolRoomMemberActions::ActionBan)) {
+			addMemberActionButton(moderationLayout, QObject::tr("Ban"),
+				IProtocolRoomMemberActions::ActionBan,
+				[accountId = AAccountId, roomId, memberId](IProtocolRoomMemberActions *provider) {
+					return provider->banMember(accountId, roomId, memberId);
+				}, true);
+			hasModerationAction = true;
+		}
+		if (hasModerationAction)
+			addActionSeparator(moderationLayout);
+		moderationActionsWidget->setVisible(hasModerationAction);
+	};
+	if (memberActions) {
+		QPointer<QWidget> moderationActionsGuard(moderationActionsWidget);
+		memberActions->observeActionsForMember(AAccountId, ARoom.id, AMember.id, dialog,
+			[moderationActionsGuard, refreshModerationActions](
+				IProtocolRoomMemberActions::MemberActions actions) {
+				if (moderationActionsGuard)
+					refreshModerationActions(actions);
+			});
+	} else {
+		refreshModerationActions(availableActions);
+	}
+	QCheckBox *ignoreMember = new QCheckBox(tr("Ignore this member"), dialog);
+	ignoreMember->setChecked(messageNotificationIgnored(AMessaging->streamId(), AMember.id));
+	connect(ignoreMember, &QCheckBox::toggled, dialog,
+		[streamId = AMessaging->streamId(), memberId = AMember.id](bool ignored) {
+			setMessageNotificationIgnored(streamId, memberId, ignored);
+		});
+	layout->addWidget(ignoreMember);
 	QDialogButtonBox *buttons = new QDialogButtonBox(QDialogButtonBox::Close, dialog);
 	connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
 	layout->addWidget(buttons);
-	dialog->resize(320, 260);
+	dialog->resize(360, 420);
 	dialog->show();
 }
 
@@ -2792,13 +3016,27 @@ IProtocolMessaging *ChatMessageHandler::findLocalHistoryProvider(const QString &
 	return nullptr;
 }
 
-IProtocolMessaging *ChatMessageHandler::findLocalHistoryProviderForAccount(const AccountId &AAccountId,
-	IProtocolRoster *&AProviderRoster, IProtocolCapabilities *&ACapabilities) const
+IProtocolMessaging *ChatMessageHandler::findLocalHistoryProviderForAccount(
+	const AccountId &AAccountId)
 {
-	AProviderRoster = nullptr;
-	ACapabilities = nullptr;
 	if (!FPluginManager || AAccountId.isEmpty())
 		return nullptr;
+
+	const QList<IPlugin *> registries = FPluginManager->pluginInterface("IProtocolMessagingRegistry");
+	for (IPlugin *plugin : registries)
+	{
+		IProtocolMessagingRegistry *registry = plugin
+			? qobject_cast<IProtocolMessagingRegistry *>(plugin->instance()) : nullptr;
+		IProtocolMessaging *messaging = registry ? registry->providerForAccount(AAccountId) : nullptr;
+		if (messaging)
+		{
+			if (!FProtocolMessaging.contains(messaging))
+				FProtocolMessaging.append(messaging);
+			ProtocolHistoryProviderBinding::bind(dynamic_cast<QObject *>(messaging), this,
+				messaging->providesHistoryLoadedSignals());
+			return messaging;
+		}
+	}
 
 	const QList<IPlugin *> providers = FPluginManager->pluginInterface("IProtocolMessaging");
 	for (IPlugin *plugin : providers)
@@ -2806,14 +3044,32 @@ IProtocolMessaging *ChatMessageHandler::findLocalHistoryProviderForAccount(const
 		QObject *instance = plugin ? plugin->instance() : nullptr;
 		IProtocolMessaging *messaging = qobject_cast<IProtocolMessaging *>(instance);
 		IProtocolRoster *roster = qobject_cast<IProtocolRoster *>(instance);
-		IProtocolCapabilities *capabilities = qobject_cast<IProtocolCapabilities *>(instance);
-		if (!messaging || !roster || !capabilities || roster->accountId() != AAccountId ||
+		if (!messaging || !roster || roster->accountId() != AAccountId ||
 			messaging->streamId() != roster->streamId())
 			continue;
-
-		AProviderRoster = roster;
-		ACapabilities = capabilities;
+		if (!FProtocolMessaging.contains(messaging))
+			FProtocolMessaging.append(messaging);
+		ProtocolHistoryProviderBinding::bind(dynamic_cast<QObject *>(messaging), this,
+			messaging->providesHistoryLoadedSignals());
 		return messaging;
+	}
+	return nullptr;
+}
+
+IProtocolCapabilities *ChatMessageHandler::findHistoryCapabilitiesForConversation(
+	const AccountId &AAccountId, const ConversationId &AConversationId) const
+{
+	if (!FPluginManager || AAccountId.isEmpty() || AConversationId.isEmpty())
+		return nullptr;
+
+	const QList<IPlugin *> providers = FPluginManager->pluginInterface("IProtocolCapabilities");
+	for (IPlugin *plugin : providers)
+	{
+		IProtocolCapabilities *capabilities = plugin
+			? qobject_cast<IProtocolCapabilities *>(plugin->instance()) : nullptr;
+		if (ProtocolHistoryActionPolicy::canViewLocalConversationHistoryForIdentity(
+				capabilities, AAccountId, AConversationId))
+			return capabilities;
 	}
 	return nullptr;
 }
@@ -2837,14 +3093,29 @@ void ChatMessageHandler::setupLocalHistoryAction(IChatWindow *AWindow)
 	if (toolBar->property("vacuum.localHistoryActionAdded").toBool())
 		return;
 
-	IProtocolRoster *roster = nullptr;
 	IProtocolCapabilities *capabilities = nullptr;
-	IProtocolMessaging *messaging = findLocalHistoryProviderForAccount(
-		AWindow->accountId(), roster, capabilities);
-	if (!messaging || !roster || !capabilities ||
+	IProtocolMessaging *messaging = findLocalHistoryProviderForAccount(AWindow->accountId());
+	AccountId historyAccountId = AWindow->accountId();
+	if (messaging)
+		capabilities = findHistoryCapabilitiesForConversation(historyAccountId,
+			AWindow->conversationId());
+	if (!messaging || !capabilities) {
+		IProtocolRoster *streamRoster = nullptr;
+		IProtocolCapabilities *streamCapabilities = nullptr;
+		IProtocolMessaging *streamMessaging = findLocalHistoryProvider(
+			AWindow->accountId(), streamRoster, streamCapabilities);
+		if (streamMessaging && streamRoster) {
+			messaging = streamMessaging;
+			capabilities = streamCapabilities;
+			historyAccountId = streamRoster->accountId();
+		}
+	}
+	if (!messaging || !ProtocolHistoryActionPolicy::canShowLocalHistoryViewerButton(
+		capabilities, historyAccountId, AWindow->conversationId(),
+		messaging->providesLocalHistoryBackup()) ||
 		!ProtocolHistoryActionPolicy::canViewLocalConversationHistoryForWindow(
-			capabilities, AWindow->accountId(), AWindow->conversationId(), roster->accountId(),
-			messaging->streamId(), roster->streamId()))
+			capabilities, AWindow->accountId(), AWindow->conversationId(), historyAccountId,
+			messaging->streamId(), messaging->streamId()))
 		return;
 
 	const QString providerStreamId = messaging->streamId();
@@ -2853,33 +3124,97 @@ void ChatMessageHandler::setupLocalHistoryAction(IChatWindow *AWindow)
 	action->setText(tr("View History"));
 	action->setIcon(RSR_STORAGE_MENUICONS, MNI_HISTORY);
 	action->setShortcutId(SCT_MESSAGEWINDOWS_SHOWHISTORY);
-	connect(action, &QAction::triggered, this, [this, providerStreamId, conversationId]() {
-		showLocalConversationHistory(providerStreamId, conversationId);
+	const QPointer<QObject> providerObject(dynamic_cast<QObject *>(messaging));
+	connect(action, &QAction::triggered, this,
+		[this, providerObject, historyAccountId, providerStreamId, conversationId]() {
+			if (providerObject)
+				showLocalHistoryViewer(qobject_cast<IProtocolMessaging *>(providerObject.data()),
+					historyAccountId, providerStreamId, conversationId);
 	});
 	changer->insertAction(action, TBG_MWTBW_ARCHIVE_VIEW);
 	toolBar->setProperty("vacuum.localHistoryActionAdded", true);
 }
 
-void ChatMessageHandler::showLocalConversationHistory(const QString &ARosterStreamId,
+void ChatMessageHandler::showLocalHistoryViewer(IProtocolMessaging *messaging,
+	const AccountId &AAccountId, const QString &AProviderStreamId,
 	const ConversationId &AConversationId)
 {
-	if (!FMessageWidgets)
+	const bool debugEnabled = QCoreApplication::arguments().contains(QStringLiteral("--debug"));
+	IProtocolCapabilities *capabilities = findHistoryCapabilitiesForConversation(AAccountId, AConversationId);
+	const bool streamMatches = messaging && messaging->streamId() == AProviderStreamId;
+	const bool capabilityAllowsHistory =
+		ProtocolHistoryActionPolicy::canViewLocalConversationHistoryForIdentity(
+			capabilities, AAccountId, AConversationId);
+	if (!streamMatches || !capabilityAllowsHistory)
+	{
+		if (debugEnabled)
+			qDebug() << "[LocalHistory] click rejected; provider" << bool(messaging)
+				<< "stream-match" << streamMatches << "capability" << capabilityAllowsHistory;
 		return;
+	}
 
-	IProtocolRoster *roster = nullptr;
-	IProtocolCapabilities *capabilities = nullptr;
-	IProtocolMessaging *messaging = findLocalHistoryProvider(ARosterStreamId, roster, capabilities);
-	if (!messaging || !roster || !capabilities ||
-		!ProtocolHistoryActionPolicy::canViewLocalConversationHistory(capabilities,
-			roster->accountId(), messaging->streamId(), ARosterStreamId, AConversationId))
+	if (!messaging->providesLocalHistoryBackup()) {
+		if (!FMessageWidgets)
+			return;
+		IChatWindow *window = FMessageWidgets->getConversationWindow(AAccountId, AConversationId);
+		if (!window)
+			return;
+		requestProtocolConversationHistorySync(messaging, AConversationId);
+		setupProtocolWindow(window, messaging);
+		renderProtocolHistory(window, messaging);
+		window->showTabPage();
 		return;
+	}
 
-	IChatWindow *window = FMessageWidgets->getConversationWindow(roster->accountId(), AConversationId);
-	if (!window)
-		return;
-	setupProtocolWindow(window, messaging);
-	renderProtocolHistory(window, messaging);
-	window->showTabPage();
+	const QPointer<QObject> providerObject(dynamic_cast<QObject *>(messaging));
+	const QString conversationName = messaging->conversationDisplayName(AConversationId);
+	const bool requested = messaging->requestLocalHistoryBackup(AConversationId, this,
+		[this, providerObject, AAccountId, AProviderStreamId, AConversationId,
+			conversationName, debugEnabled](ProtocolHistoryPage page) {
+			if (!page.success || !providerObject)
+			{
+				if (debugEnabled)
+					qDebug() << "[LocalHistory] backup callback rejected; success" << page.success
+						<< "provider-alive" << bool(providerObject) << "message-count" << page.messages.size();
+				return;
+			}
+			IProtocolMessaging *currentMessaging =
+				qobject_cast<IProtocolMessaging *>(providerObject.data());
+			IProtocolCapabilities *currentCapabilities = findHistoryCapabilitiesForConversation(
+				AAccountId, AConversationId);
+			const bool providerMatches = currentMessaging &&
+				currentMessaging->streamId() == AProviderStreamId &&
+				currentMessaging->providesLocalHistoryBackup();
+			const bool capabilityStillAllowsHistory =
+				ProtocolHistoryActionPolicy::canViewLocalConversationHistoryForIdentity(
+					currentCapabilities, AAccountId, AConversationId);
+			if (!providerMatches || !capabilityStillAllowsHistory)
+			{
+				if (debugEnabled)
+					qDebug() << "[LocalHistory] callback identity rejected; provider-match" << providerMatches
+						<< "capability" << capabilityStillAllowsHistory;
+				return;
+			}
+
+			IPlugin *plugin = FPluginManager ?
+				FPluginManager->pluginInterface("IProtocolHistoryViewer").value(0, nullptr) : nullptr;
+			IProtocolHistoryViewer *viewer = plugin ?
+				qobject_cast<IProtocolHistoryViewer *>(plugin->instance()) : nullptr;
+			if (!viewer)
+			{
+				if (debugEnabled)
+					qDebug() << "[LocalHistory] viewer unavailable; plugin-manager" << bool(FPluginManager)
+						<< "plugin-found" << bool(plugin) << "message-count" << page.messages.size();
+				return;
+			}
+		QWidget *window = viewer->showConversationHistory(AAccountId, AConversationId,
+			conversationName, page.messages);
+		if (debugEnabled)
+			qDebug() << "[LocalHistory] viewer invoked; message-count" << page.messages.size()
+				<< "window-created" << bool(window);
+		});
+	if (debugEnabled && !requested)
+		qDebug() << "[LocalHistory] backup request was not queued";
 }
 
 void ChatMessageHandler::onRosterIndexContextMenu(const QList<IRosterIndex *> &AIndexes, quint32 ALabelId, Menu *AMenu)
@@ -2932,9 +3267,15 @@ void ChatMessageHandler::onRosterIndexContextMenu(const QList<IRosterIndex *> &A
 						Action *historyAction = new Action(AMenu);
 						historyAction->setText(tr("View local conversation history"));
 						historyAction->setIcon(RSR_STORAGE_MENUICONS,MNI_HISTORY);
+						const AccountId historyAccountId = providerRoster->accountId();
+						const QString historyProviderStreamId = messaging->streamId();
+						const QPointer<QObject> providerObject(dynamic_cast<QObject *>(messaging));
 						connect(historyAction, &QAction::triggered, this,
-							[this, rosterStreamId, conversationId]() {
-								showLocalConversationHistory(rosterStreamId, conversationId);
+							[this, providerObject, historyAccountId, historyProviderStreamId, conversationId]() {
+								if (providerObject)
+									showLocalHistoryViewer(
+										qobject_cast<IProtocolMessaging *>(providerObject.data()),
+										historyAccountId, historyProviderStreamId, conversationId);
 							});
 						AMenu->addAction(historyAction,AG_RVCM_CHATMESSAGEHANDLER,true);
 					}

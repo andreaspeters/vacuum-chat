@@ -8,8 +8,9 @@ include("simplemessagestyle.cmake")
 include("${CMAKE_SOURCE_DIR}/src/plugins/plugins.cmake")
 
 if (BUILD_TESTING)
+	set(SIMPLEMESSAGESTYLE_TEST_SOURCE_DIR "${CMAKE_SOURCE_DIR}/tests/simplemessagestyle")
 	add_executable(simplemessagestyle_autoscroll_tests EXCLUDE_FROM_ALL
-		autoscroll_test.cpp
+		${SIMPLEMESSAGESTYLE_TEST_SOURCE_DIR}/autoscroll_test.cpp
 		roundedimage.h
 		simplemessagestyle.cpp
 		simplemessagestyle.h
@@ -25,7 +26,7 @@ if (BUILD_TESTING)
 		${VACUUM_UTILS_NAME}
 		Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::Xml Qt6::Sql)
 	add_executable(simplemessagestyle_message_replace_tests EXCLUDE_FROM_ALL
-		message_replace_test.cpp
+		${SIMPLEMESSAGESTYLE_TEST_SOURCE_DIR}/message_replace_test.cpp
 		roundedimage.h
 		simplemessagestyle.cpp
 		simplemessagestyle.h
@@ -40,11 +41,13 @@ if (BUILD_TESTING)
 		${VACUUM_UTILS_NAME}
 		Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::Xml Qt6::Sql)
 	add_executable(simplemessagestyle_avatar_cache_tests EXCLUDE_FROM_ALL
-		avatar_cache_test.cpp avatarpathcache.h)
+		${SIMPLEMESSAGESTYLE_TEST_SOURCE_DIR}/avatar_cache_test.cpp
+		avatarpathcache.h)
 	target_compile_features(simplemessagestyle_avatar_cache_tests PRIVATE cxx_std_11)
 	target_link_libraries(simplemessagestyle_avatar_cache_tests PRIVATE Qt6::Core)
 	add_executable(simplemessagestyle_message_decoration_tests EXCLUDE_FROM_ALL
-		message_decoration_test.cpp decorationhelper.cpp decorationhelper.h)
+		${SIMPLEMESSAGESTYLE_TEST_SOURCE_DIR}/message_decoration_test.cpp
+		decorationhelper.cpp decorationhelper.h)
 	target_compile_features(simplemessagestyle_message_decoration_tests PRIVATE cxx_std_11)
 	target_link_libraries(simplemessagestyle_message_decoration_tests PRIVATE Qt6::Core Qt6::Gui)
 endif()

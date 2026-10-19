@@ -3,6 +3,7 @@
 
 #include <QDir>
 #include <QSet>
+#include <QStringList>
 #include <definitions/namespaces.h>
 #include <definitions/actiongroups.h>
 #include <definitions/stanzahandlerorders.h>
@@ -124,6 +125,7 @@ protected slots:
 	void onOptionsClosed();
 	void onOptionsChanged(const OptionsNode &ANode);
 private:
+	void dispatchAvatarAction(const QStringList &AAccountIds, const QByteArray &AData);
 	IPluginManager *FPluginManager;
 	IAccountManager *FAccountManager;
 	IXmppStreams *FXmppStreams;
