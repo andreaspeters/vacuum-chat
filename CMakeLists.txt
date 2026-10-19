@@ -23,7 +23,8 @@ if (VACUUM_OS2_CROSS_COMPILE AND NOT CMAKE_TOOLCHAIN_FILE)
 		CACHE FILEPATH "CMake toolchain file" FORCE)
 endif()
 
-project(vacuum-chat VERSION 2.1.0 LANGUAGES CXX)
+set(VERSION "2.2.0")
+project(vacuum-chat VERSION "${VERSION}" LANGUAGES CXX)
 
 set(VACUUM_PYTHON_EXECUTABLE "python3" CACHE STRING "Python interpreter used by the check target")
 set(VACUUM_GIT_EXECUTABLE "git" CACHE STRING "Git executable used by the check target")
@@ -89,6 +90,7 @@ add_custom_target(updatets)
 
 include("src/make/config.cmake")
 include("src/translations/languages.cmake")
+include_directories(BEFORE "${CMAKE_BINARY_DIR}/src")
 include_directories("${CMAKE_SOURCE_DIR}/src")
 
 install(DIRECTORY "resources/menuicons"

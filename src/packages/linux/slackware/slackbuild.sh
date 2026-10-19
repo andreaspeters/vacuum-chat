@@ -39,7 +39,7 @@ builddir="$srcdir"/build
 pkgdir="$srcdir"/pkgdir
 instldir="$srcdir"/instldir
 
-CLIENT_VERSION="$(grep -m 1 "CLIENT_VERSION" ./src/definitions/version.h | awk -F '"' '{print $2}' | awk -F '"' '{print $1}')"
+CLIENT_VERSION="$(cmake "-DPROJECT_ROOT=${CWD}" -P "${CWD}/src/make/project_version.cmake")"
 CLIENT_VERSION_SUFIX="$(grep "CLIENT_VERSION_SUFIX" ./src/definitions/version.h | awk -F '"' '{print $2}' | awk -F '"' '{print $1}')"
 
 

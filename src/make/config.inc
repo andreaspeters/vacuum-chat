@@ -48,6 +48,17 @@ isEmpty(INSTALL_SDK_DIR) {
 }
 
 
+# Read the application version from the canonical CMake VERSION variable.
+CMAKE_VERSION_SCRIPT = $$clean_path($$PWD/../make/project_version.cmake)
+exists($$CMAKE_VERSION_SCRIPT) {
+  CMAKE_PROJECT_ROOT = $$clean_path($$PWD/../..)
+  CLIENT_VERSION_VALUE = $$system(cmake -DPROJECT_ROOT=$$CMAKE_PROJECT_ROOT -P $$CMAKE_VERSION_SCRIPT)
+  isEmpty(CLIENT_VERSION_VALUE) {
+    error("Unable to read CLIENT_VERSION from CMake VERSION")
+  }
+  DEFINES += CLIENT_VERSION='\\\"$$CLIENT_VERSION_VALUE\\\"'
+}
+
 #Preprocessor definitions
 !macx:CONFIG(debug, debug|release) {
   DEFINES               += PLUGINS_DIR='\\\"./plugins\\\"'

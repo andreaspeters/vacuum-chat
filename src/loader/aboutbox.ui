@@ -92,7 +92,7 @@
    <item>
     <widget class="QLabel" name="lblVersion">
      <property name="text">
-      <string notr="true">Version: 2.1.0</string>
+      <string notr="true"></string>
      </property>
      <property name="textFormat">
       <enum>Qt::PlainText</enum>

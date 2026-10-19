@@ -30,8 +30,7 @@
 
 
 ### Version
-VER_NUMBER="$(grep 'CLIENT_VERSION ' src/definitions/version.h | cut -f 2 -d '"')"
-VERSION="${VER_NUMBER}"
+VERSION="$(cmake "-DPROJECT_ROOT=${PWD}" -P "${PWD}/src/make/project_version.cmake")"
 
 ### Namespace
 ORIG_NAME="vacuum"

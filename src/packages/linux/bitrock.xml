@@ -1,7 +1,7 @@
 <project>
     <shortName>vacuum</shortName>
     <fullName>Vacuum Chat</fullName>
-        <version>2.1.0</version>
+        <version>@VERSION@</version>
     <installerFilename>${product_shortname}_${product_version}_${platform_name}-installer.${platform_exec_suffix}</installerFilename>
     <readmeFile>../../../README.md</readmeFile>
     <licenseFile>../../../COPYING</licenseFile>

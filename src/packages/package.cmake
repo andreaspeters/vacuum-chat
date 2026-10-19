@@ -7,12 +7,10 @@ if (WIN32)
 endif (WIN32)
 
 set(CPACK_PACKAGE_NAME "Vacuum Chat")
-set(VERSION "${PROJECT_VERSION}")
-
 set(CPACK_PACKAGE_VERSION_MAJOR "${PROJECT_VERSION_MAJOR}")
 set(CPACK_PACKAGE_VERSION_MINOR "${PROJECT_VERSION_MINOR}")
 set(CPACK_PACKAGE_VERSION_PATCH "${PROJECT_VERSION_PATCH}")
-set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_VERSION "${VERSION}")
 set(CPACK_PACKAGE_VENDOR "https://github.com/andreaspeters/vacuum-chat")
 set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/andreaspeters/vacuum-chat")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Vacuum Chat")
@@ -23,6 +21,26 @@ set(CPACK_RESOURCE_FILE_README "${CMAKE_SOURCE_DIR}/README.md")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/COPYING")
 set(CPACK_RESOURCE_FILE_WELCOME "${CMAKE_SOURCE_DIR}/CHANGELOG.md")
 set(CPACK_PACKAGE_FILE_NAME "vacuum-im-${VERSION}-installer")
+
+# Keep runtime and legacy installer metadata derived from the one project VERSION.
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/src/definitions")
+configure_file(
+	"${CMAKE_SOURCE_DIR}/src/definitions/version.h.in"
+	"${CMAKE_BINARY_DIR}/src/definitions/version.h"
+	@ONLY)
+
+foreach(_versioned_package_file IN ITEMS
+		"macosx/Info.plist"
+		"linux/bitrock.xml"
+		"windows/bitrock.xml"
+		"windows/nsis.nsi")
+	get_filename_component(_versioned_package_dir "${_versioned_package_file}" DIRECTORY)
+	file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/packages/${_versioned_package_dir}")
+	configure_file(
+		"${CMAKE_CURRENT_LIST_DIR}/${_versioned_package_file}"
+		"${CMAKE_BINARY_DIR}/packages/${_versioned_package_file}"
+		@ONLY)
+endforeach()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 	option(CPACK_BINARY_DEB "Enable to build Debian packages" OFF)
