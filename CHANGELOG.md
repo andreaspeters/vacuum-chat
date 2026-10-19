@@ -1,4 +1,4 @@
-## master
+## v2.2.0
 
 - CHANGE: [ui] sync with chat events to reduce load.
 - ADD:    [ui] notification notice.

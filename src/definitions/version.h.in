@@ -1,0 +1,9 @@
+#ifndef DEF_VERSION_H
+#define DEF_VERSION_H
+
+#define CLIENT_NAME             "Vacuum Chat"
+#define CLIENT_VERSION          "@VERSION@"
+#define CLIENT_VERSION_SUFIX    ""
+#define CLIENT_HOME_PAGE        "https://github.com/andreaspeters/vacuum-chat"
+
+#endif
