@@ -519,6 +519,7 @@ def test_matrix_reaction_render_and_send_contract():
     renderer = (root / "src/plugins/chatmessagehandler/chatmessagehandler.cpp").read_text()
     renderer_header = (root / "src/plugins/chatmessagehandler/chatmessagehandler.h").read_text()
     view = (root / "src/plugins/messagewidgets/viewwidget.cpp").read_text()
+    view_header = (root / "src/plugins/messagewidgets/messagebubbleidentity.h").read_text()
     assert 'QStringLiteral("m.reaction")' in matrix
     assert 'QStringLiteral("m.annotation")' in network
     assert 'QStringLiteral("reaction_key")' in network
@@ -528,7 +529,8 @@ def test_matrix_reaction_render_and_send_contract():
     assert 'pendingStored.metadata.insert(metadataIt.key(), metadataIt.value());' in network
     assert 'QStringLiteral("related_event_id")' in renderer
     assert 'onProtocolViewContextMenu' in renderer_header
-    assert 'vacuum.messageId' in view
+    assert 'vacuum.messageId' in view_header
+    assert 'MessageBubbleIdentity::MessageIdProperty' in view
     assert 'FProtocolReactionSenders' in renderer_header
     assert 'setMessageDecoration' in view
     reaction_start = renderer.index('void ChatMessageHandler::updateProtocolReactionDecoration(')
@@ -1770,8 +1772,9 @@ def test_per_target_message_notification_mute_contract():
     assert "setMessageNotificationMuted" in muc_plugin
     assert "index->data(RDR_ACCOUNT_ID).toString()" in context_menu
     compact_notifications = notifications.replace(" ", "").replace("\t", "").replace("\r", "").replace("\n", "")
-    assert "messageNotificationMuted(muteStreamId,notification.conversationId)" in compact_notifications
-    assert "path == OPV_MESSAGES_MUTED_TARGETS" in notifications
+    assert "messageNotificationMutedForTarget(muteStreamId,notification.conversationId,notification.senderId)" in compact_notifications
+    assert "messageNotificationIgnoredForTarget(muteStreamId,notification.conversationId,notification.senderId)" in compact_notifications
+    assert "path == OPV_MESSAGES_MUTED_TARGETS || path == OPV_MESSAGES_IGNORED_MEMBERS" in notifications
     print("  ✓ muted targets persist and suppress contact/room message notifications")
 
 def test_encrypted_matrix_formatted_body_contract():

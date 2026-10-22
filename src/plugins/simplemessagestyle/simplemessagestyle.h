@@ -96,7 +96,7 @@ public:
 	virtual bool setMessageDecoration(QWidget *AWidget, const QString &AMessageId,
 		const QString &ADecorationId, const QString &AHtml);
 	virtual bool replaceMessageContent(QWidget *AWidget, const QString &AMessageId,
-		const QString &AHtml);
+		const QString &AHtml, const QString &AEventId = QString(), bool AModified = false);
 	//ISimpleMessageStyle
 	virtual QMap<QString, QVariant> infoValues() const;
 	virtual QList<QString> variants() const;

@@ -47,6 +47,7 @@ public:
         qreal horizontalInsets, bool outgoing);
     static QRectF bubbleRectForDocumentContent(const QRectF &currentRect,
         const QTextDocument &contentDocument, qreal horizontalInsets, bool outgoing);
+    static QString renderEditedMessageHtml(const QString &body, bool modified);
 
 private:
     DecorationHelper() = default;

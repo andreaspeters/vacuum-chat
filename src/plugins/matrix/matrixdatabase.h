@@ -1,6 +1,8 @@
 #ifndef MATRIXDATABASE_H
 #define MATRIXDATABASE_H
 
+#include "matrixmemberdisplaynameversion.h"
+
 #include <QString>
 #include <QSqlDatabase>
 #include <QDateTime>
@@ -132,6 +134,8 @@ public:
                                const QString &eventId);
     QString historicalMemberDisplayName(const QString &roomId, const QString &userId,
                                         qint64 timestamp) const;
+    QList<MatrixMemberDisplayNameVersion> historicalMemberDisplayNameHistory(
+        const QString &roomId, const QString &userId) const;
     bool saveDirectRooms(const QSet<QString> &roomIds);
     QSet<QString> directRooms() const;
     bool setReadMarkers(const QString &roomId, const QString &fullyReadEventId, const QString &readEventId);

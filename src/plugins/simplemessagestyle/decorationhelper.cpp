@@ -116,6 +116,15 @@ QString DecorationHelper::bubbleMarkerHtml(const QString &marker)
         .arg(marker.toHtmlEscaped());
 }
 
+QString DecorationHelper::renderEditedMessageHtml(const QString &body, bool modified)
+{
+    if (!modified)
+        return body;
+
+    return QStringLiteral("<table width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr><td align=\"right\" style=\"font-size:6px; color:#000000; line-height:6px; margin:0; padding:0;\">(edited)</td></tr></table>") +
+        body;
+}
+
 QSet<QUrl> DecorationHelper::imageResourcesFromHtml(const QString &html)
 {
     static const QRegularExpression imageSourceExpression(

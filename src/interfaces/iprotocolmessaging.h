@@ -52,6 +52,10 @@ public:
     { (void)conversationId; return false; }
     virtual bool supportsReplies(const ConversationId &conversationId) const
     { (void)conversationId; return false; }
+    virtual bool supportsMessageEdits(const ConversationId &conversationId) const
+    { (void)conversationId; return false; }
+    virtual bool editMessage(const BasicMessage &message, const QString &newBody)
+    { (void)message; (void)newBody; return false; }
     virtual bool providesAvatarUpdateSignals() const { return false; }
     virtual bool providesHistoryLoadedSignals() const { return false; }
     virtual bool providesMessageDeliverySignals() const { return false; }

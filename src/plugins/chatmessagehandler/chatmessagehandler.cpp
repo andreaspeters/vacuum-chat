@@ -565,7 +565,7 @@ void ChatMessageHandler::onProtocolViewContextMenu(const QPoint &APosition,
 		return;
 
 	const QString displayedMessageId = AMenu->property("vacuum.messageId").toString();
-	if (displayedMessageId.isEmpty())
+	if (displayedMessageId.isEmpty() && AMenu->property("vacuum.eventId").toString().isEmpty())
 		return;
 	IProtocolMessaging *messaging = nullptr;
 	for (IProtocolMessaging *candidate : std::as_const(FProtocolMessaging))
@@ -578,13 +578,16 @@ void ChatMessageHandler::onProtocolViewContextMenu(const QPoint &APosition,
 
 	const QString eventPrefix = messaging->streamId() + QChar('\n') +
 		window->conversationId() + QChar('\n');
-	QString eventId;
-	for (auto it = FProtocolEventMessageIds.constBegin(); it != FProtocolEventMessageIds.constEnd(); ++it) {
-		if (it.key().startsWith(eventPrefix) && it.value() == displayedMessageId) {
-			const QString candidateId = it.key().mid(eventPrefix.size());
-			if (messaging->isEventIdLike(candidateId)) {
-				eventId = candidateId;
-				break;
+	QString eventId = AMenu->property("vacuum.eventId").toString();
+	if (!messaging->isEventIdLike(eventId)) {
+		eventId.clear();
+		for (auto it = FProtocolEventMessageIds.constBegin(); it != FProtocolEventMessageIds.constEnd(); ++it) {
+			if (it.key().startsWith(eventPrefix) && it.value() == displayedMessageId) {
+				const QString candidateId = it.key().mid(eventPrefix.size());
+				if (messaging->isEventIdLike(candidateId)) {
+					eventId = candidateId;
+					break;
+				}
 			}
 		}
 	}
@@ -597,9 +600,13 @@ void ChatMessageHandler::onProtocolViewContextMenu(const QPoint &APosition,
 		return;
 
 	QString targetSenderName = tr("Unknown sender");
+	BasicMessage targetMessage;
+	bool hasTargetMessage = false;
 	const QString historyKey = messaging->streamId() + QChar('\n') + window->conversationId();
 	for (const BasicMessage &target : FProtocolConversationMessages.value(historyKey))
-		if (target.messageId() == eventId) {
+		if (target.messageId() == eventId || target.messageId() == displayedMessageId) {
+			targetMessage = target;
+			hasTargetMessage = true;
 			targetSenderName = target.metadata().value(QStringLiteral("sender_name")).toString();
 			if (targetSenderName.isEmpty())
 				targetSenderName = target.sender();
@@ -607,6 +614,23 @@ void ChatMessageHandler::onProtocolViewContextMenu(const QPoint &APosition,
 		}
 
 	const QString conversationId = window->conversationId();
+	if (hasTargetMessage && messaging->supportsMessageEdits(conversationId) &&
+		(targetMessage.direction() == BasicMessage::Outgoing ||
+		 targetMessage.metadata().value(QStringLiteral("sender_is_self")).toBool())) {
+		Action *editAction = new Action(AMenu);
+		editAction->setText(tr("Edit message…"));
+		AMenu->addAction(editAction, AG_DEFAULT, true);
+		connect(editAction, &QAction::triggered, this,
+			[this, messaging, targetMessage, parent = window->instance()]() {
+				if (!messaging->supportsMessageEdits(targetMessage.conversationId()))
+					return;
+				bool accepted = false;
+				const QString editedBody = QInputDialog::getMultiLineText(parent,
+					tr("Edit message"), tr("Message:"), targetMessage.body(), &accepted);
+				if (accepted && editedBody != targetMessage.body())
+					messaging->editMessage(targetMessage, editedBody);
+			});
+	}
 	if (messaging->supportsReplies(conversationId)) {
 		Action *replyAction = new Action(AMenu);
 		replyAction->setText(tr("Reply"));
@@ -1175,6 +1199,50 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 		addProtocolReaction(AWindow, AMessaging, AMessage);
 		return;
 	}
+	if (AMessage.metadata().value(QStringLiteral("relation_type")).toString() ==
+		QStringLiteral("m.replace")) {
+		const QVariantMap replacement = AMessage.metadata().value(
+			QStringLiteral("replacement_content")).toMap();
+		const QString targetEventId = AMessage.metadata().value(
+			QStringLiteral("related_event_id")).toString();
+		const QString historyKey = AMessaging->streamId() + QChar('\n') + AMessage.conversationId();
+		auto history = FProtocolConversationMessages.find(historyKey);
+		if (history != FProtocolConversationMessages.end() && !targetEventId.isEmpty() &&
+			!replacement.value(QStringLiteral("body")).toString().isNull()) {
+			auto target = std::find_if(history->begin(), history->end(),
+				[&targetEventId](const BasicMessage &message) {
+					return message.messageId() == targetEventId ||
+						message.metadata().value(QStringLiteral("event_id")).toString() == targetEventId;
+				});
+			if (target != history->end() && target->sender() == AMessage.sender()) {
+				BasicMessage edited = *target;
+				edited.setBody(replacement.value(QStringLiteral("body")).toString());
+				QVariantMap metadata = edited.metadata();
+				for (const QString &key : {QStringLiteral("format"), QStringLiteral("formatted_body"),
+					QStringLiteral("m.mentions"), QStringLiteral("msgtype")}) {
+					if (replacement.contains(key))
+						metadata.insert(key, replacement.value(key));
+					else
+						metadata.remove(key);
+				}
+				metadata.insert(QStringLiteral("edited"), true);
+				edited.setMetadata(metadata);
+				*target = edited;
+				history->erase(std::remove_if(history->begin(), history->end(),
+					[&AMessage](const BasicMessage &message) {
+						return message.messageId() == AMessage.messageId();
+					}), history->end());
+				FProtocolRenderedMessages.remove(prefix + AMessage.messageId());
+				FProtocolRenderedMessages.remove(prefix + targetEventId);
+				FProtocolEventMessageIds.remove(prefix + AMessage.messageId());
+				// Some message styles cannot replace an existing bubble by ID. Rebuild
+				// from the updated canonical history instead of appending a duplicate.
+				scheduleProtocolConversationRebuild(AWindow, AMessaging, historyKey,
+					dynamic_cast<QObject *>(AMessaging));
+			}
+		}
+		return;
+	}
 	if (AMessage.direction() == BasicMessage::Incoming &&
 		messageNotificationIgnored(AMessaging->streamId(), AMessage.sender()))
 		return;
@@ -1231,7 +1299,11 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 		return;
 	IMessageContentOptions options;
 	options.kind = IMessageContentOptions::KindMessage;
+	options.modified = AMessage.metadata().value(QStringLiteral("edited")).toBool();
 	options.messageId = existingBubbleId.isEmpty() ? AMessage.messageId() : existingBubbleId;
+	options.eventId = AMessage.metadata().value(QStringLiteral("event_id")).toString();
+	if (!AMessaging->isEventIdLike(options.eventId))
+		options.eventId = AMessaging->isEventIdLike(AMessage.messageId()) ? AMessage.messageId() : QString();
 	const bool isVacuumUser = AMessage.direction() == BasicMessage::Outgoing ||
 		AMessage.metadata().value(QStringLiteral("sender_is_self")).toBool();
 	options.direction = isVacuumUser ? IMessageContentOptions::DirectionOut : IMessageContentOptions::DirectionIn;
@@ -1279,7 +1351,8 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 	const bool replaceExistingContent = AReplaceExisting || !existingBubbleId.isEmpty();
 	const auto appendOrReplace = [AWindow, &options, replaceExistingContent](const QString &html) {
 		IViewWidget *viewWidget = AWindow->viewWidget();
-		if (!replaceExistingContent || !viewWidget->replaceMessage(options.messageId, html))
+		if (!replaceExistingContent || !viewWidget->replaceMessage(options.messageId, html,
+			options.eventId, options.modified))
 			viewWidget->appendHtml(html, options);
 	};
 

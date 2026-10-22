@@ -267,7 +267,11 @@ bool SimpleMessageStyle::appendContent(QWidget *AWidget, const QString &AHtml, c
 		fillContentKeywords(html,AOptions,sameSender,view);
 		QString contentHtml = AHtml;
 		contentHtml.remove(QChar::Null);
-		const QString preparedMessage = prepareMessage(contentHtml,AOptions);
+		const bool modifiedMessage = AOptions.modified &&
+			AOptions.kind == IMessageContentOptions::KindMessage;
+		const QString messageBody = prepareMessage(contentHtml,AOptions);
+		const QString preparedMessage = modifiedMessage && !modernChat
+			? DecorationHelper::renderEditedMessageHtml(messageBody, true) : messageBody;
 		QString bubbleMarker;
 		if (modernChat && AOptions.kind == IMessageContentOptions::KindMessage)
 		{
@@ -280,7 +284,6 @@ bool SimpleMessageStyle::appendContent(QWidget *AWidget, const QString &AHtml, c
 		{
 			html.replace("%message%", preparedMessage);
 		}
-
 		WidgetStatus &wstatus = FWidgetStatus[AWidget];
 		wstatus.suppressTailCorrection = AOptions.noScroll;
 		const bool shouldFollowTail = wstatus.followTail && !AOptions.noScroll;
@@ -319,7 +322,7 @@ bool SimpleMessageStyle::appendContent(QWidget *AWidget, const QString &AHtml, c
 						? QColor(QStringLiteral("#e8f1ff")) : QColor(QStringLiteral("#f1f2f4"));
 				view->addMessageBubble(bubbleTable, AOptions.messageId, preparedMessage, fill,
 					AOptions.direction == IMessageContentOptions::DirectionOut,
-					sourceAnchorRect, sourceTextCursor);
+					sourceAnchorRect, sourceTextCursor, AOptions.eventId, modifiedMessage);
 			}
 		}
 
@@ -354,7 +357,7 @@ bool SimpleMessageStyle::setMessageDecoration(QWidget *AWidget, const QString &A
 }
 
 bool SimpleMessageStyle::replaceMessageContent(QWidget *AWidget, const QString &AMessageId,
-	const QString &AHtml)
+	const QString &AHtml, const QString &AEventId, bool AModified)
 {
 	if (!FWidgetStatus.contains(AWidget) || AMessageId.isEmpty())
 		return false;
@@ -363,7 +366,7 @@ bool SimpleMessageStyle::replaceMessageContent(QWidget *AWidget, const QString &
 		return false;
 	if (isModernChatStyle(FStylePath))
 		roundModernChatImages(view, AHtml);
-	return view->replaceMessageBubbleContent(AMessageId, AHtml);
+	return view->replaceMessageBubbleContent(AMessageId, AHtml, AEventId, AModified);
 }
 
 QMap<QString, QVariant> SimpleMessageStyle::infoValues() const

@@ -1173,6 +1173,27 @@ QString MatrixDatabase::historicalMemberDisplayName(const QString &roomId, const
     return query.value(0).toString();
 }
 
+QList<MatrixMemberDisplayNameVersion> MatrixDatabase::historicalMemberDisplayNameHistory(
+    const QString &roomId, const QString &userId) const
+{
+    QList<MatrixMemberDisplayNameVersion> versions;
+    QSqlQuery query(FDatabase);
+    query.prepare(QStringLiteral(
+        "SELECT valid_from, display_name FROM room_member_history "
+        "WHERE room_id = :room_id AND user_id = :user_id ORDER BY valid_from ASC"));
+    query.bindValue(QStringLiteral(":room_id"), roomId);
+    query.bindValue(QStringLiteral(":user_id"), userId);
+    if (!query.exec())
+        return versions;
+    while (query.next()) {
+        MatrixMemberDisplayNameVersion version;
+        version.validFrom = query.value(0).toLongLong();
+        version.displayName = query.value(1).toString();
+        versions.append(version);
+    }
+    return versions;
+}
+
 bool MatrixDatabase::setReadMarkers(const QString &roomId, const QString &fullyReadEventId, const QString &readEventId)
 {
     QSqlQuery query(FDatabase);

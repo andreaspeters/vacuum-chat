@@ -42,3 +42,47 @@ MatrixTextMessagePayload createMatrixTextMessagePayload(
 	payload.localEchoMetadata.insert(QStringLiteral("m.mentions"), QVariantMap());
 	return payload;
 }
+
+QJsonObject createMatrixEditMessageContent(const QString &body,
+	const QVariantMap &metadata, const QString &originalEventId)
+{
+	if (body.isEmpty() || originalEventId.isEmpty())
+		return QJsonObject();
+	const QJsonObject replacement = createMatrixTextMessagePayload(body, metadata).content;
+	QJsonObject content = replacement;
+	content.insert(QStringLiteral("body"), QStringLiteral("* ") + body);
+	content.insert(QStringLiteral("formatted_body"), QStringLiteral("* ") +
+		replacement.value(QStringLiteral("formatted_body")).toString());
+	content.insert(QStringLiteral("m.new_content"), replacement);
+	content.insert(QStringLiteral("m.relates_to"), QJsonObject{
+		{QStringLiteral("rel_type"), QStringLiteral("m.replace")},
+		{QStringLiteral("event_id"), originalEventId}});
+	return content;
+}
+
+MatrixEncryptedRoomEventPayload splitMatrixEncryptedRoomEventContent(
+	const QString &roomId, const QString &eventType, const QJsonObject &content)
+{
+	QJsonObject encryptedContent = content;
+	QJsonObject outerContent;
+	const QJsonObject relation = encryptedContent.value(QStringLiteral("m.relates_to")).toObject();
+	if (!relation.isEmpty()) {
+		encryptedContent.remove(QStringLiteral("m.relates_to"));
+		outerContent.insert(QStringLiteral("m.relates_to"), relation);
+	}
+
+	return {
+		QJsonObject{{QStringLiteral("room_id"), roomId},
+			{QStringLiteral("type"), eventType},
+			{QStringLiteral("content"), encryptedContent}},
+		outerContent};
+}
+
+QJsonObject matrixRelationForEvent(const QJsonObject &outerContent,
+	const QJsonObject &decryptedContent)
+{
+	const QJsonObject clearRelation = outerContent.value(QStringLiteral("m.relates_to")).toObject();
+	return clearRelation.isEmpty()
+		? decryptedContent.value(QStringLiteral("m.relates_to")).toObject()
+		: clearRelation;
+}

@@ -16,6 +16,7 @@
 #include <utils/animatedtextbrowser.h>
 
 class QKeyEvent;
+class QLabel;
 class QShowEvent;
 class QWheelEvent;
 
@@ -31,10 +32,12 @@ public:
 	void addMessageBubble(QTextTable *ATable, const QString &AMessageId,
 		const QString &AHtml, const QColor &AFill, bool AOutgoing = false,
 		const QRectF &ASourceAnchorRect = QRectF(),
-		const QTextCursor &ASourceTextCursor = QTextCursor());
+		const QTextCursor &ASourceTextCursor = QTextCursor(),
+		const QString &AEventId = QString(), bool AModified = false);
 	bool setMessageDecoration(const QString &AMessageId, const QString &ADecorationId,
 		const QString &AHtml);
-	bool replaceMessageBubbleContent(const QString &AMessageId, const QString &AHtml);
+	bool replaceMessageBubbleContent(const QString &AMessageId, const QString &AHtml,
+		const QString &AEventId = QString(), bool AModified = false);
 	void clearMessageBubbles();
 	QTextDocumentFragment bubbleSelection() const;
 	QTextDocumentFragment bubbleTextUnderPosition(const QPoint &APosition) const;
@@ -53,6 +56,7 @@ private:
 		QPointer<QTextBrowser> content;
 		QPointer<QTextBrowser> sideContent;
 		QPointer<QTextBrowser> reactionContent;
+		QPointer<QLabel> editedIndicator;
 		QString messageId;
 		QString html;
 		QString renderedHtml;
@@ -69,6 +73,7 @@ private:
 	void notifyUserScrollPositionChanged();
 	void updateMessageBubbleGeometry();
 	void updateMessageBubbleResource(const QUrl &AUrl);
+	void setBubbleEditedIndicator(BubbleOverlay &overlay, bool modified);
 	void scheduleMessageBubbleGeometryUpdate();
 	QSet<QString> FPendingImageResources;
 	QList<BubbleOverlay> FBubbleOverlays;

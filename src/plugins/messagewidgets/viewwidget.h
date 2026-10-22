@@ -31,7 +31,8 @@ public:
 	virtual void appendHtml(const QString &AHtml, const IMessageContentOptions &AOptions);
 	virtual void appendText(const QString &AText, const IMessageContentOptions &AOptions);
 	virtual void appendMessage(const Message &AMessage, const IMessageContentOptions &AOptions);
-	virtual bool replaceMessage(const QString &AMessageId, const QString &AHtml);
+	virtual bool replaceMessage(const QString &AMessageId, const QString &AHtml,
+		const QString &AEventId = QString(), bool AModified = false);
 	virtual bool setMessageDecoration(const QString &AMessageId, const QString &ADecorationId,
 		const QString &AHtml);
 	virtual void contextMenuForView(const QPoint &APosition, const QTextDocumentFragment &ASelection, Menu *AMenu);

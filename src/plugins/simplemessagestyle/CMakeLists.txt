@@ -50,6 +50,11 @@ if (BUILD_TESTING)
 		decorationhelper.cpp decorationhelper.h)
 	target_compile_features(simplemessagestyle_message_decoration_tests PRIVATE cxx_std_11)
 	target_link_libraries(simplemessagestyle_message_decoration_tests PRIVATE Qt6::Core Qt6::Gui)
+	add_executable(simplemessagestyle_edited_indicator_tests EXCLUDE_FROM_ALL
+		${SIMPLEMESSAGESTYLE_TEST_SOURCE_DIR}/edited_indicator_test.cpp
+		decorationhelper.cpp decorationhelper.h)
+	target_compile_features(simplemessagestyle_edited_indicator_tests PRIVATE cxx_std_11)
+	target_link_libraries(simplemessagestyle_edited_indicator_tests PRIVATE Qt6::Core Qt6::Gui)
 endif()
 
 if (IS_ENABLED)

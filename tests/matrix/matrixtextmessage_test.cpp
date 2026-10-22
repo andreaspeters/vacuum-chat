@@ -1,5 +1,7 @@
 #include "matrixtextmessage.h"
 
+#include <interfaces/matrixreply.h>
+
 #include <QCoreApplication>
 #include <QJsonValue>
 
@@ -67,6 +69,21 @@ int main(int argc, char **argv)
 		"generic image attachment metadata maps to the Matrix image wire type");
 	passed &= check(matrixMessageTypeForMetadata(QVariantMap()) == QStringLiteral("m.text"),
 		"ordinary messages without a media type remain Matrix text messages");
+
+	QVariantMap replyMetadata;
+	replyMetadata.insert(QStringLiteral("reply_to_event_id"), QStringLiteral("$target-event"));
+	const MatrixTextMessagePayload reply = createMatrixTextMessagePayload(
+		QStringLiteral("reply text"), replyMetadata);
+	const QJsonObject outgoing = MatrixReply::applyRelation(reply.content,
+		replyMetadata.value(QStringLiteral("reply_to_event_id")).toString());
+	passed &= check(outgoing.value(QStringLiteral("m.relates_to")).toObject()
+		.value(QStringLiteral("m.in_reply_to")).toObject()
+		.value(QStringLiteral("event_id")).toString() == QStringLiteral("$target-event"),
+		"reply relation targets the original event");
+	passed &= check(outgoing.value(QStringLiteral("body")).toString() == QStringLiteral("reply text") &&
+		outgoing.contains(QStringLiteral("formatted_body")) &&
+		reply.localEchoMetadata.contains(QStringLiteral("formatted_body")),
+		"reply content and local echo preserve formatted message metadata");
 
 	return passed ? 0 : 1;
 }

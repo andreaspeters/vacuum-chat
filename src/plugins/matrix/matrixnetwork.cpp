@@ -3,6 +3,8 @@
 #include "matrixdatabaseworker.h"
 #include "matrixssss.h"
 #include "matrixroommemberpolicy.h"
+#include "matrixmemberdisplaynamecache.h"
+#include "matrixtextmessage.h"
 #include "interfaces/iprotocolpresence.h"
 #include "interfaces/ichatstates.h"
 #include "interfaces/matrixreply.h"
@@ -2374,12 +2376,11 @@ void MatrixNetwork::sendRoomEvent(const QString &roomId, const QString &eventTyp
 			return;
 		}
 		QByteArray encryptedPickle;
-		const QJsonObject megolmEvent{
-			{QStringLiteral("room_id"), roomId},
-			{QStringLiteral("type"), eventType},
-			{QStringLiteral("content"), content}};
+		const MatrixEncryptedRoomEventPayload encryptedPayload =
+			splitMatrixEncryptedRoomEventContent(roomId, eventType, content);
 		QByteArray ciphertext = FOlmCrypto.encryptMegolmData(roomId,
-			QJsonDocument(megolmEvent).toJson(QJsonDocument::Compact), sessionId, encryptedPickle);
+			QJsonDocument(encryptedPayload.plaintextEvent).toJson(QJsonDocument::Compact),
+			sessionId, encryptedPickle);
 		if (ciphertext.isEmpty()) {
 			emit sendError(QStringLiteral("Encrypted Matrix message could not be encrypted"));
 			return;
@@ -2410,6 +2411,9 @@ void MatrixNetwork::sendRoomEvent(const QString &roomId, const QString &eventTyp
 			{QStringLiteral("device_id"), FDeviceId},
 			{QStringLiteral("sender_key"), senderKey},
 			{QStringLiteral("session_id"), sessionId}};
+		for (auto it = encryptedPayload.outerContent.constBegin();
+			it != encryptedPayload.outerContent.constEnd(); ++it)
+			wireContent.insert(it.key(), it.value());
 		sendType = QStringLiteral("m.room.encrypted");
 	}
 	MatrixTextEvent pending;
@@ -3943,6 +3947,15 @@ void MatrixNetwork::onSyncFinished(QNetworkReply *reply)
 	}
 	QString nextBatch = obj.value("next_batch").toString();
 	QList<MatrixTextEvent> events;
+	MatrixMemberDisplayNameCache historicalMemberNameCache;
+	const MatrixMemberDisplayNameCache::HistoryLoader loadHistoricalMemberNames =
+		[this](const QString &roomId, const QString &userId) {
+			QList<MatrixMemberDisplayNameVersion> versions;
+			runDatabase([&](MatrixDatabase &database) {
+				versions = database.historicalMemberDisplayNameHistory(roomId, userId);
+			});
+			return versions;
+		};
 	QSet<QString> limitedTimelineRooms;
 	QMap<QString, QJsonObject> roomPowerLevelsUpdates;
 	const QJsonObject rooms = obj.value("rooms").toObject();
@@ -5389,12 +5402,10 @@ void MatrixNetwork::onSyncFinished(QNetworkReply *reply)
 					}
 					break;
 				}
-			QString historicalName;
-			runDatabase([&](MatrixDatabase &database) {
-				historicalName = database.historicalMemberDisplayName(
-					roomId, matrixEvent.userId,
-					event.value(QStringLiteral("origin_server_ts")).toVariant().toLongLong());
-			});
+			const QString historicalName = historicalMemberNameCache.displayName(
+				roomId, matrixEvent.userId,
+				event.value(QStringLiteral("origin_server_ts")).toVariant().toLongLong(),
+				loadHistoricalMemberNames);
 			if (!historicalName.isEmpty())
 				matrixEvent.metadata.insert(QStringLiteral("sender_name"), historicalName);
 			const QString transactionId = event.value(QStringLiteral("unsigned")).toObject()
@@ -5491,7 +5502,7 @@ void MatrixNetwork::onSyncFinished(QNetworkReply *reply)
 						? event.value(QStringLiteral("redacts")).toString()
 						: contentRedacts);
 			}
-			const QJsonObject relation = messageContent.value(QStringLiteral("m.relates_to")).toObject();
+			const QJsonObject relation = matrixRelationForEvent(eventContent, messageContent);
 			if (!relation.isEmpty()) {
 				const QString relationType = relation.value(QStringLiteral("rel_type")).toString();
 				const QString relatedEventId = relation.value(QStringLiteral("event_id")).toString();

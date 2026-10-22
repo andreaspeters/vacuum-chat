@@ -1,3 +1,10 @@
+## master
+
+- ADD:    [ui,matrix] Edit already send messages.
+- FIX:    [matrix] message reply bubble
+- ADD:    [matrix, ui] eventid to qframe message object therefore vacuum can find the message easier.
+- FIX:    [matrix] heavy load during message sync.
+
 ## v2.2.0
 
 - CHANGE: [ui] sync with chat events to reduce load.
@@ -9,9 +16,9 @@
 - ADD:    [ui,matrix,xmpp] send images via copy'n paste.
 - FIX:    [tools] Spellchecker
 - FIX:    [matrix] Chat history backfill didn't synced messages.
-- FIX:    [matrix, ui] Do not open vacuum-media:// schemes externaly."
+- FIX:    [matrix,ui] Do not open vacuum-media:// schemes externaly."
 - FIX:    [matrix] Set messages status as ready."
-- FIX:    [matrix, ui] Replace classic style emojies with unicode."
+- FIX:    [matrix,ui] Replace classic style emojies with unicode."
 
 ## v2.1.0
 

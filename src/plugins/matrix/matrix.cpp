@@ -1545,6 +1545,31 @@ bool Matrix::sendMessage(const BasicMessage &message)
 	return true;
 }
 
+bool Matrix::supportsMessageEdits(const ConversationId &conversationId) const
+{
+	return FMatrixNetwork && FNetworkLoggedIn && conversationId.startsWith(QLatin1Char('!'));
+}
+
+bool Matrix::editMessage(const BasicMessage &message, const QString &newBody)
+{
+	const QString eventId = message.metadata().value(QStringLiteral("event_id"),
+		message.messageId()).toString();
+	if (!supportsMessageEdits(message.conversationId()) || !isEventIdLike(eventId) ||
+		newBody.isEmpty() || message.metadata().value(QStringLiteral("msgtype"),
+			QStringLiteral("m.text")).toString() != QStringLiteral("m.text") ||
+		message.sender() != FNetworkUserId)
+		return false;
+
+	QVariantMap sourceMetadata = message.metadata();
+	sourceMetadata.remove(QStringLiteral("formatted_body"));
+	const QJsonObject content = createMatrixEditMessageContent(newBody, sourceMetadata, eventId);
+	if (content.isEmpty())
+		return false;
+	const QString txnId = QStringLiteral("m_") + QUuid::createUuid().toString(QUuid::WithoutBraces);
+	queueSendMessageEvent(message.conversationId(), content, txnId);
+	return true;
+}
+
 void Matrix::queueSendMessageEvent(const QString &roomId, const QJsonObject &content, const QString &transactionId)
 {
 	QMetaObject::invokeMethod(FMatrixNetwork,
@@ -2060,6 +2085,7 @@ void Matrix::onNetworkMessageReceived(const BasicMessage &message)
 		normalizedMessage.metadata().value(QStringLiteral("room_type")).toString() != QStringLiteral("m.space") &&
 		room(normalizedMessage.conversationId()).roomType != QStringLiteral("m.space") &&
 		normalizedMessage.metadata().value(QStringLiteral("event_type")).toString() != QStringLiteral("m.reaction") &&
+		normalizedMessage.metadata().value(QStringLiteral("relation_type")).toString() != QStringLiteral("m.replace") &&
 		!normalizedMessage.metadata().value(QStringLiteral("historical")).toBool() &&
 		normalizedMessage.direction() == BasicMessage::Incoming &&
 		normalizedMessage.sender() != FNetworkUserId &&

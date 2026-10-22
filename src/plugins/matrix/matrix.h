@@ -94,6 +94,8 @@ public:
 	virtual void appendNotification(const ProtocolNotification &notification) override;
 	virtual void removeNotification(const QString &id) override;
 	virtual bool sendMessage(const BasicMessage &message);
+	bool supportsMessageEdits(const ConversationId &conversationId) const override;
+	bool editMessage(const BasicMessage &message, const QString &newBody) override;
 	virtual bool supportsRoomInvites() const override;
 	virtual bool inviteUserToRoom(const ConversationId &roomId, const UserId &userId) override;
 	virtual bool supportsReactions(const ConversationId &conversationId) const;

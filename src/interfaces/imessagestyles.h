@@ -65,15 +65,18 @@ struct IMessageContentOptions
 		status = StatusEmpty;
 		direction = DirectionIn;
 		noScroll = false;
+		modified = false;
 	}
 	int kind;
 	int type;
 	int status;
 	int direction;
 	bool noScroll;
+	bool modified;
 	QDateTime time;
 	QString timeFormat;
 	QString messageId;
+	QString eventId;
 	QString senderId;
 	QString senderName;
 	QString senderAvatar;
@@ -103,9 +106,9 @@ public:
 		return false;
 	}
 	virtual bool replaceMessageContent(QWidget *AWidget, const QString &AMessageId,
-		const QString &AHtml)
+		const QString &AHtml, const QString &AEventId = QString(), bool AModified = false)
 	{
-		(void)AWidget; (void)AMessageId; (void)AHtml;
+		(void)AWidget; (void)AMessageId; (void)AHtml; (void)AEventId; (void)AModified;
 		return false;
 	}
 protected:

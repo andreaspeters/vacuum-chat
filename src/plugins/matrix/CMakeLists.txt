@@ -88,6 +88,13 @@ if (BUILD_TESTING)
 		"${CMAKE_SOURCE_DIR}/src" "${CMAKE_SOURCE_DIR}/src/plugins/matrix")
 	target_compile_features(matrix_text_message_tests PRIVATE cxx_std_17)
 	target_link_libraries(matrix_text_message_tests PRIVATE Qt6::Core Qt6::Gui)
+	add_executable(matrix_edit_message_tests EXCLUDE_FROM_ALL
+		"${MATRIX_TEST_SOURCE_DIR}/matrixeditmessage_test.cpp" matrixtextmessage.cpp ../../utils/matrixhtml.cpp)
+	target_include_directories(matrix_edit_message_tests PRIVATE
+		"${CMAKE_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}")
+	target_compile_features(matrix_edit_message_tests PRIVATE cxx_std_17)
+	target_link_libraries(matrix_edit_message_tests PRIVATE Qt6::Core Qt6::Gui)
+	add_test(NAME matrix_edit_message_tests COMMAND matrix_edit_message_tests)
 	add_executable(matrix_timestamp_tests EXCLUDE_FROM_ALL "${MATRIX_TEST_SOURCE_DIR}/matrix_timestamp_test.cpp")
 	target_include_directories(matrix_timestamp_tests PRIVATE "${CMAKE_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}")
 	target_compile_features(matrix_timestamp_tests PRIVATE cxx_std_11)
@@ -135,6 +142,12 @@ if (BUILD_TESTING)
 	target_link_libraries(matrix_history_tests PRIVATE Qt6::Core Qt6::Network Qt6::Gui Qt6::Sql)
 
 	add_matrix_plugin_test_target(matrix_sync_batch_tests "${MATRIX_TEST_SOURCE_DIR}/matrix_sync_batch_test.cpp")
+	add_executable(matrix_member_display_name_cache_tests EXCLUDE_FROM_ALL
+		"${MATRIX_TEST_SOURCE_DIR}/matrix_member_display_name_cache_test.cpp")
+	target_include_directories(matrix_member_display_name_cache_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+	target_compile_features(matrix_member_display_name_cache_tests PRIVATE cxx_std_17)
+	target_link_libraries(matrix_member_display_name_cache_tests PRIVATE Qt6::Core)
+	add_test(NAME matrix_member_display_name_cache_tests COMMAND matrix_member_display_name_cache_tests)
 endif()
 
 if(TARGET matrix)

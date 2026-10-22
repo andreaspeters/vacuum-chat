@@ -1,6 +1,8 @@
 #include "viewwidget.h"
 
+#include "messagebubbleidentity.h"
 #include <interfaces/messagedecorationpolicy.h>
+#include <QFrame>
 #include <QTextFrame>
 #include <QTextTable>
 #include <QScrollBar>
@@ -120,9 +122,11 @@ void ViewWidget::appendHtml(const QString &AHtml, const IMessageContentOptions &
 	}
 }
 
-bool ViewWidget::replaceMessage(const QString &AMessageId, const QString &AHtml)
+bool ViewWidget::replaceMessage(const QString &AMessageId, const QString &AHtml,
+	const QString &AEventId, bool AModified)
 {
-	if (FMessageStyle && FMessageStyle->replaceMessageContent(FStyleWidget, AMessageId, AHtml))
+	if (FMessageStyle && FMessageStyle->replaceMessageContent(FStyleWidget, AMessageId,
+		AHtml, AEventId, AModified))
 		return true;
 	const QStringList decorationIds = FMessageDecorations.value(AMessageId).keys();
 	for (const QString &decorationId : decorationIds)
@@ -268,13 +272,39 @@ void ViewWidget::contextMenuForView(const QPoint &APosition, const QTextDocument
 	QTextEdit *view = qobject_cast<QTextEdit *>(FStyleWidget);
 	if (view && AMenu)
 	{
-		const int position = view->cursorForPosition(APosition).position();
-		for (auto it = FMessageRanges.constBegin(); it != FMessageRanges.constEnd(); ++it)
-			if (position >= it.value().first && position <= it.value().second)
+		bool foundBubble = false;
+		bool hasIdentityBubble = false;
+		const QPoint viewportPosition = view->viewport()->mapFrom(view, APosition);
+		const QList<QFrame *> frames = view->viewport()->findChildren<QFrame *>(
+			QString(), Qt::FindDirectChildrenOnly);
+		for (QFrame *frame : frames)
+			if (!MessageBubbleIdentity::messageId(frame).isEmpty())
 			{
-				AMenu->setProperty("vacuum.messageId", it.key());
+				hasIdentityBubble = true;
 				break;
 			}
+
+		QWidget *hitWidget = view->viewport()->childAt(viewportPosition);
+		QObject *identity = MessageBubbleIdentity::identityAncestor(hitWidget, view->viewport());
+		if (identity)
+		{
+			AMenu->setProperty(MessageBubbleIdentity::MessageIdProperty,
+				MessageBubbleIdentity::messageId(identity));
+			AMenu->setProperty(MessageBubbleIdentity::EventIdProperty,
+				MessageBubbleIdentity::eventId(identity));
+			foundBubble = true;
+		}
+
+		if (!foundBubble && MessageBubbleIdentity::shouldUseTextRangeFallback(hasIdentityBubble, foundBubble))
+		{
+			const int position = view->cursorForPosition(APosition).position();
+			for (auto it = FMessageRanges.constBegin(); it != FMessageRanges.constEnd(); ++it)
+				if (position >= it.value().first && position <= it.value().second)
+				{
+					AMenu->setProperty(MessageBubbleIdentity::MessageIdProperty, it.key());
+					break;
+				}
+		}
 	}
 	emit viewContextMenu(APosition,ASelection,AMenu);
 }

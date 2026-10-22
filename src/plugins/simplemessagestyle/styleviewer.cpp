@@ -1,10 +1,12 @@
 #include "styleviewer.h"
+#include "../messagewidgets/messagebubbleidentity.h"
 
 #include <QAbstractSlider>
 #include <QAbstractTextDocumentLayout>
 #include <QCryptographicHash>
 #include <QFrame>
 #include <QImage>
+#include <QLabel>
 #include <QKeyEvent>
 #include <QPixmap>
 #include <QPalette>
@@ -43,6 +45,21 @@ QSize imageSizeForResource(const QVariant &resource)
 	if (!data.isEmpty() && decoded.loadFromData(data))
 		return decoded.size();
 	return QSize();
+}
+
+QLabel *createEditedIndicator(QWidget *parent)
+{
+	QLabel *indicator = new QLabel(QStringLiteral("(edited)"), parent);
+	indicator->setObjectName(QStringLiteral("modernChatEditedIndicator"));
+	QFont font = indicator->font();
+	font.setPixelSize(6);
+	indicator->setFont(font);
+	indicator->setStyleSheet(QStringLiteral("color: #000000;"));
+	indicator->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+	indicator->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+	indicator->setFixedHeight(qMax(1, indicator->sizeHint().height()));
+	indicator->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+	return indicator;
 }
 }
 
@@ -135,13 +152,15 @@ void StyleViewer::addMessageBubble(QTextTable *ATable, const QString &AHtml, con
 
 void StyleViewer::addMessageBubble(QTextTable *ATable, const QString &AMessageId,
 	const QString &AHtml, const QColor &AFill, bool AOutgoing,
-	const QRectF &ASourceAnchorRect, const QTextCursor &ASourceTextCursor)
+	const QRectF &ASourceAnchorRect, const QTextCursor &ASourceTextCursor,
+	const QString &AEventId, bool AModified)
 {
 	if (!ATable)
 		return;
 
 	QFrame *frame = new QFrame(viewport());
 	frame->setObjectName(QStringLiteral("modernChatBubbleFrame"));
+	MessageBubbleIdentity::set(frame, AMessageId, AEventId);
 	frame->setFrameShape(QFrame::NoFrame);
 	frame->setAttribute(Qt::WA_StyledBackground, true);
 	frame->setStyleSheet(QStringLiteral(
@@ -218,6 +237,8 @@ void StyleViewer::addMessageBubble(QTextTable *ATable, const QString &AMessageId
 	overlay.outgoing = AOutgoing;
 	overlay.imageResources = bubbleImageResources;
 	FBubbleOverlays.append(overlay);
+	if (AModified)
+		setBubbleEditedIndicator(FBubbleOverlays.last(), true);
 	scheduleMessageBubbleGeometryUpdate();
 }
 
@@ -383,7 +404,8 @@ bool StyleViewer::setMessageDecoration(const QString &AMessageId, const QString 
 	return updated;
 }
 
-bool StyleViewer::replaceMessageBubbleContent(const QString &AMessageId, const QString &AHtml)
+bool StyleViewer::replaceMessageBubbleContent(const QString &AMessageId, const QString &AHtml,
+	const QString &AEventId, bool AModified)
 {
 	if (AMessageId.isEmpty())
 		return false;
@@ -392,6 +414,9 @@ bool StyleViewer::replaceMessageBubbleContent(const QString &AMessageId, const Q
 	{
 		if (overlay.messageId != AMessageId || !overlay.content)
 			continue;
+		if (overlay.frame && !AEventId.isEmpty())
+			MessageBubbleIdentity::set(overlay.frame, AMessageId, AEventId);
+		setBubbleEditedIndicator(overlay, AModified);
 
 		const QSet<QUrl> imageResources = DecorationHelper::imageResourcesFromHtml(AHtml);
 		for (const QUrl &url : imageResources)
@@ -418,6 +443,27 @@ bool StyleViewer::replaceMessageBubbleContent(const QString &AMessageId, const Q
 		return true;
 	}
 	return false;
+}
+
+void StyleViewer::setBubbleEditedIndicator(BubbleOverlay &overlay, bool modified)
+{
+	QVBoxLayout *layout = overlay.frame
+		? qobject_cast<QVBoxLayout *>(overlay.frame->layout()) : nullptr;
+	if (!layout)
+		return;
+
+	if (modified && !overlay.editedIndicator)
+	{
+		QLabel *indicator = createEditedIndicator(overlay.frame);
+		layout->insertWidget(0, indicator);
+		overlay.editedIndicator = indicator;
+	}
+	else if (!modified && overlay.editedIndicator)
+	{
+		layout->removeWidget(overlay.editedIndicator);
+		delete overlay.editedIndicator.data();
+		overlay.editedIndicator.clear();
+	}
 }
 
 void StyleViewer::clearMessageBubbles()
@@ -518,6 +564,12 @@ QTextDocumentFragment StyleViewer::bubbleTextUnderPosition(const QPoint &APositi
 		else
 		{
 			cursor.select(QTextCursor::WordUnderCursor);
+			if (MessageBubbleIdentity::shouldUseWholeBubbleText(
+				false, !cursor.selection().isEmpty(), !it->content->toPlainText().isEmpty()))
+			{
+				cursor.movePosition(QTextCursor::Start);
+				cursor.movePosition(QTextCursor::End, QTextCursor::KeepAnchor);
+			}
 		}
 		return QTextDocumentFragment(cursor);
 	}
@@ -591,8 +643,10 @@ void StyleViewer::updateMessageBubbleGeometry()
 			const qreal contentHeight = overlay.content->document()->documentLayout()->documentSize().height();
 			const QMargins margins = overlay.frame->layout()
 				? overlay.frame->layout()->contentsMargins() : QMargins();
+			const qreal indicatorHeight = overlay.editedIndicator
+				? overlay.editedIndicator->height() : 0;
 			if (!DecorationHelper::initializeBubbleGeometry(overlay.geometry, bubbleAnchorRect,
-				contentHeight, margins.top() + margins.bottom()))
+				contentHeight, margins.top() + margins.bottom() + indicatorHeight))
 			{
 				++i;
 				continue;
@@ -634,9 +688,11 @@ void StyleViewer::updateMessageBubbleGeometry()
 				const qreal contentHeight = overlay.content->document()->documentLayout()->documentSize().height();
 				const QMargins margins = overlay.frame->layout()
 					? overlay.frame->layout()->contentsMargins() : QMargins();
+				const qreal indicatorHeight = overlay.editedIndicator
+					? overlay.editedIndicator->height() : 0;
 				DecorationHelper::initializeBubbleGeometry(overlay.geometry,
 					overlay.geometry.documentRect,
-					contentHeight, margins.top() + margins.bottom());
+					contentHeight, margins.top() + margins.bottom() + indicatorHeight);
 				overlay.contentSizeDirty = false;
 				const qreal reactionHeight = overlay.reactionContent &&
 					!overlay.reactionContent->isHidden()
