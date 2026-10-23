@@ -102,9 +102,12 @@ public:
     // Event deduplication and ordering
     bool hasEvent(const QString &roomId, const QString &eventId) const;
     QList<MatrixTimelineEvent> getEvents(const QString &roomId, int limit = 0) const;
+    QList<MatrixTimelineEvent> pendingEncryptedEvents(const QString &roomId,
+                                                       const QString &sessionId = QString()) const;
     QStringList roomIds() const;
     QList<MatrixStoredRoom> roomStates() const;
     QList<MatrixStoredMember> roomMembers(const QString &roomId) const;
+
     
     // Sync state
     bool setNextBatch(const QString &nextBatch);

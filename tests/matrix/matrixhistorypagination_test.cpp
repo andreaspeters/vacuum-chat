@@ -242,6 +242,52 @@ int runHistoryBackfillTest()
     return 0;
 }
 
+int runPendingEncryptedEventQueryTest()
+{
+    QTemporaryDir profileDirectory;
+    if (!profileDirectory.isValid())
+        return fail("could not create temporary profile directory");
+
+    MatrixDatabase database;
+    database.setProfileDirectory(profileDirectory.path());
+    if (!database.openForAccount(QStringLiteral("https://example.org"),
+            QStringLiteral("@test:example.org")))
+        return fail("could not open temporary Matrix database");
+
+    const QString roomId = QStringLiteral("!encrypted:example.org");
+    QList<MatrixTimelineEvent> events;
+    for (int i = 0; i < 200; ++i)
+        events.append(makeEvent(roomId, QStringLiteral("$plain-%1").arg(i),
+            1700000000000LL + i, QStringLiteral("ordinary message")));
+    const QStringList sessionIds = {QStringLiteral("target-session"),
+        QStringLiteral("other-session"), QStringLiteral("target-session")};
+    for (int i = 0; i < sessionIds.size(); ++i) {
+        MatrixTimelineEvent encrypted = makeEvent(roomId,
+            QStringLiteral("$encrypted-%1").arg(i), 1700000001000LL + i, QString());
+        encrypted.eventType = QStringLiteral("m.room.encrypted");
+        encrypted.metadata.insert(QStringLiteral("session_id"), sessionIds.at(i));
+        encrypted.metadata.insert(QStringLiteral("ciphertext"), QStringLiteral("opaque"));
+        events.append(encrypted);
+    }
+    if (!database.appendTimelineEvents(roomId, events))
+        return fail("could not seed encrypted event query fixture");
+
+    const QList<MatrixTimelineEvent> matching =
+        database.pendingEncryptedEvents(roomId, QStringLiteral("target-session"));
+    if (matching.size() != 2 ||
+        matching.at(0).metadata.value(QStringLiteral("session_id")).toString() !=
+            QStringLiteral("target-session") ||
+        matching.at(1).metadata.value(QStringLiteral("session_id")).toString() !=
+            QStringLiteral("target-session"))
+        return fail("session retry query must return only matching encrypted events");
+
+    if (database.pendingEncryptedEvents(roomId).size() != 3)
+        return fail("room retry query must exclude plain timeline events");
+
+    database.close();
+    return 0;
+}
+
 namespace
 {
 bool check(bool condition, const char *message)
@@ -343,5 +389,7 @@ int main(int argc, char **argv)
     const int backupResult = runMatrixHistoryBackupTests();
     const int paginationResult = runHistoryPaginationTest();
     const int backfillResult = runHistoryBackfillTest();
-    return backupResult == 0 && paginationResult == 0 && backfillResult == 0 ? 0 : 1;
+    const int encryptedQueryResult = runPendingEncryptedEventQueryTest();
+    return backupResult == 0 && paginationResult == 0 && backfillResult == 0 &&
+        encryptedQueryResult == 0 ? 0 : 1;
 }

@@ -184,6 +184,12 @@ void MatrixDatabase::createTables()
                    "ON timeline_events(room_id, origin_ts, event_id)")) {
         qWarning() << "Failed to create timeline_events room/time index:" << query.lastError();
     }
+    if (!query.exec("CREATE INDEX IF NOT EXISTS idx_timeline_events_room_type_session "
+                   "ON timeline_events(room_id, event_type, "
+                   "json_extract(metadata, '$.session_id'), origin_ts, event_id)")) {
+        qWarning() << "Failed to create timeline_events encrypted-session index:"
+                   << query.lastError();
+    }
     if (!query.exec(
         "CREATE TABLE IF NOT EXISTS timeline_relations ("
         "source_event_id TEXT PRIMARY KEY,"
@@ -814,6 +820,35 @@ QList<MatrixTimelineEvent> MatrixDatabase::getEvents(const QString &roomId, int 
     while (query.next())
         events.append(timelineEventFromRecord(query.record()));
     
+    return events;
+}
+
+QList<MatrixTimelineEvent> MatrixDatabase::pendingEncryptedEvents(
+    const QString &roomId, const QString &sessionId) const
+{
+    QList<MatrixTimelineEvent> events;
+    if (!FisOpen || !FDatabase.isOpen() || roomId.isEmpty())
+        return events;
+
+    QString sql = QStringLiteral(
+        "SELECT room_id, event_id, event_type, sender, origin_ts, message_type, content, metadata "
+        "FROM timeline_events WHERE room_id = :room_id "
+        "AND event_type = 'm.room.encrypted' ");
+    if (!sessionId.isEmpty())
+        sql += QStringLiteral("AND json_extract(metadata, '$.session_id') = :session_id ");
+    sql += QStringLiteral("ORDER BY origin_ts ASC, event_id ASC");
+
+    QSqlQuery query(FDatabase);
+    query.prepare(sql);
+    query.bindValue(QStringLiteral(":room_id"), roomId);
+    if (!sessionId.isEmpty())
+        query.bindValue(QStringLiteral(":session_id"), sessionId);
+    if (!query.exec()) {
+        qWarning() << "Failed to query pending encrypted events:" << query.lastError();
+        return events;
+    }
+    while (query.next())
+        events.append(timelineEventFromRecord(query.record()));
     return events;
 }
 

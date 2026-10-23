@@ -5636,12 +5636,14 @@ QList<MatrixTextEvent> MatrixNetwork::messageHistory(const QString &roomId)
 
 void MatrixNetwork::retryPendingEncryptedEvents(const QString &roomId, const QString &sessionId)
 {
-	QList<MatrixTextEvent> &history = FMessageHistory[roomId];
-	if (history.isEmpty()) {
-		QList<MatrixTimelineEvent> storedEvents;
-		runDatabase([&](MatrixDatabase &database) {
-			storedEvents = database.getEvents(roomId);
-		});
+    QList<MatrixTextEvent> retryEvents;
+    QList<MatrixTextEvent> &history = FMessageHistory[roomId];
+    QList<MatrixTextEvent> *eventsToRetry = &history;
+    if (history.isEmpty()) {
+        QList<MatrixTimelineEvent> storedEvents;
+        runDatabase([&](MatrixDatabase &database) {
+            storedEvents = database.pendingEncryptedEvents(roomId, sessionId);
+        });
 		for (const MatrixTimelineEvent &stored : storedEvents) {
 			MatrixTextEvent event;
 			event.eventId = stored.eventId;
@@ -5653,13 +5655,14 @@ void MatrixNetwork::retryPendingEncryptedEvents(const QString &roomId, const QSt
 			event.content = stored.content;
 			event.attachments = stored.attachments;
 			for (auto metadataIt = stored.metadata.constBegin();
-				metadataIt != stored.metadata.constEnd(); ++metadataIt)
-				event.metadata.insert(metadataIt.key(), metadataIt.value());
-			history.append(event);
-		}
-	}
-	QList<MatrixTextEvent> updated;
-	for (MatrixTextEvent &event : history) {
+			    metadataIt != stored.metadata.constEnd(); ++metadataIt)
+			    event.metadata.insert(metadataIt.key(), metadataIt.value());
+			retryEvents.append(event);
+			}
+			eventsToRetry = &retryEvents;
+			}
+			QList<MatrixTextEvent> updated;
+			for (MatrixTextEvent &event : *eventsToRetry) {
 		if (event.eventType != QStringLiteral("m.room.encrypted") ||
 			 event.metadata.value(QStringLiteral("decryption_status")).toString() ==
 				QStringLiteral("decrypted"))
