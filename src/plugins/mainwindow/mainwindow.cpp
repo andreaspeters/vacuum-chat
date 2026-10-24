@@ -98,6 +98,9 @@ bool MainWindow::isActive() const
 
 void MainWindow::showWindow(bool AMinimized)
 {
+	qDebug() << "[MAINW-PROBE] MainWindow::showWindow() before, Options::isNull() =" << Options::isNull()
+		<< "visible =" << isVisible() << "flags =" << windowFlags() << "geometry =" << geometry()
+		<< "screen =" << (screen() ? screen()->geometry() : QRect());
 	if (!Options::isNull())
 	{
 		if (!AMinimized)
@@ -114,6 +117,13 @@ void MainWindow::showWindow(bool AMinimized)
 
 		correctWindowPosition();
 	}
+	else
+	{
+		qDebug() << "[MAINW-PROBE] MainWindow::showWindow() skipped due to Options::isNull()";
+	}
+	qDebug() << "[MAINW-PROBE] MainWindow::showWindow() after, visible =" << isVisible()
+		<< "flags =" << windowFlags() << "geometry =" << geometry()
+		<< "screen =" << (screen() ? screen()->geometry() : QRect());
 }
 
 void MainWindow::closeWindow()

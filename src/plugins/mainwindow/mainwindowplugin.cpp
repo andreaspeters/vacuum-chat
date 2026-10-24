@@ -89,6 +89,7 @@ bool MainWindowPlugin::initSettings()
 
 bool MainWindowPlugin::startPlugin()
 {
+	qDebug() << "[MAINW-PROBE] MainWindowPlugin::startPlugin(), Options::isNull() =" << Options::isNull();
 	Shortcuts::setGlobalShortcut(SCT_GLOBAL_SHOWROSTER,true);
 	return true;
 }
@@ -107,8 +108,10 @@ bool MainWindowPlugin::eventFilter(QObject *AWatched, QEvent *AEvent)
 
 void MainWindowPlugin::onOptionsOpened()
 {
+	qDebug() << "[MAINW-PROBE] MainWindowPlugin::onOptionsOpened() START, Options::isNull() =" << Options::isNull();
 	FMainWindow->loadWindowGeometryAndState();
 	QTimer::singleShot(0,this,SLOT(onShowMainWindowOnStart()));
+	qDebug() << "[MAINW-PROBE] MainWindowPlugin::onOptionsOpened() END";
 }
 
 void MainWindowPlugin::onOptionsClosed()
@@ -124,9 +127,12 @@ void MainWindowPlugin::onShutdownStarted()
 
 void MainWindowPlugin::onShowMainWindowOnStart()
 {
+	qDebug() << "[MAINW-PROBE] MainWindowPlugin::onShowMainWindowOnStart() loop" << FStartShowLoopCount;
 	if (FStartShowLoopCount >= 3)
 	{
-		if (Options::node(OPV_MAINWINDOW_SHOWONSTART).value().toBool())
+		const bool showOnStart = Options::node(OPV_MAINWINDOW_SHOWONSTART).value().toBool();
+		qDebug() << "[MAINW-PROBE] MainWindowPlugin::onShowMainWindowOnStart() Options::isNull() =" << Options::isNull() << "show-on-start =" << showOnStart;
+		if (showOnStart)
 			FMainWindow->showWindow();
 		FStartShowLoopCount = 0;
 	}

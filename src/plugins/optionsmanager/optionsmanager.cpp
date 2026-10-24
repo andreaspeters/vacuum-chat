@@ -147,7 +147,10 @@ bool OptionsManager::startPlugin()
 	int passIndex = args.indexOf(CLO_PROFILE_PASSWORD);
 	QString profile = profIndex>0 ? args.value(profIndex+1) : lastActiveProfile();
 	QString password = passIndex>0 ? args.value(passIndex+1) : QString();
-	if (profile.isEmpty() || !setCurrentProfile(profile, password))
+	const bool profileOpened = !profile.isEmpty() && setCurrentProfile(profile, password);
+	qDebug() << "[MAINW-PROBE] OptionsManager::startPlugin() profile empty =" << profile.isEmpty()
+		<< "profile open succeeded =" << profileOpened << "Options::isNull() =" << Options::isNull();
+	if (!profileOpened)
 		showLoginDialog();
 	return true;
 }

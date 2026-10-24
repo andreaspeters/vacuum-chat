@@ -22,12 +22,10 @@ endif (NOT SYSTEM_IDN_FOUND)
 
 add_translations(TRANSLATIONS "${VACUUM_UTILS_NAME}" ${SOURCES})
 if (OS2)
-	add_library(${VACUUM_UTILS_NAME} STATIC ${SOURCES} ${HEADERS} ${TRANSLATIONS})
-	else()
 	add_library(${VACUUM_UTILS_NAME} SHARED ${SOURCES} ${HEADERS} ${TRANSLATIONS})
-	endif()
-if (OS2)
 	set_target_properties(${VACUUM_UTILS_NAME} PROPERTIES OUTPUT_NAME "vacuum")
+else()
+	add_library(${VACUUM_UTILS_NAME} SHARED ${SOURCES} ${HEADERS} ${TRANSLATIONS})
 endif()
 
 # Qt6 setup
@@ -71,6 +69,32 @@ endif (APPLE)
 
 target_link_libraries(${VACUUM_UTILS_NAME} PRIVATE
 	Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::Xml ${ADD_LIBS})
+
+if (OS2)
+	find_program(OS2_EMXEXP_EXECUTABLE emxexp)
+	if (NOT OS2_EMXEXP_EXECUTABLE)
+		message(FATAL_ERROR "OS/2 utility target requires emxexp")
+	endif()
+	find_program(OS2_EMXIMP_EXECUTABLE emximp)
+	if (NOT OS2_EMXIMP_EXECUTABLE)
+		message(FATAL_ERROR "OS/2 utility target requires emximp")
+	endif()
+	add_custom_command(TARGET ${VACUUM_UTILS_NAME} PRE_LINK
+		COMMAND "${CMAKE_COMMAND}"
+			"-DEMXEXP=${OS2_EMXEXP_EXECUTABLE}"
+			"-DLINK_COMMAND_FILE=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${VACUUM_UTILS_NAME}.dir/link.txt"
+			"-DLINK_WORKING_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}"
+			"-DOUTPUT_FILE=${CMAKE_BINARY_DIR}/vacuum.def"
+			-P "${CMAKE_CURRENT_SOURCE_DIR}/generate_os2_exports.cmake"
+		COMMENT "Generating OS/2 utility DLL exports"
+		VERBATIM)
+	add_custom_command(TARGET ${VACUUM_UTILS_NAME} POST_BUILD
+		COMMAND "${OS2_EMXIMP_EXECUTABLE}" -q -p16 -o
+			"$<TARGET_LINKER_FILE:${VACUUM_UTILS_NAME}>"
+			"$<TARGET_FILE:${VACUUM_UTILS_NAME}>"
+		COMMENT "Generating OMF import library for ${VACUUM_UTILS_NAME}"
+		VERBATIM)
+endif()
 
 if (WIN32 OR OS2)
 	set_target_properties(${VACUUM_UTILS_NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
