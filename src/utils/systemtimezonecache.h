@@ -79,8 +79,7 @@ inline QTimeZone processLocalTimeZone()
 			return environmentTimeZone;
 	}
 
-	const QTimeZone currentOffset = QTimeZone::fromSecondsAheadOfUtc(
-		QDateTime::currentDateTime().offsetFromUtc());
+	const QTimeZone currentOffset(QDateTime::currentDateTime().offsetFromUtc());
 	return matchesLocalTimeSamples(currentOffset) || !systemTimeZone.isValid()
 		? currentOffset : systemTimeZone;
 }

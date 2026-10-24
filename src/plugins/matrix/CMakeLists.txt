@@ -36,6 +36,25 @@ else()
 	add_definitions(-DHAVE_OLM=0)
 endif()
 
+# OS/2-specific additions for libolm runtime DLLs
+if (OS2 AND OLM_FOUND)
+	set(VACUUM_OS2_RUNTIME_DLL_DIR "" CACHE PATH
+		"Directory containing external OS/2 runtime DLLs such as libolm.dll")
+	if (NOT VACUUM_OS2_RUNTIME_DLL_DIR)
+		message(FATAL_ERROR "Set VACUUM_OS2_RUNTIME_DLL_DIR when libolm is enabled for OS/2")
+	endif()
+	set(_vacuum_libolm_dll "${VACUUM_OS2_RUNTIME_DLL_DIR}/libolm.dll")
+	if (NOT EXISTS "${_vacuum_libolm_dll}")
+		message(FATAL_ERROR "Missing required OS/2 libolm runtime DLL: ${_vacuum_libolm_dll}")
+	endif()
+	install(FILES "${_vacuum_libolm_dll}"
+		DESTINATION "${INSTALL_BINS}")
+	if (EXISTS "${VACUUM_OS2_RUNTIME_DLL_DIR}/olm.dll")
+		install(FILES "${VACUUM_OS2_RUNTIME_DLL_DIR}/olm.dll"
+			DESTINATION "${INSTALL_BINS}")
+	endif()
+endif()
+
 if(OpenSSL_FOUND)
 	message(STATUS "Found OpenSSL for Matrix SSSS")
 	add_definitions(-DHAVE_OPENSSL=1)
@@ -43,6 +62,30 @@ if(OpenSSL_FOUND)
 else()
 	message(STATUS "OpenSSL not found - Matrix SSSS support disabled")
 	add_definitions(-DHAVE_OPENSSL=0)
+endif()
+
+if (OS2 AND OpenSSL_FOUND)
+	get_filename_component(_vacuum_openssl_crypto_dir "${OPENSSL_CRYPTO_LIBRARY}" DIRECTORY)
+	set(_vacuum_openssl_crypto_dll "${_vacuum_openssl_crypto_dir}/crypto3.dll")
+	if (NOT EXISTS "${_vacuum_openssl_crypto_dll}")
+		message(FATAL_ERROR "Missing OS/2 OpenSSL runtime DLL: ${_vacuum_openssl_crypto_dll}")
+	endif()
+	install(FILES "${_vacuum_openssl_crypto_dll}"
+		DESTINATION "${INSTALL_BINS}")
+	if (OPENSSL_SSL_LIBRARY)
+		get_filename_component(_vacuum_openssl_ssl_dir "${OPENSSL_SSL_LIBRARY}" DIRECTORY)
+		set(_vacuum_openssl_ssl_dll "${_vacuum_openssl_ssl_dir}/ssl3.dll")
+		if (NOT EXISTS "${_vacuum_openssl_ssl_dll}")
+			message(FATAL_ERROR "Missing OS/2 OpenSSL runtime DLL: ${_vacuum_openssl_ssl_dll}")
+		endif()
+		install(FILES "${_vacuum_openssl_ssl_dll}"
+			DESTINATION "${INSTALL_BINS}")
+	endif()
+	set(_vacuum_openssl_pthread_dll "${_vacuum_openssl_crypto_dir}/pthr01.dll")
+	if (EXISTS "${_vacuum_openssl_pthread_dll}")
+		install(FILES "${_vacuum_openssl_pthread_dll}"
+			DESTINATION "${INSTALL_BINS}")
+	endif()
 endif()
 
 include("matrix.cmake")

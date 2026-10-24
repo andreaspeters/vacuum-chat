@@ -133,4 +133,5 @@ if (BUILD_TESTING)
 	target_include_directories(system_timezone_cache_tests PRIVATE
 		"${CMAKE_SOURCE_DIR}/src")
 	target_link_libraries(system_timezone_cache_tests PRIVATE Qt6::Core)
+
 endif()

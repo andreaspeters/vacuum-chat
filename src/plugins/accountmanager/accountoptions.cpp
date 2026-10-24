@@ -8,7 +8,7 @@
 #include <QLabel>
 #include <QVBoxLayout>
 #include <interfaces/iemoticons.h>
-#ifndef OS2
+#ifdef ACCOUNTMANAGER_WITH_BLUETOOTH
 #include <QBluetoothDeviceDiscoveryAgent>
 #include <QBluetoothDeviceInfo>
 #endif
@@ -122,7 +122,7 @@ AccountOptions::AccountOptions(IAccountManager *AManager, IPluginManager *APlugi
 				emit modified();
 		});
 
-#ifndef OS2
+#ifdef ACCOUNTMANAGER_WITH_BLUETOOTH
 	FMeshCoreBleDiscoveryAgent = new QBluetoothDeviceDiscoveryAgent(this);
 	FMeshCoreBleDiscoveryAgent->setLowEnergyDiscoveryTimeout(15000);
 	connect(FMeshCoreBleDiscoveryAgent, &QBluetoothDeviceDiscoveryAgent::deviceDiscovered,
@@ -307,7 +307,7 @@ AccountOptions::AccountOptions(IAccountManager *AManager, IPluginManager *APlugi
 
 AccountOptions::~AccountOptions()
 {
-#ifndef OS2
+#ifdef ACCOUNTMANAGER_WITH_BLUETOOTH
 	if (FMeshCoreBleDiscoveryAgent && FMeshCoreBleDiscoveryAgent->isActive())
 		FMeshCoreBleDiscoveryAgent->stop();
 #endif

@@ -15,6 +15,14 @@
 
 namespace
 {
+#if defined(O_CLOEXEC)
+constexpr int kOpenCloseOnExec = O_CLOEXEC;
+#elif defined(O_NOINHERIT)
+constexpr int kOpenCloseOnExec = O_NOINHERIT;
+#else
+#error "AX.25 pipe test requires a close-on-exec/inherit flag"
+#endif
+
 bool check(bool condition, const char *message)
 {
     if (!condition)
@@ -68,7 +76,7 @@ int main(int argc, char **argv)
         return 1;
 
     // Emulate FlexPacket's reader of readpipe before the plugin connects.
-    const int flexpacketInput = ::open(inputPath.constData(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+    const int flexpacketInput = ::open(inputPath.constData(), O_RDONLY | O_NONBLOCK | kOpenCloseOnExec);
     if (!check(flexpacketInput >= 0, "synthetic FlexPacket input endpoint opens"))
         return 1;
 
@@ -84,7 +92,7 @@ int main(int argc, char **argv)
         return 1;
 
     // Emulate FlexPacket's writer of received channel output.
-    const int flexpacketOutput = ::open(outputPath.constData(), O_WRONLY | O_NONBLOCK | O_CLOEXEC);
+    const int flexpacketOutput = ::open(outputPath.constData(), O_WRONLY | O_NONBLOCK | kOpenCloseOnExec);
     if (!check(flexpacketOutput >= 0, "synthetic FlexPacket output endpoint opens"))
         return 1;
 

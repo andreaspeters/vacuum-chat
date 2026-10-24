@@ -18,6 +18,14 @@
 
 namespace
 {
+#if defined(O_CLOEXEC)
+constexpr int kOpenCloseOnExec = O_CLOEXEC;
+#elif defined(O_NOINHERIT)
+constexpr int kOpenCloseOnExec = O_NOINHERIT;
+#else
+#error "AX.25 pipe transport requires a close-on-exec/inherit flag"
+#endif
+
 QString canonicalAddress(const QString &callsign)
 {
     QByteArray frame;
@@ -91,14 +99,14 @@ bool Ax25FlexPacketPipeTransport::open(const QString &localCallsign, int channel
     // FlexPacket reads its input from flexpacketreadpipe and writes received
     // channel data to flexpacketwritepipe. O_RDWR avoids an EOF busy loop while
     // FlexPacket is between writes; the separate write end must have a reader.
-    m_readFd = ::open(outputPath.constData(), O_RDWR | O_NONBLOCK | O_CLOEXEC);
+    m_readFd = ::open(outputPath.constData(), O_RDWR | O_NONBLOCK | kOpenCloseOnExec);
     if (m_readFd < 0) {
         emit transportError(tr("Cannot open FlexPacket output pipe: %1")
                                 .arg(QString::fromLocal8Bit(std::strerror(errno))));
         close();
         return false;
     }
-    const int writeProbeFd = ::open(inputPath.constData(), O_WRONLY | O_NONBLOCK | O_CLOEXEC);
+    const int writeProbeFd = ::open(inputPath.constData(), O_WRONLY | O_NONBLOCK | kOpenCloseOnExec);
     if (writeProbeFd < 0) {
         emit transportError(tr("Cannot open FlexPacket input pipe: %1")
                                 .arg(QString::fromLocal8Bit(std::strerror(errno))));
@@ -217,7 +225,7 @@ bool Ax25FlexPacketPipeTransport::writePendingRecord(const QByteArray &record)
 {
     const QByteArray inputPath = QFile::encodeName(
         QDir(m_pipeDirectory).filePath(QStringLiteral("flexpacketreadpipe")));
-    const int writeFd = ::open(inputPath.constData(), O_WRONLY | O_NONBLOCK | O_CLOEXEC);
+    const int writeFd = ::open(inputPath.constData(), O_WRONLY | O_NONBLOCK | kOpenCloseOnExec);
     if (writeFd < 0) {
         emit transportError(tr("Cannot open FlexPacket input pipe: %1")
                                 .arg(QString::fromLocal8Bit(std::strerror(errno))));

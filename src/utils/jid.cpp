@@ -389,7 +389,8 @@ QString Jid::resourcePrepare(const QString &AResource)
 
 Jid &Jid::parseFromString(const QString &AJidStr)
 {
-	if (!JidCache.contains(AJidStr))
+	QHash<QString,Jid>::const_iterator it = JidCache.constFind(AJidStr);
+	if (it == JidCache.constEnd())
 	{
 		if (!d)
 			d = new JidData;
@@ -538,7 +539,7 @@ Jid &Jid::parseFromString(const QString &AJidStr)
 	}
 	else
 	{
-		*this = JidCache.value(AJidStr);
+		*this = it.value();
 	}
 	return *this;
 }

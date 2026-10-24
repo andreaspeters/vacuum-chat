@@ -2,6 +2,7 @@
 
 #include <QTextBlockFormat>
 #include <QTextCursor>
+#include <QTextDocument>
 
 void DecorationHelper::createOrUpdateDecoration(QMap<QString, Decoration> &decorationMap, const QString &id, const QString &html, int start, int end)
 {

@@ -8,6 +8,7 @@ set(${PLUGIN_NAME}_IS_ESSENTIAL YES)
 if (NOT OS2)
 	find_package(Qt6 REQUIRED COMPONENTS Bluetooth)
 	list(APPEND ADD_LIBS Qt6::Bluetooth)
+	add_compile_definitions(ACCOUNTMANAGER_WITH_BLUETOOTH)
 endif()
 
 include("accountmanager.cmake")

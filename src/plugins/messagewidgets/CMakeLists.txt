@@ -31,7 +31,7 @@ if(BUILD_TESTING)
 	target_link_libraries(messagewidgets_editor_image_paste_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets)
 
 	add_executable(messagewidgets_message_identity_tests EXCLUDE_FROM_ALL
-		${CMAKE_CURRENT_SOURCE_DIR}/../../tests/messagewidgets/messagebubbleidentity_test.cpp)
+		${MESSAGEWIDGETS_TEST_SOURCE_DIR}/messagebubbleidentity_test.cpp)
 	target_include_directories(messagewidgets_message_identity_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 	target_compile_features(messagewidgets_message_identity_tests PRIVATE cxx_std_17)
 	target_link_libraries(messagewidgets_message_identity_tests PRIVATE Qt6::Core)

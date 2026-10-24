@@ -4,6 +4,7 @@ list(FILTER SOURCES EXCLUDE REGEX "/messagenotificationmute_test\\.cpp$")
 list(FILTER SOURCES EXCLUDE REGEX "/imageloadscheduler_test\\.cpp$")
 list(FILTER SOURCES EXCLUDE REGEX "/matrixhtml_test\\.cpp$")
 list(FILTER SOURCES EXCLUDE REGEX "/systemtimezonecache_test\\.cpp$")
+list(FILTER SOURCES EXCLUDE REGEX "/jid_test\\.cpp$")
 
 set(HEADERS "action.h"
             "filestorage.h"

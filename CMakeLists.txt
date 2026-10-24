@@ -25,6 +25,7 @@ endif()
 
 set(VERSION "2.2.0")
 project(vacuum-chat VERSION "${VERSION}" LANGUAGES CXX)
+add_compile_definitions(CLIENT_VERSION=\"${PROJECT_VERSION}\")
 
 set(VACUUM_PYTHON_EXECUTABLE "python3" CACHE STRING "Python interpreter used by the check target")
 set(VACUUM_GIT_EXECUTABLE "git" CACHE STRING "Git executable used by the check target")
