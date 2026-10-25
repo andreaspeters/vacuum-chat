@@ -151,8 +151,13 @@ bool MatrixDatabase::createConnection()
         return false;
     }
 	QSqlQuery pragma(FDatabase);
+#if defined(Q_OS_OS2)
+	if (!pragma.exec(QStringLiteral("PRAGMA journal_mode=DELETE")))
+		qWarning() << "Could not select Matrix SQLite rollback journal:" << pragma.lastError().text();
+#else
 	if (!pragma.exec(QStringLiteral("PRAGMA journal_mode=WAL")))
 		qWarning() << "Could not enable Matrix SQLite WAL:" << pragma.lastError().text();
+#endif
 	if (!pragma.exec(QStringLiteral("PRAGMA synchronous=NORMAL")))
 		qWarning() << "Could not set Matrix SQLite synchronous mode:" << pragma.lastError().text();
 

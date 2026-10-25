@@ -153,6 +153,7 @@ if (BUILD_TESTING)
 		matrixdatabaseworker.cpp
 		matrixolm.cpp
 		matrixssss.cpp
+		matrixtextmessage.cpp
 	)
 
 	# Helper function to add Matrix test targets with shared configuration.
