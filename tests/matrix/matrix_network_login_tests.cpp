@@ -134,7 +134,13 @@ private:
             return QByteArrayLiteral(
                 "{\"next_batch\":\"test-next-batch\",\"rooms\":{"
                 "\"join\":{\"!login-test:example.invalid\":{\"state\":{\"events\":[]},"
-                "\"timeline\":{\"events\":[]}}},\"invite\":{},\"leave\":{}},"
+                "\"timeline\":{\"events\":[]}}},"
+                "\"invite\":{\"!invite-test:example.invalid\":{\"invite_state\":{\"events\":["
+                "{\"type\":\"m.room.member\",\"sender\":\"@alice:example.invalid\","
+                "\"state_key\":\"@matrix-login-test:example.invalid\","
+                "\"content\":{\"membership\":\"invite\"}},"
+                "{\"type\":\"m.room.name\",\"state_key\":\"\","
+                "\"content\":{\"name\":\"Matrix invitation test\"}}]}}},\"leave\":{}},"
                 "\"to_device\":{\"events\":[]},\"presence\":{\"events\":[]},"
                 "\"device_lists\":{\"changed\":[],\"left\":[]}}");
         if (path.startsWith(QStringLiteral("/_matrix/client/v3/keys/query")))
@@ -199,6 +205,9 @@ int main(int argc, char **argv)
     bool passed = true;
     {
         MatrixNetwork network;
+        passed &= check(MatrixNetwork::staticMetaObject.indexOfSignal(
+            "roomInviteReceived(QString,QString,QString)") >= 0,
+            "Matrix network exposes incoming room invitations");
         network.setServerUrl(QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort()));
         network.setDatabaseProfileDirectory(profileDirectory.path());
         network.setDatabaseWorker(databaseWorker);
@@ -209,6 +218,17 @@ int main(int argc, char **argv)
         QString loggedInUser;
         QString loggedInDevice;
         quint64 successGeneration = 0;
+        int inviteCount = 0;
+        QString invitedRoomId;
+        QString inviterId;
+        QString invitedRoomName;
+        QObject::connect(&network, &MatrixNetwork::roomInviteReceived, &application,
+            [&](const QString &roomId, const QString &inviter, const QString &roomName) {
+                ++inviteCount;
+                invitedRoomId = roomId;
+                inviterId = inviter;
+                invitedRoomName = roomName;
+            });
         QObject::connect(&network, &MatrixNetwork::loginSuccessForSession, &application,
             [&](const QString &userId, const QString &, const QString &deviceId, quint64 generation) {
                 ++successCount;
@@ -248,6 +268,29 @@ int main(int argc, char **argv)
             syncRequested |= path.startsWith(QStringLiteral("/_matrix/client/v3/sync"));
         passed &= check(syncRequested,
             "successful login starts the normal Matrix sync request");
+
+        const bool inviteDelivered = waitUntil([&]() { return inviteCount > 0; }, 1500);
+        passed &= check(inviteDelivered && inviteCount == 1,
+            "incoming /sync room invitation emits one user-facing invite signal");
+        passed &= check(invitedRoomId == QStringLiteral("!invite-test:example.invalid") &&
+            inviterId == QStringLiteral("@alice:example.invalid") &&
+            invitedRoomName == QStringLiteral("Matrix invitation test"),
+            "invite signal identifies the room, inviter, and display name");
+        const QList<MatrixLocalApi::CapturedRequest> requestsBeforeDuplicate = server.requests();
+        const int syncCountBeforeDuplicate = std::count_if(requestsBeforeDuplicate.cbegin(),
+            requestsBeforeDuplicate.cend(), [](const MatrixLocalApi::CapturedRequest &request) {
+                return request.path.startsWith(QStringLiteral("/_matrix/client/v3/sync"));
+            });
+        network.sync();
+        const bool duplicateSyncProcessed = waitUntil([&]() {
+            const QList<MatrixLocalApi::CapturedRequest> requests = server.requests();
+            return std::count_if(requests.cbegin(), requests.cend(),
+                [](const MatrixLocalApi::CapturedRequest &request) {
+                    return request.path.startsWith(QStringLiteral("/_matrix/client/v3/sync"));
+                }) > syncCountBeforeDuplicate;
+        }, 1500);
+        passed &= check(duplicateSyncProcessed && inviteCount == 1,
+            "repeated sync delivery of the same invite does not prompt again");
 
         const QString roomId = QStringLiteral("!login-test:example.invalid");
         const QString transactionId = QStringLiteral("m_local_send_01");

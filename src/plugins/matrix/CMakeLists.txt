@@ -161,6 +161,12 @@ if (BUILD_TESTING)
 		add_executable(${target_name} EXCLUDE_FROM_ALL
 			${source_file} ${MATRIX_TEST_SOURCES})
 		target_include_directories(${target_name} PRIVATE "${CMAKE_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}")
+		if (OLM_INCLUDE_DIR)
+			target_include_directories(${target_name} PRIVATE "${OLM_INCLUDE_DIR}")
+		endif()
+		if (OLM_INCLUDE_DIRS)
+			target_include_directories(${target_name} PRIVATE ${OLM_INCLUDE_DIRS})
+		endif()
 		target_link_libraries(${target_name} PRIVATE
 			${VACUUM_UTILS_NAME} Qt6::Core Qt6::Gui Qt6::Network Qt6::Sql ${ADD_LIBS})
 	endfunction()
@@ -172,6 +178,10 @@ if (BUILD_TESTING)
 		add_matrix_test_target(matrix_avatar_cache_tests "${MATRIX_TEST_SOURCE_DIR}/matrixavatarcache_test.cpp")
 	endif()
 	add_matrix_test_target(matrix_account_avatar_tests "${MATRIX_TEST_SOURCE_DIR}/matrixaccountavatar_test.cpp")
+	if (OLM_FOUND)
+		add_matrix_test_target(matrix_olm_key_upload_tests "${MATRIX_TEST_SOURCE_DIR}/olm_key_upload_test.cpp")
+		add_test(NAME matrix_olm_key_upload_tests COMMAND matrix_olm_key_upload_tests)
+	endif()
 
 	add_matrix_plugin_test_target(matrix_presence_tests "${MATRIX_TEST_SOURCE_DIR}/matrix_presence_lifecycle_test.cpp")
 

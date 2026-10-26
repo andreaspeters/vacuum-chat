@@ -4,6 +4,7 @@
 - FIX:    [matrix] message reply bubble
 - ADD:    [matrix, ui] eventid to qframe message object therefore vacuum can find the message easier.
 - FIX:    [matrix] heavy load during message sync.
+- ADD:    [matrix,ui] Invitation window.
 
 ## v2.2.0
 

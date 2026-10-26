@@ -187,6 +187,8 @@ private slots:
 	void onNetworkTypingChanged(const ProtocolTypingUpdate &update);
 	void onNetworkReceiptReceived(const MatrixReceipt &receipt);
 	void onNetworkNotificationEvent(const MatrixNotificationEvent &event);
+	void onNetworkRoomInviteReceived(const QString &roomId, const QString &inviterId,
+		const QString &roomName);
 	void onAccountAvatarUpdateFinished(const QString &userId, bool success,
 		const QString &avatarUrl, const QString &error);
 	void onAccountDisplayNameUpdateFinished(const QString &userId, bool success,

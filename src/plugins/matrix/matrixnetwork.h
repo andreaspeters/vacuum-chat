@@ -214,6 +214,8 @@ signals:
 	void typingChanged(const ProtocolTypingUpdate &update);  // Protocol-neutral typing signal
 	void receiptReceived(const MatrixReceipt &receipt);
 	void notificationEventReceived(const MatrixNotificationEvent &event);
+	void roomInviteReceived(const QString &roomId, const QString &inviterId,
+		const QString &roomName);
 	void avatarImageReceived(const QString &key, const QImage &image);
 	void displayNameReceived(const QString &userId, const QString &displayName);
 	void roomNameReceived(const QString &roomId, const QString &roomName);
@@ -343,6 +345,7 @@ private:
 	QMap<QString, ProtocolRoom> FRooms;
 	QMap<QString, QString> FKnownRoomTypes;
 	QSet<QString> FReplacedRoomIds;
+	QSet<QString> FPromptedInviteRoomIds;
 	QSet<QString> FDirectRoomIds;
 	QSet<QString> FDisplayNameRequests;
 	QSet<QString> FRoomNameRequests;

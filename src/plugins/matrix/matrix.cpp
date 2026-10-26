@@ -1151,6 +1151,8 @@ void Matrix::onAccountShown(IAccount *AAccount)
 		this, &Matrix::onNetworkTypingChanged, Qt::UniqueConnection);
 	connect(FMatrixNetwork, &MatrixNetwork::notificationEventReceived,
 		this, &Matrix::onNetworkNotificationEvent, Qt::UniqueConnection);
+	connect(FMatrixNetwork, &MatrixNetwork::roomInviteReceived,
+		this, &Matrix::onNetworkRoomInviteReceived, Qt::UniqueConnection);
 	connect(FMatrixNetwork, &MatrixNetwork::avatarImageReceived, this,
 		&Matrix::onAvatarImageReceived, Qt::UniqueConnection);
 	connect(FMatrixNetwork, &MatrixNetwork::accountAvatarUpdateFinished, this,
@@ -2211,6 +2213,39 @@ void Matrix::onNetworkNotificationEvent(const MatrixNotificationEvent &event)
 		return;
 	}
 	appendNotification(notification);
+}
+
+void Matrix::onNetworkRoomInviteReceived(const QString &roomId, const QString &inviterId,
+	const QString &roomName)
+{
+	if (!FMatrixNetwork || !FNetworkLoggedIn || roomId.isEmpty())
+		return;
+
+	QWidget *parent = FRostersViewPlugin && FRostersViewPlugin->rostersView()
+		? FRostersViewPlugin->rostersView()->instance() : nullptr;
+	const QString displayName = roomName.trimmed().isEmpty() ? roomId : roomName.trimmed();
+	const QString inviter = inviterId.trimmed().isEmpty() ? tr("Someone") : inviterId.trimmed();
+	QMessageBox prompt(parent);
+	prompt.setIcon(QMessageBox::Question);
+	prompt.setTextFormat(Qt::PlainText);
+	prompt.setWindowTitle(tr("Matrix room invitation"));
+	prompt.setText(tr("%1 invited you to join the room \"%2\".")
+		.arg(inviter, displayName));
+	prompt.setInformativeText(tr("Do you want to accept or decline this invitation?"));
+	QPushButton *acceptButton = prompt.addButton(tr("Accept"), QMessageBox::AcceptRole);
+	QPushButton *declineButton = prompt.addButton(tr("Decline"), QMessageBox::RejectRole);
+	prompt.setDefaultButton(declineButton);
+	prompt.setEscapeButton(declineButton);
+	prompt.exec();
+
+	const char *membershipMethod = nullptr;
+	if (prompt.clickedButton() == acceptButton)
+		membershipMethod = "joinRoom";
+	else if (prompt.clickedButton() == declineButton)
+		membershipMethod = "leaveRoom";
+	if (membershipMethod)
+		QMetaObject::invokeMethod(FMatrixNetwork, membershipMethod, Qt::QueuedConnection,
+			Q_ARG(QString, roomId));
 }
 
 void Matrix::onLoginError(const QString &AError, quint64 ASessionGeneration)

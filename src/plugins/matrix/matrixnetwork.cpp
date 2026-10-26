@@ -934,6 +934,7 @@ void MatrixNetwork::logout()
 	FFilterCreationAttempted = false;
 	FReplacedRoomIds.clear();
 	FRooms.clear();
+	FPromptedInviteRoomIds.clear();
 	FDisplayNameRequests.clear();
 	FAvatarRetries.clear();
 	FAvatarLegacyFallbacks.clear();
@@ -3634,6 +3635,7 @@ void MatrixNetwork::onLoginFinished(QNetworkReply *reply)
 	
 	FReplacedRoomIds.clear();
 	FRooms.clear();
+	FPromptedInviteRoomIds.clear();
 	FDisplayNameRequests.clear();
 	FAvatarRetries.clear();
 	FAvatarLegacyFallbacks.clear();
@@ -3969,6 +3971,8 @@ void MatrixNetwork::onSyncFinished(QNetworkReply *reply)
 		room.membership = QStringLiteral("invite");
 		room.isJoined = false;
 		room.isAvailable = true;
+		QString inviterId;
+		bool hasLocalMembershipInvite = false;
 		const QJsonArray inviteEvents = inviteIt.value().toObject()
 			.value(QStringLiteral("invite_state")).toObject()
 			.value(QStringLiteral("events")).toArray();
@@ -3976,6 +3980,12 @@ void MatrixNetwork::onSyncFinished(QNetworkReply *reply)
 			const QJsonObject stateEvent = eventValue.toObject();
 			const QString stateType = stateEvent.value(QStringLiteral("type")).toString();
 			const QJsonObject content = stateEvent.value(QStringLiteral("content")).toObject();
+			if (stateType == QStringLiteral("m.room.member") &&
+				stateEvent.value(QStringLiteral("state_key")).toString() == FUserId &&
+				content.value(QStringLiteral("membership")).toString() == QStringLiteral("invite")) {
+				hasLocalMembershipInvite = true;
+				inviterId = stateEvent.value(QStringLiteral("sender")).toString();
+			}
 			if (stateType == QStringLiteral("m.room.name"))
 				room.name = content.value(QStringLiteral("name")).toString();
 			else if (stateType == QStringLiteral("m.room.topic"))
@@ -3992,6 +4002,10 @@ void MatrixNetwork::onSyncFinished(QNetworkReply *reply)
 		});
 		if (!inviteSaved)
 			qWarning() << "Failed to persist Matrix invite room" << roomId;
+		if (hasLocalMembershipInvite && !FPromptedInviteRoomIds.contains(roomId)) {
+			FPromptedInviteRoomIds.insert(roomId);
+			emit roomInviteReceived(roomId, inviterId, room.name);
+		}
 	}
 	if (!invited.isEmpty())
 		emitRosterSnapshot();
@@ -4032,6 +4046,7 @@ void MatrixNetwork::onSyncFinished(QNetworkReply *reply)
 	const QJsonObject left = rooms.value("leave").toObject();
 	for (auto leftIt = left.constBegin(); leftIt != left.constEnd(); ++leftIt) {
 		const QString roomId = leftIt.key();
+		FPromptedInviteRoomIds.remove(roomId);
 		const ProtocolRoom room = FRooms.value(roomId);
 		bool roomSaved = false;
 		runDatabase([&](MatrixDatabase &database) {
@@ -4961,6 +4976,7 @@ void MatrixNetwork::onSyncFinished(QNetworkReply *reply)
 		if (roomIt.key() != FActiveRoomId)
 			joinedRoomIds.append(roomIt.key());
 	for (const QString &roomId : joinedRoomIds) {
+		FPromptedInviteRoomIds.remove(roomId);
 		const QJsonObject roomData = joined.value(roomId).toObject();
 		if (!FRoomPrevBatch.contains(roomId)) {
 			QString storedPrevBatch;
