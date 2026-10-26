@@ -44,20 +44,22 @@ QNetworkReply *requestPublicRooms(QNetworkAccessManager *manager, const QUrl &en
     const QString server = directoryServer.trimmed();
     if (!server.isEmpty())
         query.addQueryItem(QStringLiteral("server"), server);
+    url.setQuery(query);
+
+    QJsonObject body;
     const QString term = searchTerm.trimmed();
     if (!term.isEmpty()) {
         const QJsonObject filter{{QStringLiteral("generic_search_term"), term}};
-        query.addQueryItem(QStringLiteral("filter"),
-            QString::fromUtf8(QJsonDocument(filter).toJson(QJsonDocument::Compact)));
+        body.insert(QStringLiteral("filter"), filter);
     }
     if (limit > 0)
-        query.addQueryItem(QStringLiteral("limit"), QString::number(limit));
+        body.insert(QStringLiteral("limit"), limit);
     if (!since.isEmpty())
-        query.addQueryItem(QStringLiteral("since"), since);
-    url.setQuery(query);
+        body.insert(QStringLiteral("since"), since);
 
     QNetworkRequest request = buildAuthenticatedRequest(url, accessToken, allowHttp2);
-    return manager->get(request);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    return manager->post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
 }
 
 Result parsePublicRoomsResponse(const QByteArray &responseBody)

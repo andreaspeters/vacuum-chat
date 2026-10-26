@@ -52,13 +52,19 @@ int main(int argc, char **argv)
     room.joinedMemberCount = 7;
     MatrixPublicRooms::Result result;
     result.rooms.append(room);
+    MatrixPublicRooms::Room unrelatedRoom;
+    unrelatedRoom.roomId = QStringLiteral("!general:matrix.example.org");
+    unrelatedRoom.canonicalAlias = QStringLiteral("#general:matrix.example.org");
+    unrelatedRoom.name = QStringLiteral("General");
+    unrelatedRoom.topic = QStringLiteral("A room unrelated to the search");
+    result.rooms.append(unrelatedRoom);
     result.nextBatch = QStringLiteral("cursor-2");
     dialog.setPublicRoomsResult(result);
     auto *rooms = dialog.findChild<QListWidget *>(QStringLiteral("publicRoomsList"));
     auto *joinSelected = dialog.findChild<QPushButton *>(QStringLiteral("joinSelectedButton"));
     if (!rooms || !joinSelected || rooms->count() != 1 ||
         rooms->item(0)->data(Qt::UserRole).toString() != room.roomId)
-        return fail("public-room search result was not rendered with its room ID");
+        return fail("public-room results were not filtered by the search term");
     rooms->setCurrentRow(0);
     bool joinRequested = false;
     QString requestedRoom;

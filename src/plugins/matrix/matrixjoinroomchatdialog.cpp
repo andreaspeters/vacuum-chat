@@ -120,8 +120,15 @@ void MatrixJoinRoomChatDialog::setPublicRoomsResult(const MatrixPublicRooms::Res
         FPublicRooms->clear();
 
     int added = 0;
+    const QString searchTerm = FSearchTerm->text().trimmed();
     for (const MatrixPublicRooms::Room &room : result.rooms) {
         if (room.roomId.isEmpty())
+            continue;
+        if (!searchTerm.isEmpty() &&
+            !room.name.contains(searchTerm, Qt::CaseInsensitive) &&
+            !room.canonicalAlias.contains(searchTerm, Qt::CaseInsensitive) &&
+            !room.topic.contains(searchTerm, Qt::CaseInsensitive) &&
+            !room.roomId.contains(searchTerm, Qt::CaseInsensitive))
             continue;
         bool duplicate = false;
         for (int i = 0; i < FPublicRooms->count(); ++i)

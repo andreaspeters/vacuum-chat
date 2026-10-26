@@ -145,6 +145,8 @@ private:
                 "\"device_lists\":{\"changed\":[],\"left\":[]}}");
         if (path.startsWith(QStringLiteral("/_matrix/client/v3/keys/query")))
             return QByteArrayLiteral("{\"device_keys\":{},\"failures\":{}}");
+        if (path.endsWith(QStringLiteral("/join")))
+            return QByteArrayLiteral("{\"room_id\":\"!unknown-room:example.invalid\"}");
         if (path.contains(QStringLiteral("/send/")))
             return QByteArrayLiteral("{\"event_id\":\"$matrix-local-send-event\"}");
         return QByteArrayLiteral("{}");
@@ -339,6 +341,29 @@ int main(int argc, char **argv)
             sentContent.value(QStringLiteral("body")).toString() ==
                 QStringLiteral("local Matrix send regression"),
             "outgoing Matrix request preserves the message event content");
+
+        const QString unknownRoomId = QStringLiteral("!unknown-room:example.invalid");
+        const QString expectedJoinPath = QStringLiteral("/_matrix/client/v3/rooms/") +
+            QString::fromUtf8(QUrl::toPercentEncoding(unknownRoomId)) + QStringLiteral("/join");
+        const int syncCountBeforeJoin = std::count_if(capturedRequests.cbegin(),
+            capturedRequests.cend(), [](const MatrixLocalApi::CapturedRequest &request) {
+                return request.path.startsWith(QStringLiteral("/_matrix/client/v3/sync"));
+            });
+        network.joinRoom(unknownRoomId);
+        const bool joinedUnknownRoomAndSynced = waitUntil([&]() {
+            const QList<MatrixLocalApi::CapturedRequest> requests = server.requests();
+            const bool joinRequestFound = std::any_of(requests.cbegin(), requests.cend(),
+                [&](const MatrixLocalApi::CapturedRequest &request) {
+                    return request.method == QStringLiteral("POST") && request.path == expectedJoinPath;
+                });
+            const int syncCount = std::count_if(requests.cbegin(), requests.cend(),
+                [](const MatrixLocalApi::CapturedRequest &request) {
+                    return request.path.startsWith(QStringLiteral("/_matrix/client/v3/sync"));
+                });
+            return joinRequestFound && syncCount > syncCountBeforeJoin;
+        }, 1500);
+        passed &= check(joinedUnknownRoomAndSynced,
+            "joining an unknown public room requests a fresh sync after the join succeeds");
 
         network.logout();
         bool logoutRequestFound = false;

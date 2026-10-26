@@ -99,8 +99,8 @@ int testPublicRooms()
         return fail("local HTTP fixture timed out");
     if (reply->error() != QNetworkReply::NoError)
         return fail("public-room request failed against local HTTP fixture");
-    if (!fixture.request.startsWith("GET /_matrix/client/v3/publicRooms?"))
-        return fail("request did not use the Matrix v3 publicRooms GET endpoint");
+    if (!fixture.request.startsWith("POST /_matrix/client/v3/publicRooms?"))
+        return fail("request did not use the Matrix v3 publicRooms POST endpoint");
     if (!containsHeader(fixture.request,
             QByteArrayLiteral("Authorization: Bearer ") + QByteArrayLiteral("synthetic-test-token")))
         return fail("request omitted its bearer token");
@@ -109,14 +109,19 @@ int testPublicRooms()
     const QUrl requestUrl = QUrl::fromEncoded("http://localhost" + requestTarget);
     const QUrlQuery query(requestUrl);
     if (query.queryItemValue(QStringLiteral("server")) != QStringLiteral("directory.example:8448") ||
-        query.queryItemValue(QStringLiteral("limit")) != QStringLiteral("25") ||
-        query.queryItemValue(QStringLiteral("since")) != QStringLiteral("page token+1"))
-        return fail("public-room request query omitted server, limit, or pagination cursor");
-    const QJsonDocument filter = QJsonDocument::fromJson(
-        query.queryItemValue(QStringLiteral("filter")).toUtf8());
-    if (!filter.isObject() || filter.object().value(QStringLiteral("generic_search_term")).toString()
-        != QStringLiteral("classic chat"))
-        return fail("public-room request omitted its generic_search_term filter");
+        !query.queryItemValue(QStringLiteral("limit")).isEmpty() ||
+        !query.queryItemValue(QStringLiteral("since")).isEmpty() ||
+        !query.queryItemValue(QStringLiteral("filter")).isEmpty())
+        return fail("public-room request must keep only server in the query string");
+    if (!containsHeader(fixture.request, QByteArrayLiteral("Content-Type: application/json")))
+        return fail("public-room POST request omitted its JSON content type");
+    const int bodyStart = fixture.request.indexOf("\r\n\r\n") + 4;
+    const QJsonObject requestBody = QJsonDocument::fromJson(fixture.request.mid(bodyStart)).object();
+    const QJsonObject filter = requestBody.value(QStringLiteral("filter")).toObject();
+    if (filter.value(QStringLiteral("generic_search_term")).toString() != QStringLiteral("classic chat") ||
+        requestBody.value(QStringLiteral("limit")).toInt() != 25 ||
+        requestBody.value(QStringLiteral("since")).toString() != QStringLiteral("page token+1"))
+        return fail("public-room POST body omitted its filter or pagination values");
 
     const MatrixPublicRooms::Result result = MatrixPublicRooms::parsePublicRoomsResponse(reply->readAll());
     reply->deleteLater();
