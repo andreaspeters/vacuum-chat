@@ -3975,7 +3975,6 @@ void MatrixNetwork::onSyncFinished(QNetworkReply *reply)
 			});
 			return versions;
 		};
-	QSet<QString> limitedTimelineRooms;
 	QMap<QString, QJsonObject> roomPowerLevelsUpdates;
 	const QJsonObject rooms = obj.value("rooms").toObject();
 	const QJsonObject joined = rooms.value("join").toObject();
@@ -5187,9 +5186,6 @@ void MatrixNetwork::onSyncFinished(QNetworkReply *reply)
 			FLimitedRooms.insert(roomId);
 		else
 			FLimitedRooms.remove(roomId);
-		if (timeline.value(QStringLiteral("limited")).toBool() &&
-			!timeline.value(QStringLiteral("events")).toArray().isEmpty())
-			limitedTimelineRooms.insert(roomId);
 		const QString prevBatch = timeline.value(QStringLiteral("prev_batch")).toString();
 		if (!prevBatch.isEmpty())
 			FRoomPrevBatch.insert(roomId, prevBatch);
@@ -5611,16 +5607,9 @@ void MatrixNetwork::onSyncFinished(QNetworkReply *reply)
 			powerIt != roomPowerLevelsUpdates.constEnd(); ++powerIt)
 			emit roomPowerLevelsChanged(powerIt.key(), powerIt.value());
 	}
-	// A limited /sync timeline means the server omitted an older part of this
-	// room's timeline. Start Matrix /messages recovery independently of whether
-	// the user has already opened that conversation (startup can race UI setup).
-	for (const QString &roomId : limitedTimelineRooms) {
-		if (FRoomPrevBatch.value(roomId).isEmpty())
-			continue;
-		QMetaObject::invokeMethod(this, [this, roomId]() {
-			historyBackfill(roomId, 50);
-		}, Qt::QueuedConnection);
-	}
+	// Keep the /sync timeline cursor for a lazy /messages request when the user
+	// opens this room. Do not backfill every limited room during sync: that
+	// duplicates the initial conversation request and loads unopened history.
 	FInitialSyncComplete = true;
 	if (wasInitialSync) {
 		emit initialSyncCompleted();
@@ -5843,7 +5832,6 @@ QList<MatrixTextEvent> MatrixNetwork::historyBackfill(const QString &roomId, int
 
 	QList<MatrixTextEvent> result;
 	QList<MatrixTimelineEvent> persistedEvents;
-	bool reachedExistingEvent = false;
 	for (const QJsonValue &val : events) {
 		const QJsonObject obj = val.toObject();
 		MatrixTextEvent evt;
@@ -5893,8 +5881,6 @@ QList<MatrixTextEvent> MatrixNetwork::historyBackfill(const QString &roomId, int
 		if (mergeMessageEvent(evt, true)) {
 			persistedEvents.append(stored);
 			result.append(evt);
-		} else if (!evt.eventId.isEmpty()) {
-			reachedExistingEvent = true;
 		}
 	}
 
@@ -5919,15 +5905,9 @@ QList<MatrixTextEvent> MatrixNetwork::historyBackfill(const QString &roomId, int
 		saveMessageHistory(roomId);
 	emit messageHistoryChanged(roomId, FMessageHistory.value(roomId));
 
-	// Continue from the next opaque Matrix token until reaching an event already
-	// cached locally or exhausting the server cursor. Queue one page at a time so
-	// sync and other network work can run between requests.
-	if (!reachedExistingEvent && !nextToken.isEmpty() && nextToken != prevBatch &&
-		FRoomPrevBatch.value(roomId) == nextToken) {
-		QMetaObject::invokeMethod(this, [this, roomId, limit]() {
-			historyBackfill(roomId, limit);
-		}, Qt::QueuedConnection);
-	}
+	// Do not chase the server cursor automatically. The caller owns paging:
+	// initial conversation recovery requests 50 events, while each explicit
+	// older-history request supplies its own (30-event) page limit.
 	return result;
 }
 

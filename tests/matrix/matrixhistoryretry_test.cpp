@@ -508,9 +508,9 @@ int main(int argc, char **argv)
         return fail("could not configure Matrix database worker");
     }
 
-    // A server history page is limited to 50 events. Verify the recovery call
-    // follows the opaque end cursor, includes our own events from another
-    // device, and stops as soon as the local timeline overlaps the server page.
+    // History recovery is lazy: /sync persists the room cursor but does not
+    // fetch history until the user opens the room. Opening fetches one 50-event
+    // page, and an explicit scroll fetches the next page with a 30-event limit.
     const QString backfillRoom = QStringLiteral("!history-backfill:example.org");
     MatrixNetwork backfillNetwork;
     QMetaObject::invokeMethod(&backfillNetwork, "setDatabaseWorker", Qt::DirectConnection,
@@ -543,14 +543,34 @@ int main(int argc, char **argv)
             if (changedRoom == backfillRoom)
                 ++backfillSnapshots;
         });
-    QEventLoop backfillLoop;
-    QObject::connect(&backfillNetwork, &MatrixNetwork::messageHistoryChanged, &backfillLoop,
-        [&](const QString &changedRoom, const QList<MatrixTextEvent> &) {
-            if (changedRoom == backfillRoom && backfillSnapshots >= 2)
-                backfillLoop.quit();
-        });
+    bool initialSyncCompleted = false;
+    QEventLoop syncLoop;
+    QObject::connect(&backfillNetwork, &MatrixNetwork::initialSyncCompleted, &syncLoop,
+        [&]() { initialSyncCompleted = true; syncLoop.quit(); });
     backfillNetwork.sync();
-    waitForEventLoop(backfillLoop, 5000, [&]() { return backfillSnapshots >= 2; });
+    waitForEventLoop(syncLoop, 5000, [&]() { return initialSyncCompleted; });
+    QEventLoop drainLoop;
+    QTimer::singleShot(50, &drainLoop, &QEventLoop::quit);
+    drainLoop.exec();
+
+    const QStringList initialBackfillTargets = backfillServer.targets();
+    for (const QString &target : initialBackfillTargets) {
+        if (target.contains(QStringLiteral("/messages?"))) {
+            stopDatabaseWorker();
+            return fail("limited /sync must not fetch conversation history before the room is opened");
+        }
+    }
+
+    // Simulate opening the conversation: one initial page, capped at 50.
+    backfillNetwork.historyBackfill(backfillRoom, 50);
+    if (backfillSnapshots != 1) {
+        stopDatabaseWorker();
+        return fail("opening a room must fetch exactly one initial history page");
+    }
+
+    // Simulate the user's first scroll-up request: fetch the next page with a
+    // 30-event cap from the opaque cursor returned by the initial page.
+    backfillNetwork.historyBackfill(backfillRoom, 30);
     const QList<MatrixTextEvent> backfilledHistory =
         MatrixNetworkTestAccess::history(backfillNetwork, backfillRoom);
     bool sawSelfSent = false;
@@ -580,9 +600,13 @@ int main(int argc, char **argv)
         QUrlQuery(QUrl(QStringLiteral("http://localhost") + messagePageTargets.value(0)))
                 .queryItemValue(QStringLiteral("from")) != QStringLiteral("cursor-0") ||
         QUrlQuery(QUrl(QStringLiteral("http://localhost") + messagePageTargets.value(1)))
-                .queryItemValue(QStringLiteral("from")) != QStringLiteral("cursor-1")) {
+                .queryItemValue(QStringLiteral("from")) != QStringLiteral("cursor-1") ||
+        QUrlQuery(QUrl(QStringLiteral("http://localhost") + messagePageTargets.value(0)))
+                .queryItemValue(QStringLiteral("limit")) != QStringLiteral("50") ||
+        QUrlQuery(QUrl(QStringLiteral("http://localhost") + messagePageTargets.value(1)))
+                .queryItemValue(QStringLiteral("limit")) != QStringLiteral("30")) {
         stopDatabaseWorker();
-        return fail("Matrix backfill did not paginate missing self-sent events to the known overlap");
+        return fail("Matrix history must fetch one initial 50-event page and only fetch 30 more on scroll");
     }
     MatrixNetworkTestAccess::setAccessToken(backfillNetwork, QString());
 
