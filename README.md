@@ -55,7 +55,7 @@ Configure and build the main application from the repository root:
 ```sh
 mkdir build
 cd build
-cmake -DRUN_FROM_BUILD_DIR=ON ..
+cmake -DRUN_FROM_BUILD_DIR=ON -DHAVE_OLM=1 ..
 make
 ```
 
@@ -73,7 +73,7 @@ environment. From the repository root, configure and build in a fresh directory:
 ```sh
 mkdir build
 cd build
-cmake -DRUN_FROM_BUILD_DIR=ON -DBUILD_SHARED_LIBS=ON ..
+cmake -DRUN_FROM_BUILD_DIR=ON -DHAVE_OLM=1 -DBUILD_SHARED_LIBS=ON ..
 make
 ```
 
@@ -118,7 +118,8 @@ cmake -S . -B "$BUILD_DIR" \
   -DQt6WidgetsTools_DIR="$QT_HOST_PREFIX/lib/cmake/Qt6WidgetsTools" \
   -DRUN_FROM_BUILD_DIR=OFF \
   -DBUILD_SHARED_LIBS=ON \
-  -DCMAKE_BUILD_TYPE=Release
+  -DCMAKE_BUILD_TYPE=Release \
+  -DHAVE_OLM=1
 
 cmake --build "$BUILD_DIR" --parallel 2
 ```
@@ -141,7 +142,7 @@ available, its default generator set also creates an Arch Linux
 ```sh
 mkdir build
 cd build
-cmake -DRUN_FROM_BUILD_DIR=OFF -DCPACK_BINARY_DEB=true ..
+cmake -DRUN_FROM_BUILD_DIR=OFF -DHAVE_OLM=1 -DCPACK_BINARY_DEB=true ..
 make package
 ```
 

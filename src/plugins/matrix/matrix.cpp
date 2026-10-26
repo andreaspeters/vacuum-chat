@@ -997,6 +997,8 @@ void Matrix::showRoomChatDialog(const QString &boundAccountId)
 		FMatrixNetwork, &MatrixNetwork::searchPublicRooms);
 	connect(FMatrixNetwork, &MatrixNetwork::publicRoomsReceived,
 		&dialog, &MatrixJoinRoomChatDialog::setPublicRoomsResult);
+	connect(FMatrixNetwork, &MatrixNetwork::roomMembershipResult,
+		&dialog, &MatrixJoinRoomChatDialog::setRoomMembershipResult);
 	connect(&dialog, &MatrixJoinRoomChatDialog::joinRoomRequested,
 		FMatrixNetwork, &MatrixNetwork::joinRoom);
 	connect(&dialog, &MatrixJoinRoomChatDialog::startDirectChatRequested,

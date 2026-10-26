@@ -18,6 +18,8 @@ public:
 
 public slots:
     void setPublicRoomsResult(const MatrixPublicRooms::Result &result);
+    void setRoomMembershipResult(const QString &roomId, const QString &action,
+        bool success, const QString &error);
     void setDirectRoomCreated(const QString &userId, const QString &roomId, const QString &error);
 
 signals:

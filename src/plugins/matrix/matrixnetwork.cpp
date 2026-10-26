@@ -708,8 +708,11 @@ void MatrixNetwork::setAuthenticatedJsonRequestHeaders(QNetworkRequest &request)
 QNetworkReply *MatrixNetwork::postRoomAction(const QString &roomId, const QString &action,
 	const QJsonObject &content, const QString &requestType, const QString &memberId)
 {
-	const QString path = QStringLiteral("/_matrix/client/v3/rooms/%1/%2")
-		.arg(percentEncodedPathSegment(roomId), action);
+	const QString path = action == QStringLiteral("join")
+		? QStringLiteral("/_matrix/client/v3/join/%1")
+			.arg(percentEncodedPathSegment(roomId))
+		: QStringLiteral("/_matrix/client/v3/rooms/%1/%2")
+			.arg(percentEncodedPathSegment(roomId), action);
 	QNetworkRequest request(QUrl(constructUrl(path)));
 	setAuthenticatedJsonRequestHeaders(request);
 	QNetworkReply *reply = FNetworkAccessManager->post(request,
@@ -1354,8 +1357,12 @@ void MatrixNetwork::onMemberRedactionFinished(QNetworkReply *reply)
 void MatrixNetwork::changeRoomMembership(const QString &roomId, const QString &action)
 {
 	if (roomId.isEmpty() || FAccesToken.isEmpty() || (action != QStringLiteral("join") &&
-		action != QStringLiteral("leave")))
+		action != QStringLiteral("leave"))) {
+		if (action == QStringLiteral("join"))
+			emit roomMembershipResult(roomId, action, false,
+				QStringLiteral("A logged-in Matrix account is required to join a room"));
 		return;
+	}
 	postRoomAction(roomId, action, QJsonObject(), QStringLiteral("room_membership"));
 }
 
@@ -2796,24 +2803,34 @@ void MatrixNetwork::onReplyFinished(QNetworkReply *reply)
 		const QString roomId = reply->property("roomId").toString();
 		const QString action = reply->property("membershipAction").toString();
 		if (reply->error() != QNetworkReply::NoError) {
-			emit syncError(QStringLiteral("Matrix room %1 failed: %2")
-				.arg(action, reply->errorString()));
-		} else if (FRooms.contains(roomId)) {
-			ProtocolRoom &room = FRooms[roomId];
-			room.membership = action;
-			room.isJoined = action == QStringLiteral("join");
-			room.isAvailable = room.isJoined;
-			bool roomSaved = false;
-			runDatabase([&](MatrixDatabase &database) {
-				roomSaved = database.saveRoomState(roomId, room.name, room.subject,
-					room.avatarUrl, action, room.isDirect, room.isEncrypted,
-				room.encryptionStateKnown,
-					QString(), FRoomPrevBatch.value(roomId));
-			});
-			if (!roomSaved)
-				qWarning() << "Failed to persist Matrix membership action" << roomId << action;
-			emitRosterSnapshot();
-			sync();
+			const QJsonObject response = QJsonDocument::fromJson(reply->readAll()).object();
+			const QString serverError = response.value(QStringLiteral("error")).toString();
+			const QString errorCode = response.value(QStringLiteral("errcode")).toString();
+			QString error = serverError.isEmpty() ? reply->errorString() : serverError;
+			if (!errorCode.isEmpty())
+				error = errorCode + QStringLiteral(": ") + error;
+			emit roomMembershipResult(roomId, action, false, error);
+			emit syncError(QStringLiteral("Matrix room %1 failed: %2").arg(action, error));
+		} else {
+			if (FRooms.contains(roomId)) {
+				ProtocolRoom &room = FRooms[roomId];
+				room.membership = action;
+				room.isJoined = action == QStringLiteral("join");
+				room.isAvailable = room.isJoined;
+				bool roomSaved = false;
+				runDatabase([&](MatrixDatabase &database) {
+					roomSaved = database.saveRoomState(roomId, room.name, room.subject,
+						room.avatarUrl, action, room.isDirect, room.isEncrypted,
+						room.encryptionStateKnown,
+						QString(), FRoomPrevBatch.value(roomId));
+				});
+				if (!roomSaved)
+					qWarning() << "Failed to persist Matrix membership action" << roomId << action;
+				emitRosterSnapshot();
+			}
+			emit roomMembershipResult(roomId, action, true, QString());
+			if (!FSyncInFlight)
+				sync();
 		}
 	} else if (type == "room_metadata_state") {
 		onRoomMetadataStateFinished(reply);

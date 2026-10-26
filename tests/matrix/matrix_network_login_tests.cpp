@@ -31,6 +31,11 @@ public:
     {
         return network.FInitialSyncComplete;
     }
+
+    static void setAccessToken(MatrixNetwork &network, const QString &accessToken)
+    {
+        network.FAccesToken = accessToken;
+    }
 };
 
 class MatrixLocalApi final : public QTcpServer
@@ -145,7 +150,8 @@ private:
                 "\"device_lists\":{\"changed\":[],\"left\":[]}}");
         if (path.startsWith(QStringLiteral("/_matrix/client/v3/keys/query")))
             return QByteArrayLiteral("{\"device_keys\":{},\"failures\":{}}");
-        if (path.endsWith(QStringLiteral("/join")))
+        if (path.startsWith(QStringLiteral("/_matrix/client/v3/join/")) ||
+            path.endsWith(QStringLiteral("/join")))
             return QByteArrayLiteral("{\"room_id\":\"!unknown-room:example.invalid\"}");
         if (path.contains(QStringLiteral("/send/")))
             return QByteArrayLiteral("{\"event_id\":\"$matrix-local-send-event\"}");
@@ -342,28 +348,36 @@ int main(int argc, char **argv)
                 QStringLiteral("local Matrix send regression"),
             "outgoing Matrix request preserves the message event content");
 
-        const QString unknownRoomId = QStringLiteral("!unknown-room:example.invalid");
-        const QString expectedJoinPath = QStringLiteral("/_matrix/client/v3/rooms/") +
-            QString::fromUtf8(QUrl::toPercentEncoding(unknownRoomId)) + QStringLiteral("/join");
-        const int syncCountBeforeJoin = std::count_if(capturedRequests.cbegin(),
-            capturedRequests.cend(), [](const MatrixLocalApi::CapturedRequest &request) {
-                return request.path.startsWith(QStringLiteral("/_matrix/client/v3/sync"));
-            });
-        network.joinRoom(unknownRoomId);
+        MatrixLocalApi membershipServer;
+        passed &= check(membershipServer.listen(QHostAddress::LocalHost, 0),
+            "isolated room-membership test server is available");
+        MatrixNetwork membershipProbe;
+        membershipProbe.setServerUrl(QStringLiteral("http://127.0.0.1:%1")
+            .arg(membershipServer.serverPort()));
+        MatrixNetworkTestAccess::setAccessToken(membershipProbe,
+            QStringLiteral("synthetic-membership-token"));
+        const QString roomAlias = QStringLiteral("#os2world:matrix.org");
+        const QString expectedJoinPath = QStringLiteral("/_matrix/client/v3/join/") +
+            QString::fromUtf8(QUrl::toPercentEncoding(roomAlias));
+        membershipProbe.joinRoom(roomAlias);
         const bool joinedUnknownRoomAndSynced = waitUntil([&]() {
-            const QList<MatrixLocalApi::CapturedRequest> requests = server.requests();
-            const bool joinRequestFound = std::any_of(requests.cbegin(), requests.cend(),
-                [&](const MatrixLocalApi::CapturedRequest &request) {
-                    return request.method == QStringLiteral("POST") && request.path == expectedJoinPath;
-                });
-            const int syncCount = std::count_if(requests.cbegin(), requests.cend(),
-                [](const MatrixLocalApi::CapturedRequest &request) {
-                    return request.path.startsWith(QStringLiteral("/_matrix/client/v3/sync"));
-                });
-            return joinRequestFound && syncCount > syncCountBeforeJoin;
+            const QList<MatrixLocalApi::CapturedRequest> requests = membershipServer.requests();
+            int joinRequestIndex = -1;
+            bool syncAfterJoin = false;
+            for (int i = 0; i < requests.size(); ++i) {
+                const MatrixLocalApi::CapturedRequest &request = requests.at(i);
+                if (joinRequestIndex < 0 && request.method == QStringLiteral("POST") &&
+                    request.path == expectedJoinPath)
+                    joinRequestIndex = i;
+                else if (joinRequestIndex >= 0 &&
+                    request.path.startsWith(QStringLiteral("/_matrix/client/v3/sync")))
+                    syncAfterJoin = true;
+            }
+            return joinRequestIndex >= 0 && syncAfterJoin;
         }, 1500);
         passed &= check(joinedUnknownRoomAndSynced,
-            "joining an unknown public room requests a fresh sync after the join succeeds");
+            "joining a Matrix room alias uses the alias join endpoint and syncs after success");
+        membershipProbe.shutdown();
 
         network.logout();
         bool logoutRequestFound = false;

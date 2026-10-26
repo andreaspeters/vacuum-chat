@@ -160,6 +160,17 @@ void MatrixJoinRoomChatDialog::setPublicRoomsResult(const MatrixPublicRooms::Res
         setStatus(FRoomStatus, tr("No public rooms found"));
 }
 
+void MatrixJoinRoomChatDialog::setRoomMembershipResult(const QString &roomId,
+    const QString &action, bool success, const QString &error)
+{
+    if (action != QStringLiteral("join"))
+        return;
+    if (success)
+        setStatus(FRoomStatus, tr("Joined %1. Refreshing the room list…").arg(roomId));
+    else
+        setStatus(FRoomStatus, tr("Could not join %1: %2").arg(roomId, error), true);
+}
+
 void MatrixJoinRoomChatDialog::setDirectRoomCreated(const QString &userId, const QString &roomId,
     const QString &error)
 {
@@ -207,7 +218,7 @@ void MatrixJoinRoomChatDialog::joinSelectedRoom()
     if (roomId.isEmpty())
         return;
     emit joinRoomRequested(roomId);
-    setStatus(FRoomStatus, tr("Join requested for %1; the room will appear after sync.").arg(roomId));
+    setStatus(FRoomStatus, tr("Joining %1…").arg(roomId));
 }
 
 void MatrixJoinRoomChatDialog::joinEnteredRoom()
@@ -218,7 +229,7 @@ void MatrixJoinRoomChatDialog::joinEnteredRoom()
         return;
     }
     emit joinRoomRequested(roomIdOrAlias);
-    setStatus(FRoomStatus, tr("Join requested for %1; the room will appear after sync.").arg(roomIdOrAlias));
+    setStatus(FRoomStatus, tr("Joining %1…").arg(roomIdOrAlias));
 }
 
 void MatrixJoinRoomChatDialog::startDirectChat()

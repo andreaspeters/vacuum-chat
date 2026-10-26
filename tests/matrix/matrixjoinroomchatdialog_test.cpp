@@ -73,6 +73,21 @@ int main(int argc, char **argv)
     joinSelected->click();
     if (!joinRequested || requestedRoom != room.roomId)
         return fail("selected public room did not request joining its Matrix room ID");
+    auto *roomStatus = dialog.findChild<QLabel *>(QStringLiteral("roomStatusLabel"));
+    const bool joinSuccessReported = roomStatus && QMetaObject::invokeMethod(&dialog,
+        "setRoomMembershipResult", Qt::DirectConnection,
+        Q_ARG(QString, room.roomId), Q_ARG(QString, QStringLiteral("join")),
+        Q_ARG(bool, true), Q_ARG(QString, QString()));
+    if (!joinSuccessReported || !roomStatus->text().contains(QStringLiteral("Joined")) ||
+        !roomStatus->text().contains(room.roomId))
+        return fail("successful room join did not update the visible dialog status");
+    const QString joinError = QStringLiteral("M_FORBIDDEN: membership is not allowed");
+    const bool joinFailureReported = QMetaObject::invokeMethod(&dialog,
+        "setRoomMembershipResult", Qt::DirectConnection,
+        Q_ARG(QString, room.roomId), Q_ARG(QString, QStringLiteral("join")),
+        Q_ARG(bool, false), Q_ARG(QString, joinError));
+    if (!joinFailureReported || !roomStatus->text().contains(joinError))
+        return fail("failed room join did not show the Matrix server error");
 
     auto *userId = dialog.findChild<QLineEdit *>(QStringLiteral("directUserIdInput"));
     auto *startDirect = dialog.findChild<QPushButton *>(QStringLiteral("startDirectChatButton"));

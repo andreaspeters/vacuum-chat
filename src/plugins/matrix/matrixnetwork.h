@@ -220,6 +220,8 @@ signals:
 	void displayNameReceived(const QString &userId, const QString &displayName);
 	void roomNameReceived(const QString &roomId, const QString &roomName);
 	void publicRoomsReceived(const MatrixPublicRooms::Result &result);
+	void roomMembershipResult(const QString &roomId, const QString &action,
+		bool success, const QString &error);
 	void directRoomCreated(const QString &userId, const QString &roomId, const QString &error);
 	void rosterChanged(const QList<ProtocolRoom> &rooms);
 	void roomMetadataChanged(const ProtocolRoom &room);

@@ -1,10 +1,11 @@
 ## master
 
 - ADD:    [ui,matrix] Edit already send messages.
-- FIX:    [matrix] message reply bubble
 - ADD:    [matrix, ui] eventid to qframe message object therefore vacuum can find the message easier.
-- FIX:    [matrix] heavy load during message sync.
 - ADD:    [matrix,ui] Invitation window.
+- FIX:    [matrix] heavy load during message sync.
+- FIX:    [matrix] message reply bubble
+- FIX:    [matrix] join a matrix room by id.
 
 ## v2.2.0
 
