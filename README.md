@@ -1,9 +1,12 @@
 # Vacuum Chat
 
-Vacuum Chat 2.0.0 is a Qt 6 desktop messaging application with a modular plugin
-architecture. It offers XMPP account support and an integrated Matrix and Meshcore plugin,
+Vacuum Chat is a Qt 6 desktop messaging application with a modular plugin
+architecture. It offers XMPP, Matrix, APRS Chat, and Meshcore plugin,
 with shared interfaces for conversations, presence, rosters, notifications, and
 message display.
+
+Vacuum Chat is a hard fork of [Vacuum-IM](https://github.com/vacuum-im/vacuum-im). Thanks
+to the original authors.
 
 ## Features
 
