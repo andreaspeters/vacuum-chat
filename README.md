@@ -96,17 +96,23 @@ installation. Do not use OS/2 executables as host tools or mix host Qt libraries
 into the target link.
 
 Set these paths to the prefixes on your build host, then configure once in a
-fresh out-of-tree build directory. The `qt.toolchain.cmake` shipped with the
-OS/2 Qt package selects the target toolchain. Adjust the build directory to
-match the build policy for your environment.
+fresh out-of-tree build directory. In this environment the installed Qt
+`qt.toolchain.cmake` contains a stale default chainload path, so explicitly
+chainload the OS/2 Qt base toolchain. That file selects the OS2EMX compiler and
+sysroot. Adjust the build directory to match the build policy for your
+environment.
 
 ```sh
-QT_OS2_PREFIX=/path/to/os2-qt6-prefix
-QT_HOST_PREFIX=/path/to/linux-qt6-host-prefix
-BUILD_DIR=/path/to/build-vacuum-os2
+QT_HOST_PREFIX=/data/qt6-host
+QT_OS2_PREFIX=/data/qt6-os2-install
+QT_BASE=/data/qt6-base-os2
+OS2EMX_PREFIX=/data/os2emx
+BUILD_DIR=/data/build-nix/vacuum-os2
 
 cmake -S . -B "$BUILD_DIR" \
   -DCMAKE_TOOLCHAIN_FILE="$QT_OS2_PREFIX/lib/cmake/Qt6/qt.toolchain.cmake" \
+  -DQT_CHAINLOAD_TOOLCHAIN_FILE="$QT_BASE/cmake/qt6-os2.cmake" \
+  -DOS2EMX_PREFIX="$OS2EMX_PREFIX" \
   -DCMAKE_PREFIX_PATH="$QT_OS2_PREFIX" \
   -DQt6_DIR="$QT_OS2_PREFIX/lib/cmake/Qt6" \
   -DQt6Core_DIR="$QT_OS2_PREFIX/lib/cmake/Qt6Core" \
@@ -120,9 +126,12 @@ cmake -S . -B "$BUILD_DIR" \
   -DQt6GuiTools_DIR="$QT_HOST_PREFIX/lib/cmake/Qt6GuiTools" \
   -DQt6WidgetsTools_DIR="$QT_HOST_PREFIX/lib/cmake/Qt6WidgetsTools" \
   -DRUN_FROM_BUILD_DIR=OFF \
+  -DBUILD_TESTING=ON \
   -DBUILD_SHARED_LIBS=ON \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DHAVE_OLM=1
+  -DCMAKE_BUILD_TYPE=Release
+
+grep -E '^CMAKE_(C|CXX)_COMPILER:' "$BUILD_DIR/CMakeCache.txt"
+grep -H 'set(CMAKE_SYSTEM_NAME "OS2")' "$BUILD_DIR"/CMakeFiles/*/CMakeSystem.cmake
 
 cmake --build "$BUILD_DIR" --parallel 2
 ```
