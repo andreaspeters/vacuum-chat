@@ -23,7 +23,9 @@ endif (NOT SYSTEM_IDN_FOUND)
 add_translations(TRANSLATIONS "${VACUUM_UTILS_NAME}" ${SOURCES})
 if (OS2)
 	add_library(${VACUUM_UTILS_NAME} SHARED ${SOURCES} ${HEADERS} ${TRANSLATIONS})
-	set_target_properties(${VACUUM_UTILS_NAME} PROPERTIES OUTPUT_NAME "vacuum")
+	set_target_properties(${VACUUM_UTILS_NAME} PROPERTIES
+		OUTPUT_NAME "vacuum"
+		IMPORT_SUFFIX ".lib")
 else()
 	add_library(${VACUUM_UTILS_NAME} SHARED ${SOURCES} ${HEADERS} ${TRANSLATIONS})
 endif()
@@ -89,7 +91,7 @@ if (OS2)
 		COMMENT "Generating OS/2 utility DLL exports"
 		VERBATIM)
 	add_custom_command(TARGET ${VACUUM_UTILS_NAME} POST_BUILD
-		COMMAND "${OS2_EMXIMP_EXECUTABLE}" -q -p16 -o
+		COMMAND "${OS2_EMXIMP_EXECUTABLE}" -q -p128 -o
 			"$<TARGET_LINKER_FILE:${VACUUM_UTILS_NAME}>"
 			"$<TARGET_FILE:${VACUUM_UTILS_NAME}>"
 		COMMENT "Generating OMF import library for ${VACUUM_UTILS_NAME}"

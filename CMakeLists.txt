@@ -50,7 +50,14 @@ if (OS2)
 		"<CMAKE_CXX_COMPILER> <LANGUAGE_COMPILE_FLAGS> <CMAKE_SHARED_LIBRARY_CXX_FLAGS> <LINK_FLAGS> <CMAKE_SHARED_LIBRARY_CREATE_CXX_FLAGS> -o <TARGET> <OBJECTS> <LINK_LIBRARIES> <TARGET_BASE>.def")
 endif (OS2)
 
-find_package(Threads REQUIRED)
+if (OS2)
+	# The OS/2 Qt package exports a dependency on Threads::Threads, but its
+	# threads are provided by the OS/2 platform rather than pthreads_s.a. Avoid
+	# FindThreads: its static try-compile can falsely detect -lpthreads here.
+	add_library(Threads::Threads INTERFACE IMPORTED GLOBAL)
+else()
+	find_package(Threads REQUIRED)
+endif()
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network Xml Sql)
 
 if (OS2)

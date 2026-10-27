@@ -10,6 +10,50 @@ import subprocess
 import sys
 
 
+def collect_object_inputs(
+    link_command_file: pathlib.Path, working_directory: pathlib.Path
+) -> list[pathlib.Path]:
+    """Resolve object-file arguments, including CMake response files."""
+    arguments = shlex.split(link_command_file.read_text(encoding="utf-8"))
+    response_stack: set[pathlib.Path] = set()
+
+    def expand_response_files(items: list[str]):
+        for item in items:
+            if not item.startswith("@") or item == "@":
+                yield item
+                continue
+
+            response_file = pathlib.Path(item[1:])
+            if not response_file.is_absolute():
+                response_file = working_directory / response_file
+            response_file = response_file.resolve()
+            if response_file in response_stack:
+                raise ValueError(f"recursive response file: {response_file}")
+
+            response_stack.add(response_file)
+            try:
+                response_arguments = shlex.split(
+                    response_file.read_text(encoding="utf-8")
+                )
+                yield from expand_response_files(response_arguments)
+            finally:
+                response_stack.remove(response_file)
+
+    objects: list[pathlib.Path] = []
+    for argument in expand_response_files(arguments):
+        if pathlib.Path(argument).suffix.lower() not in {".o", ".obj"}:
+            continue
+        path = pathlib.Path(argument)
+        if not path.is_absolute():
+            path = working_directory / path
+        path = path.resolve()
+        if not path.is_file():
+            raise FileNotFoundError(f"target link input is missing: {path}")
+        if path not in objects:
+            objects.append(path)
+    return objects
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--emxexp", required=True)
@@ -21,23 +65,11 @@ def main() -> int:
     working_directory = pathlib.Path(args.working_directory).resolve()
     link_command_file = pathlib.Path(args.link_command_file)
     try:
-        link_arguments = shlex.split(link_command_file.read_text(encoding="utf-8"))
+        objects = collect_object_inputs(link_command_file, working_directory)
     except (OSError, ValueError) as error:
-        print(f"cannot read target link command {link_command_file}: {error}", file=sys.stderr)
+        print(f"cannot read target link inputs: {error}", file=sys.stderr)
         return 1
 
-    objects: list[pathlib.Path] = []
-    for argument in link_arguments:
-        if argument.lower().endswith(".obj"):
-            path = pathlib.Path(argument)
-            if not path.is_absolute():
-                path = working_directory / path
-            path = path.resolve()
-            if not path.is_file():
-                print(f"target link input is missing: {path}", file=sys.stderr)
-                return 1
-            if path not in objects:
-                objects.append(path)
     if not objects:
         print(f"no OMF object inputs found in {link_command_file}", file=sys.stderr)
         return 1
