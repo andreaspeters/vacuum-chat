@@ -187,6 +187,8 @@ public:
     bool loadDeviceKeys(const QString &userId, const QString &deviceId,
                         QByteArray &keysJson) const;
     QMap<QString, QByteArray> loadDeviceKeysForUser(const QString &userId) const;
+    QMap<QString, QMap<QString, QByteArray>> loadDeviceKeysForUsers(
+        const QStringList &userIds) const;
     bool deviceKeyChanged(const QString &userId, const QString &deviceId) const;
     bool isDeviceVerified(const QString &userId, const QString &deviceId) const;
     bool userVerificationStates(const QStringList &userIds, QMap<QString, bool> &states) const;

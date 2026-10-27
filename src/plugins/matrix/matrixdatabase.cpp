@@ -1673,6 +1673,39 @@ QMap<QString, QByteArray> MatrixDatabase::loadDeviceKeysForUser(const QString &u
     return result;
 }
 
+QMap<QString, QMap<QString, QByteArray>> MatrixDatabase::loadDeviceKeysForUsers(
+    const QStringList &userIds) const
+{
+    QMap<QString, QMap<QString, QByteArray>> result;
+    QStringList uniqueUserIds = userIds;
+    uniqueUserIds.removeAll(QString());
+    uniqueUserIds.removeDuplicates();
+    if (uniqueUserIds.isEmpty() || !FisOpen || !FDatabase.isOpen())
+        return result;
+
+    // Stay below SQLite builds with the traditional 999 bind-parameter limit.
+    constexpr int batchSize = 500;
+    for (int offset = 0; offset < uniqueUserIds.size(); offset += batchSize) {
+        const QStringList batchUserIds = uniqueUserIds.mid(offset, batchSize);
+        QStringList placeholders;
+        for (int i = 0; i < batchUserIds.size(); ++i)
+            placeholders.append(QStringLiteral(":user_%1").arg(i));
+
+        QSqlQuery query(FDatabase);
+        query.prepare(QStringLiteral(
+            "SELECT user_id, device_id, keys_json FROM olm_device_keys "
+            "WHERE user_id IN (%1)").arg(placeholders.join(QLatin1Char(','))));
+        for (int i = 0; i < batchUserIds.size(); ++i)
+            query.bindValue(placeholders.at(i), batchUserIds.at(i));
+        if (!query.exec())
+            return {};
+        while (query.next())
+            result[query.value(0).toString()].insert(query.value(1).toString(),
+                                                     query.value(2).toByteArray());
+    }
+    return result;
+}
+
 bool MatrixDatabase::deviceKeyChanged(const QString &userId, const QString &deviceId) const
 {
     QSqlQuery query(FDatabase);

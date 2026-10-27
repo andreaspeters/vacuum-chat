@@ -640,13 +640,21 @@ void MatrixNetwork::queryDeviceKeysForRoom(const QString &roomId)
 	const auto roomIt = FRooms.constFind(roomId);
 	if (roomIt == FRooms.constEnd() || !roomIt->isEncrypted)
 		return;
+	QStringList usersToLoad;
+	for (const ProtocolRosterEntry &member : roomIt->members) {
+		if (member.isValid && member.id != FUserId && !FDeviceKeyQueries.contains(member.id))
+			usersToLoad.append(member.id);
+	}
+	QMap<QString, QMap<QString, QByteArray>> cachedKeysByUser;
+	if (!usersToLoad.isEmpty()) {
+		runDatabase([&](MatrixDatabase &database) {
+			cachedKeysByUser = database.loadDeviceKeysForUsers(usersToLoad);
+		});
+	}
 	for (const ProtocolRosterEntry &member : roomIt->members) {
 		if (!member.isValid || member.id == FUserId || FDeviceKeyQueries.contains(member.id))
 			continue;
-		QMap<QString, QByteArray> cachedKeys;
-		runDatabase([&](MatrixDatabase &database) {
-			cachedKeys = database.loadDeviceKeysForUser(member.id);
-		});
+		const QMap<QString, QByteArray> cachedKeys = cachedKeysByUser.value(member.id);
 		if (!cachedKeys.isEmpty()) {
 			FDeviceKeyQueries.insert(member.id);
 			qWarning() << "[Matrix-E2EE] loaded cached member device keys for active room:"
@@ -2297,13 +2305,20 @@ void MatrixNetwork::sendRoomEvent(const QString &roomId, const QString &eventTyp
 			QSet<QString> currentRecipients;
 			const auto roomIt = FRooms.constFind(roomId);
 			if (roomIt != FRooms.constEnd()) {
+				QStringList memberIds;
+				for (const ProtocolRosterEntry &member : roomIt->members) {
+					if (member.isValid)
+						memberIds.append(member.id);
+				}
+				QMap<QString, QMap<QString, QByteArray>> devicesByUser;
+				if (!memberIds.isEmpty())
+					runDatabase([&](MatrixDatabase &database) {
+						devicesByUser = database.loadDeviceKeysForUsers(memberIds);
+					});
 				for (const ProtocolRosterEntry &member : roomIt->members) {
 					if (!member.isValid)
 						continue;
-					QMap<QString, QByteArray> devices;
-					runDatabase([&](MatrixDatabase &database) {
-						devices = database.loadDeviceKeysForUser(member.id);
-					});
+					const QMap<QString, QByteArray> devices = devicesByUser.value(member.id);
 					for (auto deviceIt = devices.constBegin(); deviceIt != devices.constEnd(); ++deviceIt)
 						if (!(member.id == FUserId && deviceIt.key() == FDeviceId))
 							currentRecipients.insert(member.id + QLatin1Char('\n') + deviceIt.key());
@@ -6554,13 +6569,20 @@ bool MatrixNetwork::distributeOutboundRoomKey(const QString &roomId, const QStri
 	const auto roomIt = FRooms.constFind(roomId);
 	if (roomIt == FRooms.constEnd() || roomIt->members.isEmpty())
 		return false;
+	QStringList memberIds;
+	for (const ProtocolRosterEntry &member : roomIt->members) {
+		if (member.isValid)
+			memberIds.append(member.id);
+	}
+	QMap<QString, QMap<QString, QByteArray>> devicesByUser;
+	if (!memberIds.isEmpty())
+		runDatabase([&](MatrixDatabase &database) {
+			devicesByUser = database.loadDeviceKeysForUsers(memberIds);
+		});
 	for (const ProtocolRosterEntry &member : roomIt->members) {
 		if (!member.isValid)
 			continue;
-		QMap<QString, QByteArray> devices;
-		runDatabase([&](MatrixDatabase &database) {
-			devices = database.loadDeviceKeysForUser(member.id);
-		});
+		const QMap<QString, QByteArray> devices = devicesByUser.value(member.id);
 		if (devices.isEmpty()) {
 			if (member.id == FUserId)
 				continue;

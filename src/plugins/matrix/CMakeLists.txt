@@ -39,11 +39,11 @@ endif()
 # OS/2-specific additions for libolm runtime DLLs
 if (OS2 AND OLM_FOUND)
 	set(VACUUM_OS2_RUNTIME_DLL_DIR "" CACHE PATH
-		"Directory containing external OS/2 runtime DLLs such as libolm.dll")
+		"Directory containing external OS/2 runtime DLLs such as olm.dll")
 	if (NOT VACUUM_OS2_RUNTIME_DLL_DIR)
 		message(FATAL_ERROR "Set VACUUM_OS2_RUNTIME_DLL_DIR when libolm is enabled for OS/2")
 	endif()
-	set(_vacuum_libolm_dll "${VACUUM_OS2_RUNTIME_DLL_DIR}/libolm.dll")
+	set(_vacuum_libolm_dll "${VACUUM_OS2_RUNTIME_DLL_DIR}/olm.dll")
 	if (NOT EXISTS "${_vacuum_libolm_dll}")
 		message(FATAL_ERROR "Missing required OS/2 libolm runtime DLL: ${_vacuum_libolm_dll}")
 	endif()

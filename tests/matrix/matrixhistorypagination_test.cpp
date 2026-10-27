@@ -383,6 +383,49 @@ int runMatrixHistoryBackupTests()
     return 0;
 }
 
+int runBatchedDeviceKeysTest()
+{
+    QTemporaryDir profile;
+    if (!profile.isValid())
+        return fail("could not create temporary device-key profile");
+    MatrixDatabase database;
+    database.setProfileDirectory(profile.path());
+    if (!database.openForAccount(QStringLiteral("https://example.org"),
+                                 QStringLiteral("@batch-test:example.org")))
+        return fail("could not open temporary device-key database");
+    if (!database.saveDeviceKeys(QStringLiteral("@alice:example.org"), QStringLiteral("A"),
+        QByteArrayLiteral("{\"keys\":{\"ed25519:A\":\"alice-A\"}}")) ||
+        !database.saveDeviceKeys(QStringLiteral("@alice:example.org"), QStringLiteral("B"),
+        QByteArrayLiteral("{\"keys\":{\"ed25519:B\":\"alice-B\"}}")) ||
+        !database.saveDeviceKeys(QStringLiteral("@bob:example.org"), QStringLiteral("C"),
+        QByteArrayLiteral("{\"keys\":{\"ed25519:C\":\"bob-C\"}}")))
+        return fail("could not seed synthetic device keys");
+
+    const auto keys = database.loadDeviceKeysForUsers({
+        QStringLiteral("@alice:example.org"), QStringLiteral("@bob:example.org"),
+        QStringLiteral("@alice:example.org"), QString()});
+    if (keys.size() != 2 || keys.value(QStringLiteral("@alice:example.org")).size() != 2 ||
+        keys.value(QStringLiteral("@alice:example.org")).value(QStringLiteral("A")) !=
+            QByteArrayLiteral("{\"keys\":{\"ed25519:A\":\"alice-A\"}}") ||
+        keys.value(QStringLiteral("@alice:example.org")).value(QStringLiteral("B")) !=
+            QByteArrayLiteral("{\"keys\":{\"ed25519:B\":\"alice-B\"}}") ||
+        keys.value(QStringLiteral("@bob:example.org")).size() != 1 ||
+        keys.value(QStringLiteral("@bob:example.org")).value(QStringLiteral("C")) !=
+            QByteArrayLiteral("{\"keys\":{\"ed25519:C\":\"bob-C\"}}"))
+        return fail("batched device-key load must preserve user/device mapping and deduplicate IDs");
+    if (!database.loadDeviceKeysForUsers({}).isEmpty())
+        return fail("empty batched device-key request must return no rows");
+
+    QStringList largeUserSet{QStringLiteral("@alice:example.org"),
+                              QStringLiteral("@bob:example.org")};
+    for (int i = 0; i < 501; ++i)
+        largeUserSet.append(QStringLiteral("@absent-%1:example.org").arg(i));
+    const auto chunkedKeys = database.loadDeviceKeysForUsers(largeUserSet);
+    if (chunkedKeys != keys)
+        return fail("batched device-key load must handle more users than one SQLite bind batch");
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
@@ -390,6 +433,7 @@ int main(int argc, char **argv)
     const int paginationResult = runHistoryPaginationTest();
     const int backfillResult = runHistoryBackfillTest();
     const int encryptedQueryResult = runPendingEncryptedEventQueryTest();
+    const int batchedDeviceKeysResult = runBatchedDeviceKeysTest();
     return backupResult == 0 && paginationResult == 0 && backfillResult == 0 &&
-        encryptedQueryResult == 0 ? 0 : 1;
+        encryptedQueryResult == 0 && batchedDeviceKeysResult == 0 ? 0 : 1;
 }
