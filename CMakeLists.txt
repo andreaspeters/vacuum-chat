@@ -1,30 +1,50 @@
 cmake_minimum_required(VERSION 3.16)
 
+set(_vacuum_os2_cross_compile_default OFF)
+if (DEFINED ENV{OS2EMX_PREFIX} AND NOT "$ENV{OS2EMX_PREFIX}" STREQUAL "")
+	set(_vacuum_os2_cross_compile_default ON)
+endif()
 option(VACUUM_OS2_CROSS_COMPILE
 	"Cross-compile Vacuum and its plugins for OS/2 using the Qt6 OS/2 toolchain"
-	OFF)
+	${_vacuum_os2_cross_compile_default})
 set(VACUUM_OS2_TOOLCHAIN_FILE ""
 	CACHE FILEPATH "CMake toolchain file used by VACUUM_OS2_CROSS_COMPILE")
 if (VACUUM_OS2_CROSS_COMPILE AND NOT CMAKE_TOOLCHAIN_FILE)
 	if ("${VACUUM_OS2_TOOLCHAIN_FILE}" STREQUAL "")
-		set(_vacuum_default_os2_toolchain
-			"${CMAKE_SOURCE_DIR}/../qt6-base-os2/qt6-base-os2/cmake/qt6-os2.cmake")
-		if (EXISTS "${_vacuum_default_os2_toolchain}")
-			set(VACUUM_OS2_TOOLCHAIN_FILE "${_vacuum_default_os2_toolchain}"
-				CACHE FILEPATH "CMake toolchain file used by VACUUM_OS2_CROSS_COMPILE" FORCE)
-		endif()
+		foreach(_vacuum_toolchain_candidate
+				"$ENV{CMAKE_TOOLCHAIN_FILE}"
+				"$ENV{OS2EMX_CMAKE_TOOLCHAIN_FILE}"
+				"${CMAKE_SOURCE_DIR}/../crosscompiling/qt6-base-os2/cmake/qt6-os2.cmake")
+			if (NOT "${_vacuum_toolchain_candidate}" STREQUAL "" AND
+				EXISTS "${_vacuum_toolchain_candidate}")
+				set(VACUUM_OS2_TOOLCHAIN_FILE "${_vacuum_toolchain_candidate}"
+					CACHE FILEPATH "CMake toolchain file used by VACUUM_OS2_CROSS_COMPILE")
+				break()
+			endif()
+		endforeach()
 	endif()
 	if ("${VACUUM_OS2_TOOLCHAIN_FILE}" STREQUAL "")
 		message(FATAL_ERROR
 			"VACUUM_OS2_CROSS_COMPILE requires CMAKE_TOOLCHAIN_FILE or "
-			"VACUUM_OS2_TOOLCHAIN_FILE")
+			"VACUUM_OS2_TOOLCHAIN_FILE. Enter the OS/2 shell or set the toolchain path.")
 	endif()
 	set(CMAKE_TOOLCHAIN_FILE "${VACUUM_OS2_TOOLCHAIN_FILE}"
 		CACHE FILEPATH "CMake toolchain file" FORCE)
 endif()
 
+if (VACUUM_OS2_CROSS_COMPILE AND NOT OS2EMX_PREFIX AND
+	DEFINED ENV{OS2EMX_PREFIX})
+	set(OS2EMX_PREFIX "$ENV{OS2EMX_PREFIX}" CACHE PATH
+		"OS/2 cross-compilation prefix")
+endif()
+
+if (VACUUM_OS2_CROSS_COMPILE AND NOT CMAKE_BUILD_TYPE)
+	# The installed OS/2 Qt packages provide Release imported configurations.
+	set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
 set(VERSION "2.2.0")
-project(vacuum-chat VERSION "${VERSION}" LANGUAGES CXX)
+project(vacuum-chat VERSION "${VERSION}" LANGUAGES C CXX)
 add_compile_definitions(CLIENT_VERSION=\"${PROJECT_VERSION}\")
 
 set(VACUUM_PYTHON_EXECUTABLE "python3" CACHE STRING "Python interpreter used by the check target")
@@ -58,6 +78,53 @@ if (OS2)
 else()
 	find_package(Threads REQUIRED)
 endif()
+
+if (VACUUM_OS2_CROSS_COMPILE AND OS2EMX_PREFIX)
+	set(_vacuum_qt_target_prefix "${OS2EMX_PREFIX}")
+	if (NOT QT_HOST_PATH)
+		if (DEFINED ENV{QT_HOST_PATH} AND NOT "$ENV{QT_HOST_PATH}" STREQUAL "")
+			set(QT_HOST_PATH "$ENV{QT_HOST_PATH}")
+		else()
+			# The OS/2 Nix prefix also contains the native Qt host-tool packages.
+			set(QT_HOST_PATH "${_vacuum_qt_target_prefix}")
+		endif()
+	endif()
+	if (NOT QT_HOST_PATH_CMAKE_DIR)
+		set(QT_HOST_PATH_CMAKE_DIR "${QT_HOST_PATH}/lib/cmake" CACHE PATH
+			"Directory containing host Qt CMake packages")
+	endif()
+	if (NOT Qt6_DIR OR "${Qt6_DIR}" MATCHES "-NOTFOUND$")
+		set(Qt6_DIR "${_vacuum_qt_target_prefix}/lib/cmake/Qt6" CACHE PATH
+			"OS/2 Qt6 package directory" FORCE)
+	endif()
+	if (NOT CMAKE_PREFIX_PATH)
+		set(CMAKE_PREFIX_PATH "${_vacuum_qt_target_prefix}" CACHE STRING
+			"Search prefix for OS/2 Qt packages")
+	elseif (NOT "${_vacuum_qt_target_prefix}" IN_LIST CMAKE_PREFIX_PATH)
+		list(PREPEND CMAKE_PREFIX_PATH "${_vacuum_qt_target_prefix}")
+		set(CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH}" CACHE STRING
+			"Search prefix for OS/2 Qt packages" FORCE)
+	endif()
+	foreach(_vacuum_qt_component Core Gui Widgets Network Xml Sql SerialPort)
+		set(_vacuum_qt_component_dir
+			"${_vacuum_qt_target_prefix}/lib/cmake/Qt6${_vacuum_qt_component}")
+		if (EXISTS "${_vacuum_qt_component_dir}/Qt6${_vacuum_qt_component}Config.cmake" AND
+			NOT Qt6${_vacuum_qt_component}_DIR)
+			set(Qt6${_vacuum_qt_component}_DIR "${_vacuum_qt_component_dir}"
+				CACHE PATH "OS/2 Qt6${_vacuum_qt_component} package directory")
+		endif()
+	endforeach()
+	foreach(_vacuum_qt_tool_component Core Gui Widgets)
+		set(_vacuum_qt_tool_dir
+			"${QT_HOST_PATH}/lib/cmake/Qt6${_vacuum_qt_tool_component}Tools")
+		if (EXISTS "${_vacuum_qt_tool_dir}/Qt6${_vacuum_qt_tool_component}ToolsConfig.cmake" AND
+			NOT Qt6${_vacuum_qt_tool_component}Tools_DIR)
+			set(Qt6${_vacuum_qt_tool_component}Tools_DIR "${_vacuum_qt_tool_dir}"
+				CACHE PATH "Host Qt6${_vacuum_qt_tool_component}Tools package directory")
+		endif()
+	endforeach()
+endif()
+
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network Xml Sql)
 
 if (OS2)

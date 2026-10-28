@@ -57,6 +57,9 @@ if (IS_ENABLED)
 			file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/plugins")
 			configure_file("${_os2_plugin_def_source}"
 				"${CMAKE_BINARY_DIR}/plugins/${_os2_plugin_def_name}.def" COPYONLY)
+			# Ninja's OS/2 linker uses the full target filename as the .def base.
+			configure_file("${_os2_plugin_def_source}"
+				"${CMAKE_BINARY_DIR}/plugins/${_os2_plugin_def_name}.dll.def" COPYONLY)
 		endif()
 	endif (OS2)
 	set_target_properties(${PLUGIN_NAME} PROPERTIES

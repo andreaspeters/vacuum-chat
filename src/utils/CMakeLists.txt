@@ -81,12 +81,23 @@ if (OS2)
 	if (NOT OS2_EMXIMP_EXECUTABLE)
 		message(FATAL_ERROR "OS/2 utility target requires emximp")
 	endif()
+	set(_vacuum_export_output "$<TARGET_FILE:${VACUUM_UTILS_NAME}>.def")
+	if (CMAKE_GENERATOR STREQUAL "Ninja")
+		set(_vacuum_export_input_arguments
+			"-DNINJA_EXECUTABLE=${CMAKE_MAKE_PROGRAM}"
+			"-DNINJA_TARGET=$<TARGET_FILE:${VACUUM_UTILS_NAME}>"
+			"-DNINJA_BUILD_DIRECTORY=${CMAKE_BINARY_DIR}"
+			"-DOUTPUT_FILE=${_vacuum_export_output}")
+	else()
+		set(_vacuum_export_input_arguments
+			"-DLINK_COMMAND_FILE=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${VACUUM_UTILS_NAME}.dir/link.txt"
+			"-DLINK_WORKING_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}"
+			"-DOUTPUT_FILE=${_vacuum_export_output}")
+	endif()
 	add_custom_command(TARGET ${VACUUM_UTILS_NAME} PRE_LINK
 		COMMAND "${CMAKE_COMMAND}"
 			"-DEMXEXP=${OS2_EMXEXP_EXECUTABLE}"
-			"-DLINK_COMMAND_FILE=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${VACUUM_UTILS_NAME}.dir/link.txt"
-			"-DLINK_WORKING_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}"
-			"-DOUTPUT_FILE=${CMAKE_BINARY_DIR}/vacuum.def"
+			${_vacuum_export_input_arguments}
 			-P "${CMAKE_CURRENT_SOURCE_DIR}/generate_os2_exports.cmake"
 		COMMENT "Generating OS/2 utility DLL exports"
 		VERBATIM)

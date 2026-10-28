@@ -95,24 +95,28 @@ Linux host tools such as `moc`, `rcc`, and `uic` must come from the host Qt
 installation. Do not use OS/2 executables as host tools or mix host Qt libraries
 into the target link.
 
-Set these paths to the prefixes on your build host, then configure once in a
-fresh out-of-tree build directory. In this environment the installed Qt
-`qt.toolchain.cmake` contains a stale default chainload path, so explicitly
-chainload the OS/2 Qt base toolchain. That file selects the OS2EMX compiler and
-sysroot. Adjust the build directory to match the build policy for your
-environment.
+Enter the `/data/shell.nix` environment first so `OS2EMX_PREFIX` and the target
+tools are available. Set `QT_BASE_SOURCE` to the Qt 6.2 OS/2 source tree, and
+set `QT_OS2_PREFIX` and `QT_HOST_PREFIX` to the target Qt installation and the
+native Linux Qt host-tools installation respectively. In the current setup the
+host tools are packaged in the same prefix, so `QT_HOST_PREFIX` defaults to
+`QT_OS2_PREFIX`. Use a build directory outside the source tree and configure
+with the Qt OS/2 toolchain directly; the installed `qt.toolchain.cmake` has a
+stale default chainload path.
 
 ```sh
-QT_HOST_PREFIX=/data/qt6-host
-QT_OS2_PREFIX=/data/qt6-os2-install
-QT_BASE=/data/qt6-base-os2
-OS2EMX_PREFIX=/data/os2emx
-BUILD_DIR=/data/build-nix/vacuum-os2
+QT_BASE_SOURCE="${QT_BASE_SOURCE:-$HOME/Projekte/os2/crosscompiling/qt6-base-os2}"
+QT_OS2_PREFIX="${QT_OS2_PREFIX:-${OS2EMX_PREFIX:?Enter /data/shell.nix first}}"
+QT_HOST_PREFIX="${QT_HOST_PREFIX:-$QT_OS2_PREFIX}"
+BUILD_DIR="${BUILD_DIR:-$HOME/.cache/vacuum-os2/os2-build}"
+VACUUM_SOURCE="$(pwd)"
 
-cmake -S . -B "$BUILD_DIR" \
-  -DCMAKE_TOOLCHAIN_FILE="$QT_OS2_PREFIX/lib/cmake/Qt6/qt.toolchain.cmake" \
-  -DQT_CHAINLOAD_TOOLCHAIN_FILE="$QT_BASE/cmake/qt6-os2.cmake" \
-  -DOS2EMX_PREFIX="$OS2EMX_PREFIX" \
+mkdir -p "$BUILD_DIR"
+cmake -S "$VACUUM_SOURCE" -B "$BUILD_DIR" \
+  -G "Unix Makefiles" \
+  -DCMAKE_MAKE_PROGRAM="$(command -v make)" \
+  -DCMAKE_TOOLCHAIN_FILE="$QT_BASE_SOURCE/cmake/qt6-os2.cmake" \
+  -DOS2EMX_PREFIX="$QT_OS2_PREFIX" \
   -DCMAKE_PREFIX_PATH="$QT_OS2_PREFIX" \
   -DQt6_DIR="$QT_OS2_PREFIX/lib/cmake/Qt6" \
   -DQt6Core_DIR="$QT_OS2_PREFIX/lib/cmake/Qt6Core" \
@@ -121,7 +125,9 @@ cmake -S . -B "$BUILD_DIR" \
   -DQt6Network_DIR="$QT_OS2_PREFIX/lib/cmake/Qt6Network" \
   -DQt6Xml_DIR="$QT_OS2_PREFIX/lib/cmake/Qt6Xml" \
   -DQt6Sql_DIR="$QT_OS2_PREFIX/lib/cmake/Qt6Sql" \
+  -DQt6SerialPort_DIR="$QT_OS2_PREFIX/lib/cmake/Qt6SerialPort" \
   -DQT_HOST_PATH="$QT_HOST_PREFIX" \
+  -DQT_HOST_PATH_CMAKE_DIR="$QT_HOST_PREFIX/lib/cmake" \
   -DQt6CoreTools_DIR="$QT_HOST_PREFIX/lib/cmake/Qt6CoreTools" \
   -DQt6GuiTools_DIR="$QT_HOST_PREFIX/lib/cmake/Qt6GuiTools" \
   -DQt6WidgetsTools_DIR="$QT_HOST_PREFIX/lib/cmake/Qt6WidgetsTools" \
@@ -130,10 +136,8 @@ cmake -S . -B "$BUILD_DIR" \
   -DBUILD_SHARED_LIBS=ON \
   -DCMAKE_BUILD_TYPE=Release
 
-grep -E '^CMAKE_(C|CXX)_COMPILER:' "$BUILD_DIR/CMakeCache.txt"
-grep -H 'set(CMAKE_SYSTEM_NAME "OS2")' "$BUILD_DIR"/CMakeFiles/*/CMakeSystem.cmake
-
 cmake --build "$BUILD_DIR" --parallel 2
+
 ```
 
 Keep the target Qt prefix, host Qt prefix, and build directory separate. If the

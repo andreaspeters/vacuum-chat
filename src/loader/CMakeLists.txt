@@ -58,7 +58,7 @@ if (OS2)
 		DESTINATION "${INSTALL_PLUGINS}/sqldrivers")
 	# Install the Qt SerialPort runtime DLL used by Vacuum plugins.
 	# Resolve it from the same Qt prefix and fail early if it is unavailable.
-	get_filename_component(_vacuum_qt_dll_dir "${_vacuum_qt_prefix}/bin" ABSOLUTE)
+	get_filename_component(_vacuum_qt_dll_dir "${_vacuum_qt_prefix}/lib" ABSOLUTE)
 	set(_vacuum_qtsp_dll "${_vacuum_qt_dll_dir}/Qt6SP.dll")
 	if (NOT EXISTS "${_vacuum_qtsp_dll}")
 		message(FATAL_ERROR "Missing required OS/2 Qt runtime library: ${_vacuum_qtsp_dll}")
