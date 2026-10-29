@@ -122,7 +122,8 @@ bool MeshCoreBleTransport::sendPayload(const QByteArray &payload)
 
 void MeshCoreBleTransport::onDeviceDiscovered(const QBluetoothDeviceInfo &device)
 {
-    if (m_controller || device.address() != m_targetAddress ||
+    if (!m_lifecycle.acceptsControllerCallbacks() || m_controller ||
+        device.address() != m_targetAddress ||
         !device.coreConfigurations().testFlag(QBluetoothDeviceInfo::LowEnergyCoreConfiguration))
         return;
 
@@ -148,12 +149,16 @@ void MeshCoreBleTransport::onDeviceDiscovered(const QBluetoothDeviceInfo &device
 
 void MeshCoreBleTransport::onDiscoveryFinished()
 {
+    if (!m_lifecycle.acceptsControllerCallbacks())
+        return;
     if (!m_controller)
         fail(tr("Configured BLE device was not discovered"));
 }
 
 void MeshCoreBleTransport::onDiscoveryError(QBluetoothDeviceDiscoveryAgent::Error error)
 {
+    if (!m_lifecycle.acceptsControllerCallbacks())
+        return;
     if (error == QBluetoothDeviceDiscoveryAgent::NoError)
         return;
     const QString message = m_discoveryAgent
@@ -164,12 +169,14 @@ void MeshCoreBleTransport::onDiscoveryError(QBluetoothDeviceDiscoveryAgent::Erro
 
 void MeshCoreBleTransport::onControllerConnected()
 {
-    if (m_controller)
+    if (m_lifecycle.acceptsControllerCallbacks() && m_controller)
         m_controller->discoverServices();
 }
 
 void MeshCoreBleTransport::onControllerDisconnected()
 {
+    if (!m_lifecycle.acceptsControllerCallbacks())
+        return;
     if (m_isConnected)
         cleanup();
     else
@@ -191,12 +198,16 @@ void MeshCoreBleTransport::onControllerDestroyed()
 
 void MeshCoreBleTransport::onControllerDiscoveryFinished()
 {
+    if (!m_lifecycle.acceptsControllerCallbacks())
+        return;
     if (!m_service)
         fail(tr("MeshCore UART service was not found"));
 }
 
 void MeshCoreBleTransport::onControllerError(QLowEnergyController::Error error)
 {
+    if (!m_lifecycle.acceptsControllerCallbacks())
+        return;
     if (error == QLowEnergyController::NoError)
         return;
     const QString message = m_controller
@@ -207,7 +218,8 @@ void MeshCoreBleTransport::onControllerError(QLowEnergyController::Error error)
 
 void MeshCoreBleTransport::onServiceDiscovered(const QBluetoothUuid &serviceUuid)
 {
-    if (m_service || serviceUuid != MeshCoreUartServiceUuid || !m_controller)
+    if (!m_lifecycle.acceptsControllerCallbacks() || m_service ||
+        serviceUuid != MeshCoreUartServiceUuid || !m_controller)
         return;
 
     m_service = m_controller->createServiceObject(serviceUuid, this);
@@ -231,6 +243,8 @@ void MeshCoreBleTransport::onServiceDiscovered(const QBluetoothUuid &serviceUuid
 
 void MeshCoreBleTransport::onServiceStateChanged(QLowEnergyService::ServiceState state)
 {
+    if (!m_lifecycle.acceptsControllerCallbacks())
+        return;
     if (state == QLowEnergyService::RemoteServiceDiscovered)
         setupCharacteristics();
     else if (state == QLowEnergyService::InvalidService)
@@ -239,13 +253,16 @@ void MeshCoreBleTransport::onServiceStateChanged(QLowEnergyService::ServiceState
 
 void MeshCoreBleTransport::onServiceError(QLowEnergyService::ServiceError error)
 {
+    if (!m_lifecycle.acceptsControllerCallbacks())
+        return;
     if (error != QLowEnergyService::NoError)
         fail(tr("MeshCore GATT service operation failed (%1)").arg(static_cast<int>(error)));
 }
 
 void MeshCoreBleTransport::setupCharacteristics()
 {
-    if (!m_service || m_notificationWritePending || m_isConnected)
+    if (!m_lifecycle.acceptsControllerCallbacks() || !m_service ||
+        m_notificationWritePending || m_isConnected)
         return;
 
     m_rxCharacteristic = m_service->characteristic(MeshCoreUartRxUuid);
@@ -284,14 +301,16 @@ void MeshCoreBleTransport::setupCharacteristics()
 void MeshCoreBleTransport::onCharacteristicChanged(
     const QLowEnergyCharacteristic &characteristic, const QByteArray &value)
 {
-    if (isConnected() && characteristic.uuid() == m_txCharacteristic.uuid())
+    if (m_lifecycle.acceptsControllerCallbacks() && isConnected() &&
+        characteristic.uuid() == m_txCharacteristic.uuid())
         emit packetReceived(value);
 }
 
 void MeshCoreBleTransport::onCharacteristicWritten(
     const QLowEnergyCharacteristic &characteristic, const QByteArray &value)
 {
-    if (!m_writeInProgress || characteristic.uuid() != m_rxCharacteristic.uuid())
+    if (!m_lifecycle.acceptsControllerCallbacks() || !m_writeInProgress ||
+        characteristic.uuid() != m_rxCharacteristic.uuid())
         return;
     if (m_pendingWrites.isEmpty() || m_pendingWrites.head() != value) {
         fail(tr("BLE write completion did not match the queued payload"));
@@ -306,7 +325,8 @@ void MeshCoreBleTransport::onCharacteristicWritten(
 void MeshCoreBleTransport::onDescriptorWritten(
     const QLowEnergyDescriptor &descriptor, const QByteArray &value)
 {
-    if (!m_notificationWritePending || descriptor != m_cccd)
+    if (!m_lifecycle.acceptsControllerCallbacks() ||
+        !m_notificationWritePending || descriptor != m_cccd)
         return;
     if (value != m_notificationValue) {
         fail(tr("BLE notification subscription was rejected"));

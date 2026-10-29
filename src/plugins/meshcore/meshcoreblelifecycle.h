@@ -24,6 +24,11 @@ public:
         return m_state;
     }
 
+    bool acceptsControllerCallbacks() const
+    {
+        return m_state == State::Opening || m_state == State::Connected;
+    }
+
     OpenDisposition requestOpen()
     {
         if (m_state == State::Closing) {

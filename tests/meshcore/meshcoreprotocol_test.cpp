@@ -275,22 +275,30 @@ bool testBleLifecyclePolicy()
         }
     };
 
+    expect(!lifecycle.acceptsControllerCallbacks(),
+           "idle session must reject stale controller callbacks");
     expect(lifecycle.requestOpen() == MeshCoreBleLifecycle::OpenDisposition::Start,
            "idle open should start a session");
     expect(lifecycle.state() == MeshCoreBleLifecycle::State::Opening,
            "session should enter Opening");
+    expect(lifecycle.acceptsControllerCallbacks(),
+           "opening session should accept controller callbacks");
     expect(lifecycle.requestOpen() == MeshCoreBleLifecycle::OpenDisposition::AlreadyActive,
            "repeated open while opening should be idempotent");
 
     lifecycle.markConnected();
     expect(lifecycle.state() == MeshCoreBleLifecycle::State::Connected,
            "connected callback should advance session state");
+    expect(lifecycle.acceptsControllerCallbacks(),
+           "connected session should accept controller callbacks");
     expect(lifecycle.requestOpen() == MeshCoreBleLifecycle::OpenDisposition::AlreadyActive,
            "repeated open while connected should be idempotent");
 
     lifecycle.beginClose();
     expect(lifecycle.state() == MeshCoreBleLifecycle::State::Closing,
            "close should retain Closing until controller disconnects");
+    expect(!lifecycle.acceptsControllerCallbacks(),
+           "closing session must reject callbacks already queued by Qt");
     expect(lifecycle.requestOpen() == MeshCoreBleLifecycle::OpenDisposition::Deferred &&
                lifecycle.hasPendingOpen(),
            "open during Closing should be deferred");
@@ -301,6 +309,8 @@ bool testBleLifecyclePolicy()
     expect(lifecycle.state() == MeshCoreBleLifecycle::State::Idle &&
                !lifecycle.hasPendingOpen(),
            "close completion should consume the deferred open request");
+    expect(!lifecycle.acceptsControllerCallbacks(),
+           "completed session must reject stale controller callbacks");
 
     lifecycle.requestOpen();
     lifecycle.beginClose();
