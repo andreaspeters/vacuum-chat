@@ -47,15 +47,30 @@ if (OS2)
 	get_filename_component(_vacuum_qt_prefix "${Qt6Gui_DIR}/../../.." ABSOLUTE)
 	set(_vacuum_qos2_plugin "${_vacuum_qt_prefix}/plugins/platforms/qos2.dll")
 	set(_vacuum_qsqlite_plugin "${_vacuum_qt_prefix}/plugins/sqldrivers/qsqlite.dll")
-	foreach(_vacuum_qt_plugin IN ITEMS "${_vacuum_qos2_plugin}" "${_vacuum_qsqlite_plugin}")
+	set(_vacuum_qopenssl_plugin "${_vacuum_qt_prefix}/plugins/tls/qopenssl.dll")
+	foreach(_vacuum_qt_plugin IN ITEMS
+			"${_vacuum_qos2_plugin}"
+			"${_vacuum_qsqlite_plugin}"
+			"${_vacuum_qopenssl_plugin}")
 		if (NOT EXISTS "${_vacuum_qt_plugin}")
 			message(FATAL_ERROR "Missing required OS/2 Qt runtime plugin: ${_vacuum_qt_plugin}")
 		endif()
 	endforeach()
+	# Fail rather than repackage the bundled QSQLite VFS, which cannot open
+	# file-backed databases on OS/2. The fixed plugin imports sqlite30.dll.
+	file(STRINGS "${_vacuum_qsqlite_plugin}" _vacuum_qsqlite_sqlite_import
+		REGEX "[Ss][Qq][Ll][Ii][Tt][Ee]30")
+	if (NOT _vacuum_qsqlite_sqlite_import)
+		message(FATAL_ERROR
+			"The OS/2 QSQLITE plugin must link sqlite30.dll; rebuild Qt with "
+			"the OS/2 system SQLite import library before building Vacuum.")
+	endif()
 	install(FILES "${_vacuum_qos2_plugin}"
 		DESTINATION "${INSTALL_PLUGINS}/platforms")
 	install(FILES "${_vacuum_qsqlite_plugin}"
 		DESTINATION "${INSTALL_PLUGINS}/sqldrivers")
+	install(FILES "${_vacuum_qopenssl_plugin}"
+		DESTINATION "${INSTALL_PLUGINS}/tls")
 	# Install the Qt SerialPort runtime DLL used by Vacuum plugins.
 	# Resolve it from the same Qt prefix and fail early if it is unavailable.
 	get_filename_component(_vacuum_qt_dll_dir "${_vacuum_qt_prefix}/lib" ABSOLUTE)
