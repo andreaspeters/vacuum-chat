@@ -28,6 +28,7 @@ class UTILS_EXPORT ImageLoadScheduler : public QObject
 public:
     using Completion = std::function<void(const QImage &)>;
     using Operation = std::function<void(Completion)>;
+    using DataTransform = std::function<QByteArray(const QByteArray &)>;
 
     static ImageLoadScheduler *instance();
     static QString fileKey(const QString &path);
@@ -45,7 +46,11 @@ public:
     // They do not consume another scheduler slot and return on this object's
     // thread; the enclosing operation remains active until its Completion runs.
     void decodeFileAsync(const QString &path, const Completion &callback);
+    void decodeFileAsync(const QString &path, const DataTransform &transform,
+                         const Completion &callback);
     void decodeDataAsync(const QByteArray &data, const Completion &callback);
+    void decodeDataAsync(const QByteArray &data, const DataTransform &transform,
+                         const Completion &callback);
 
 private:
     struct Subscriber

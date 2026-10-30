@@ -3,6 +3,8 @@
 #include <QBuffer>
 #include <QCoreApplication>
 #include <QDir>
+#include <QDebug>
+#include <QFile>
 #include <QFileInfo>
 #include <QImageReader>
 #include <QMetaObject>
@@ -22,6 +24,19 @@ const int MaxConcurrentImageLoads = 4;
 const int MaxCachedImageCostKiB = 64 * 1024;
 const QSize MaximumDecodedImageSize(1280, 1280);
 
+void logImageReaderFailure(const char *operation, const QImageReader &reader)
+{
+    QCoreApplication *application = QCoreApplication::instance();
+    if (!application || !application->arguments().contains(QStringLiteral("--debug")))
+        return;
+
+    qDebug() << "ImageLoadScheduler:" << operation
+             << "failed; format:" << reader.format()
+             << "error:" << reader.error()
+             << "errorString:" << reader.errorString()
+             << "supportedFormats:" << QImageReader::supportedImageFormats();
+}
+
 QImage readImageFile(const QString &path)
 {
     QImageReader reader(path);
@@ -30,7 +45,10 @@ QImage readImageFile(const QString &path)
     if (sourceSize.isValid() && (sourceSize.width() > MaximumDecodedImageSize.width() ||
         sourceSize.height() > MaximumDecodedImageSize.height()))
         reader.setScaledSize(sourceSize.scaled(MaximumDecodedImageSize, Qt::KeepAspectRatio));
-    return reader.read();
+    QImage image = reader.read();
+    if (image.isNull())
+        logImageReaderFailure("readImageFile", reader);
+    return image;
 }
 
 QImage readImageData(const QByteArray &data)
@@ -46,7 +64,10 @@ QImage readImageData(const QByteArray &data)
     if (sourceSize.isValid() && (sourceSize.width() > MaximumDecodedImageSize.width() ||
         sourceSize.height() > MaximumDecodedImageSize.height()))
         reader.setScaledSize(sourceSize.scaled(MaximumDecodedImageSize, Qt::KeepAspectRatio));
-    return reader.read();
+    QImage image = reader.read();
+    if (image.isNull())
+        logImageReaderFailure("readImageData", reader);
+    return image;
 }
 }
 
@@ -170,9 +191,32 @@ void ImageLoadScheduler::decodeFileAsync(const QString &path, const Completion &
     runWorker([path]() { return readImageFile(path); }, callback);
 }
 
+void ImageLoadScheduler::decodeFileAsync(const QString &path, const DataTransform &transform,
+                                         const Completion &callback)
+{
+    runWorker([path, transform]() {
+        QFile file(path);
+        if (!file.open(QIODevice::ReadOnly))
+            return QImage();
+        QByteArray data = file.readAll();
+        if (transform)
+            data = transform(data);
+        return data.isEmpty() ? QImage() : readImageData(data);
+    }, callback);
+}
+
 void ImageLoadScheduler::decodeDataAsync(const QByteArray &data, const Completion &callback)
 {
     runWorker([data]() { return readImageData(data); }, callback);
+}
+
+void ImageLoadScheduler::decodeDataAsync(const QByteArray &data, const DataTransform &transform,
+                                         const Completion &callback)
+{
+    runWorker([data, transform]() {
+        const QByteArray processed = transform ? transform(data) : data;
+        return processed.isEmpty() ? QImage() : readImageData(processed);
+    }, callback);
 }
 
 void ImageLoadScheduler::runWorker(const std::function<QImage()> &work,

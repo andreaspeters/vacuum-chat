@@ -1,4 +1,5 @@
 #include "matrixnetwork.h"
+#include "matrixeventcontentmetadata.h"
 #include "matrixhistorybackup.h"
 #include "matrixdatabaseworker.h"
 #include "matrixssss.h"
@@ -38,6 +39,11 @@
 #include <QImage>
 #include <QImageReader>
 #include <algorithm>
+#include <limits>
+
+#if HAVE_OPENSSL
+#include <openssl/evp.h>
+#endif
 
 namespace {
 bool matrixNetworkTextEventLess(const MatrixTextEvent &left, const MatrixTextEvent &right)
@@ -92,6 +98,86 @@ enum class MediaDownloadApiVersion
 	ClientV1,
 	LegacyV3
 };
+
+struct MatrixMediaDescriptor
+{
+	QString mxcUrl;
+	QByteArray key;
+	QByteArray iv;
+	QByteArray sha256;
+	bool encrypted = false;
+};
+
+QByteArray decodeMatrixBase64Url(const QString &value)
+{
+	QByteArray encoded = value.toLatin1();
+	encoded.replace('-', '+');
+	encoded.replace('_', '/');
+	if (encoded.size() % 4 == 1)
+		return QByteArray();
+	while (encoded.size() % 4 != 0)
+		encoded.append('=');
+	return QByteArray::fromBase64(encoded, QByteArray::AbortOnBase64DecodingErrors);
+}
+
+bool parseMatrixMediaDescriptor(const QVariantMap &metadata, MatrixMediaDescriptor &descriptor)
+{
+	const QVariantMap encryptedFile = metadata.value(QStringLiteral("file")).toMap();
+	if (encryptedFile.isEmpty()) {
+		descriptor.mxcUrl = metadata.value(QStringLiteral("url")).toString();
+	} else {
+		const QJsonObject file = QJsonObject::fromVariantMap(encryptedFile);
+		const QJsonObject key = file.value(QStringLiteral("key")).toObject();
+		const QJsonObject hashes = file.value(QStringLiteral("hashes")).toObject();
+		if (key.value(QStringLiteral("alg")).toString() != QStringLiteral("A256CTR") ||
+			key.value(QStringLiteral("kty")).toString() != QStringLiteral("oct"))
+			return false;
+		descriptor.mxcUrl = file.value(QStringLiteral("url")).toString();
+		descriptor.key = decodeMatrixBase64Url(key.value(QStringLiteral("k")).toString());
+		descriptor.iv = decodeMatrixBase64Url(file.value(QStringLiteral("iv")).toString());
+		descriptor.sha256 = decodeMatrixBase64Url(hashes.value(QStringLiteral("sha256")).toString());
+		descriptor.encrypted = true;
+		if (descriptor.key.size() != 32 || descriptor.iv.size() != 16 ||
+			descriptor.sha256.size() != 32)
+			return false;
+	}
+	const QUrl mxc(descriptor.mxcUrl);
+	return mxc.scheme() == QStringLiteral("mxc") && !mxc.host().isEmpty() && !mxc.path().isEmpty();
+}
+
+QByteArray decryptMatrixMedia(const QByteArray &ciphertext, const MatrixMediaDescriptor &descriptor)
+{
+	if (!descriptor.encrypted)
+		return ciphertext;
+#if HAVE_OPENSSL
+	if (ciphertext.size() > std::numeric_limits<int>::max() ||
+		QCryptographicHash::hash(ciphertext, QCryptographicHash::Sha256) != descriptor.sha256)
+		return QByteArray();
+	EVP_CIPHER_CTX *context = EVP_CIPHER_CTX_new();
+	if (!context)
+		return QByteArray();
+	const bool initialized = EVP_DecryptInit_ex(context, EVP_aes_256_ctr(), nullptr,
+		reinterpret_cast<const unsigned char *>(descriptor.key.constData()),
+		reinterpret_cast<const unsigned char *>(descriptor.iv.constData())) == 1;
+	QByteArray plaintext(ciphertext.size() + EVP_CIPHER_block_size(EVP_aes_256_ctr()), Qt::Uninitialized);
+	int produced = 0;
+	int finalProduced = 0;
+	const bool decrypted = initialized &&
+		EVP_DecryptUpdate(context, reinterpret_cast<unsigned char *>(plaintext.data()), &produced,
+			reinterpret_cast<const unsigned char *>(ciphertext.constData()),
+			static_cast<int>(ciphertext.size())) == 1 &&
+		EVP_DecryptFinal_ex(context, reinterpret_cast<unsigned char *>(plaintext.data()) + produced,
+			&finalProduced) == 1;
+	EVP_CIPHER_CTX_free(context);
+	if (!decrypted)
+		return QByteArray();
+	plaintext.resize(produced + finalProduced);
+	return plaintext;
+#else
+	Q_UNUSED(ciphertext);
+	return QByteArray();
+#endif
+}
 
 QString matrixMediaDownloadPath(const QUrl &mxc, MediaDownloadApiVersion version)
 {
@@ -1522,20 +1608,36 @@ void MatrixNetwork::requestImage(const MatrixTextEvent &event)
 		event.messageType != QStringLiteral("m.file"))
 		return;
 	const bool isImageEvent = event.messageType == QStringLiteral("m.image");
-	const QString mxcUrl = event.metadata.value(QStringLiteral("url")).toString();
+	MatrixMediaDescriptor mediaDescriptor;
+	if (isImageEvent) {
+		if (!parseMatrixMediaDescriptor(event.metadata, mediaDescriptor))
+			return;
+	} else {
+		mediaDescriptor.mxcUrl = event.metadata.value(QStringLiteral("url")).toString();
+	}
+	const QString mxcUrl = mediaDescriptor.mxcUrl;
 	const QUrl mxc(mxcUrl);
 	if (event.eventId.isEmpty() || mxc.scheme() != QStringLiteral("mxc") ||
 		mxc.host().isEmpty() || mxc.path().isEmpty())
 		return;
+	const ImageLoadScheduler::DataTransform mediaTransform = mediaDescriptor.encrypted
+		? ImageLoadScheduler::DataTransform([mediaDescriptor](const QByteArray &data) {
+			return decryptMatrixMedia(data, mediaDescriptor);
+		})
+		: ImageLoadScheduler::DataTransform();
 	const QString profileDirectory = databaseProfileDirectory();
 	const QString cacheDirectory = profileDirectory.isEmpty()
 		? QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + QStringLiteral("/matrix-media")
 		: profileDirectory + QStringLiteral("/media");
 	QDir().mkpath(cacheDirectory);
+	QByteArray cacheMaterial = mxcUrl.toUtf8();
+	if (mediaDescriptor.encrypted)
+		cacheMaterial += mediaDescriptor.key + mediaDescriptor.iv + mediaDescriptor.sha256;
 	const QString cachePath = cacheDirectory + QLatin1Char('/') +
-		QString::fromLatin1(QCryptographicHash::hash(mxcUrl.toUtf8(), QCryptographicHash::Sha256).toHex()) +
+		QString::fromLatin1(QCryptographicHash::hash(cacheMaterial, QCryptographicHash::Sha256).toHex()) +
 		QStringLiteral(".bin");
-	const QString requestKey = event.eventId + QChar('\n') + mxcUrl;
+	const QString requestKey = event.eventId + QChar('\n') + QString::fromLatin1(
+		QCryptographicHash::hash(cacheMaterial, QCryptographicHash::Sha256).toHex());
 	if (FImageRequestsInFlight.contains(requestKey))
 		return;
 	FImageRequestsInFlight.insert(requestKey);
@@ -1548,7 +1650,7 @@ void MatrixNetwork::requestImage(const MatrixTextEvent &event)
 	const QString schedulerKey = (isImageEvent ? QString() : QStringLiteral("matrix-attachment:")) +
 		ImageLoadScheduler::fileKey(cachePath);
 	scheduler->submit(schedulerKey,
-		[network, event, mxcUrl, cachePath, isImageEvent](ImageLoadScheduler::Completion done) {
+		[network, event, mxcUrl, cachePath, isImageEvent, mediaTransform](ImageLoadScheduler::Completion done) {
 			if (completeImageLoadIfNetworkUnavailable(network, done))
 				return;
 			ImageLoadScheduler *queue = ImageLoadScheduler::instance();
@@ -1557,8 +1659,8 @@ void MatrixNetwork::requestImage(const MatrixTextEvent &event)
 				return;
 			}
 			connect(network, &QObject::destroyed, queue, [done]() { done(QImage()); });
-			queue->decodeFileAsync(cachePath,
-				[network, event, mxcUrl, cachePath, isImageEvent, done](const QImage &cachedImage) {
+			queue->decodeFileAsync(cachePath, mediaTransform,
+				[network, event, mxcUrl, cachePath, isImageEvent, mediaTransform, done](const QImage &cachedImage) {
 					if (completeImageLoadIfNetworkUnavailable(network, done))
 						return;
 					if (!cachedImage.isNull()) {
@@ -1572,7 +1674,7 @@ void MatrixNetwork::requestImage(const MatrixTextEvent &event)
 					if (isImageEvent)
 						QFile::remove(cachePath);
 					QMetaObject::invokeMethod(network,
-						[network, event, mxcUrl, cachePath, isImageEvent, done]() {
+						[network, event, mxcUrl, cachePath, isImageEvent, mediaTransform, done]() {
 							if (completeImageLoadIfNetworkUnavailable(network, done))
 								return;
 							if (network->FAccesToken.isEmpty()) {
@@ -1585,7 +1687,7 @@ void MatrixNetwork::requestImage(const MatrixTextEvent &event)
 							QNetworkRequest request(QUrl(network->constructUrl(path)));
 							network->setDefaultRequestHeaders(request);
 							QNetworkReply *reply = network->FNetworkAccessManager->get(request);
-							const auto finishMediaReply = [network, cachePath, isImageEvent, done](QNetworkReply *mediaReply) {
+							const auto finishMediaReply = [network, cachePath, isImageEvent, mediaTransform, done](QNetworkReply *mediaReply) {
 								const auto failMediaReply = [&]() {
 									mediaReply->deleteLater();
 									done(QImage());
@@ -1615,7 +1717,7 @@ void MatrixNetwork::requestImage(const MatrixTextEvent &event)
 								if (!queue) {
 									done(QImage());
 								} else if (isImageEvent) {
-									queue->decodeDataAsync(data, done);
+									queue->decodeDataAsync(data, mediaTransform, done);
 								} else {
 									queue->decodeDataAsync(data, [done](const QImage &image) {
 										if (!image.isNull()) {
@@ -1671,9 +1773,9 @@ void MatrixNetwork::requestImage(const MatrixTextEvent &event)
 									finishMediaReply(reply);
 								});
 						}, Qt::QueuedConnection);
-				});
-		}, this,
-		[this, event, requestKey, cachePath](const QImage &image) {
+						});
+						}, this,
+						[this, event, requestKey, cachePath, isEncryptedImage = mediaDescriptor.encrypted](const QImage &image) {
 			FImageRequestsInFlight.remove(requestKey);
 			if (image.isNull())
 				return;
@@ -1685,7 +1787,10 @@ void MatrixNetwork::requestImage(const MatrixTextEvent &event)
 						.arg(QString::fromLatin1(QUrl::toPercentEncoding(imageEvent.roomId)),
 							QString::fromLatin1(QUrl::toPercentEncoding(imageEvent.eventId))));
 			}
-			imageEvent.metadata.insert(QStringLiteral("file_path"), cachePath);
+			if (isEncryptedImage)
+				imageEvent.metadata.remove(QStringLiteral("file_path"));
+			else
+				imageEvent.metadata.insert(QStringLiteral("file_path"), cachePath);
 			for (MatrixTextEvent &cached : FMessageHistory[imageEvent.roomId])
 				if (cached.eventId == imageEvent.eventId)
 					cached.metadata = imageEvent.metadata;
@@ -1704,7 +1809,10 @@ void MatrixNetwork::requestHistoricalImages(const QString &roomId,
 	for (auto it = events.crbegin(); it != events.crend() && requested < requestLimit; ++it) {
 		if (it->roomId != roomId || it->messageType != QStringLiteral("m.image"))
 			continue;
-		const QString mxcUrl = it->metadata.value(QStringLiteral("url")).toString();
+		QString mxcUrl = it->metadata.value(QStringLiteral("url")).toString();
+		if (mxcUrl.isEmpty())
+			mxcUrl = it->metadata.value(QStringLiteral("file")).toMap()
+				.value(QStringLiteral("url")).toString();
 		const QUrl mxc(mxcUrl);
 		if (it->eventId.isEmpty() || mxc.scheme() != QStringLiteral("mxc") || mxc.host().isEmpty())
 			continue;
@@ -5487,7 +5595,11 @@ void MatrixNetwork::onSyncFinished(QNetworkReply *reply)
 			QStringList attachmentUrls;
 			for (const QString &attachmentKey : {QStringLiteral("url"), QStringLiteral("file"),
 				QStringLiteral("thumbnail_url")}) {
-				const QString attachment = messageContent.value(attachmentKey).toString();
+				const QJsonValue attachmentValue = messageContent.value(attachmentKey);
+				QString attachment = attachmentValue.toString();
+				if (attachment.isEmpty() && attachmentKey == QStringLiteral("file") &&
+					attachmentValue.isObject())
+					attachment = attachmentValue.toObject().value(QStringLiteral("url")).toString();
 				if (!attachment.isEmpty()) {
 					attachmentUrls.append(attachment);
 					matrixEvent.metadata.insert(QStringLiteral("attachment_") + attachmentKey, attachment);
@@ -5495,6 +5607,7 @@ void MatrixNetwork::onSyncFinished(QNetworkReply *reply)
 			}
 			for (auto it = eventContent.constBegin(); it != eventContent.constEnd(); ++it)
 				matrixEvent.metadata.insert(it.key(), it.value().toVariant());
+			MatrixEventContentMetadata::copyMediaFields(messageContent, matrixEvent.metadata);
 			for (const QString &formattedField : {QStringLiteral("format"), QStringLiteral("formatted_body")})
 				if (messageContent.contains(formattedField))
 					matrixEvent.metadata.insert(formattedField,
@@ -5760,6 +5873,7 @@ void MatrixNetwork::retryPendingEncryptedEvents(const QString &roomId, const QSt
 			event.content = content.value(QStringLiteral("body")).toString();
 			event.metadata.insert(QStringLiteral("msgtype"), event.messageType);
 			event.metadata.insert(QStringLiteral("body"), event.content);
+			MatrixEventContentMetadata::copyMediaFields(content, event.metadata);
 			const QString replyEventId = MatrixReply::replyEventId(content);
 			if (!replyEventId.isEmpty())
 				event.metadata.insert(QStringLiteral("reply_to_event_id"), replyEventId);

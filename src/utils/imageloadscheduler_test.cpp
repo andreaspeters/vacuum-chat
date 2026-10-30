@@ -1,19 +1,30 @@
 #include <utils/imageloadscheduler.h>
 
 #include <QCoreApplication>
+#include <QDebug>
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QList>
+#include <QPointer>
+#include <QSharedPointer>
 #include <QStringList>
 #include <QTimer>
 
 #include <iostream>
 
 namespace {
+QStringList capturedDebugMessages;
+
 int fail(const char *message)
 {
     std::cerr << message << '\n';
     return 1;
+}
+
+void captureDebugMessage(QtMsgType type, const QMessageLogContext &, const QString &message)
+{
+    if (type == QtDebugMsg)
+        capturedDebugMessages.append(message);
 }
 }
 
@@ -23,6 +34,37 @@ int main(int argc, char **argv)
     ImageLoadScheduler *scheduler = ImageLoadScheduler::instance();
     if (!scheduler)
         return fail("image load scheduler was not created");
+
+    const bool debugEnabled = application.arguments().contains(QStringLiteral("--debug"));
+    capturedDebugMessages.clear();
+    const QtMessageHandler previousMessageHandler = qInstallMessageHandler(captureDebugMessage);
+    QEventLoop decodeLoop;
+    QPointer<QEventLoop> guardedDecodeLoop(&decodeLoop);
+    QTimer decodeTimeout;
+    decodeTimeout.setSingleShot(true);
+    QObject::connect(&decodeTimeout, &QTimer::timeout, &decodeLoop, &QEventLoop::quit);
+    struct DecodeResult {
+        bool completed = false;
+        bool nullImage = false;
+    };
+    const QSharedPointer<DecodeResult> decodeResult(new DecodeResult);
+    scheduler->decodeDataAsync(QByteArrayLiteral("not-an-image"),
+        [decodeResult, guardedDecodeLoop](const QImage &image) {
+            decodeResult->completed = true;
+            decodeResult->nullImage = image.isNull();
+            if (guardedDecodeLoop)
+                guardedDecodeLoop->quit();
+        });
+    decodeTimeout.start(5000);
+    decodeLoop.exec();
+    decodeTimeout.stop();
+    qInstallMessageHandler(previousMessageHandler);
+    if (!decodeResult->completed || !decodeResult->nullImage)
+        return fail("invalid image data did not complete with a null image");
+    const bool hasDecodeDiagnostic = capturedDebugMessages.join(QLatin1Char('\n'))
+        .contains(QStringLiteral("ImageLoadScheduler: readImageData failed"));
+    if (hasDecodeDiagnostic != debugEnabled)
+        return fail("image decoder diagnostics did not follow the existing --debug flag");
 
     const QStringList sources = {
         QStringLiteral("matrix"), QStringLiteral("meshcore"),
