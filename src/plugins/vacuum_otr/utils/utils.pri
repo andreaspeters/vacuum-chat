@@ -24,7 +24,8 @@ HEADERS  = utilsexport.h \
            closebutton.h \
            searchlineedit.h \
            imagemanager.h \
-           advanceditemdelegate.h
+           advanceditemdelegate.h \
+           ../../../utils/advanceddelegateitem.h
 
 SOURCES  = jid.cpp \
            versionparser.cpp \
@@ -51,4 +52,5 @@ SOURCES  = jid.cpp \
            closebutton.cpp \
            searchlineedit.cpp \
            imagemanager.cpp \
-           advanceditemdelegate.cpp
+           advanceditemdelegate.cpp \
+           ../../../utils/advanceddelegateitem.cpp

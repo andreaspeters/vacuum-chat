@@ -2,6 +2,8 @@
 
 #include <QHash>
 #include <QAction>
+#include <QKeyEvent>
+#include <QLineEdit>
 #include <QVariant>
 #include <QWidget>
 #include <thirdparty/qxtglobalshortcut/qxtglobalshortcut.h>
@@ -26,6 +28,27 @@ QKeySequence correctKeySequence(const QKeySequence &AKey)
 	}
 #endif
 	return AKey;
+}
+
+bool Shortcuts::captureKeySequenceKeyPress(QLineEdit &AEditor, const QKeyEvent &AEvent)
+{
+	static const int extKeyMask = 0x01000000;
+	static const int modifMask = Qt::META|Qt::SHIFT|Qt::CTRL|Qt::ALT;
+	static const QList<int> controlKeys = QList<int>() << Qt::Key_Shift << Qt::Key_Control
+		<< Qt::Key_Meta << Qt::Key_Alt << Qt::Key_AltGr;
+
+	if (AEvent.key()==0 || AEvent.key()==Qt::Key_unknown)
+		return true;
+	if (AEvent.key()>0x7F && (AEvent.key() & extKeyMask)==0)
+		return true;
+	if (controlKeys.contains(AEvent.key()))
+		return true;
+	if ((AEvent.modifiers() & modifMask)==Qt::SHIFT && (AEvent.key() & extKeyMask)==0)
+		return true;
+
+	QKeySequence keySeq((AEvent.modifiers() & modifMask) | AEvent.key());
+	AEditor.setText(keySeq.toString(QKeySequence::NativeText));
+	return true;
 }
 
 Shortcuts *Shortcuts::instance()

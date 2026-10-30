@@ -866,48 +866,46 @@ bool RosterChanger::showProtocolJoinRoomDialog(const QString &AAccountId)
 bool RosterChanger::leaveProtocolRoom(const QString &AAccountId,
 	const QString &AStreamId, const QString &ARoomId)
 {
-	if (!FPluginManager || AAccountId.isEmpty() || AStreamId.isEmpty() || ARoomId.isEmpty())
+	if (ARoomId.isEmpty())
 		return false;
 
-	if (!hasActiveAccount(FPluginManager, AAccountId))
+	QObject *instance = protocolRosterInstance(AAccountId, AStreamId);
+	if (!instance)
 		return false;
 
-	for (IPlugin *plugin : FPluginManager->pluginInterface("IProtocolRoster"))
-	{
-		QObject *instance = plugin ? plugin->instance() : NULL;
-		IProtocolRoster *roster = instance
-			? qobject_cast<IProtocolRoster *>(instance) : NULL;
-		if (!roster || roster->streamId() != AStreamId || roster->accountId() != AAccountId)
-			continue;
-		IProtocolCapabilities *capabilities = qobject_cast<IProtocolCapabilities *>(instance);
-		IProtocolRoomActions *actions = qobject_cast<IProtocolRoomActions *>(instance);
-		return dispatchLeaveRoomAction(capabilities, actions, AAccountId, ARoomId);
-	}
-	return false;
+	IProtocolCapabilities *capabilities = qobject_cast<IProtocolCapabilities *>(instance);
+	IProtocolRoomActions *actions = qobject_cast<IProtocolRoomActions *>(instance);
+	return dispatchLeaveRoomAction(capabilities, actions, AAccountId, ARoomId);
 }
 
 bool RosterChanger::sendProtocolSelfAdvert(const QString &AAccountId,
 	const QString &AStreamId, IProtocolAdvertActions::AdvertType AType)
 {
-	if (!FPluginManager || AAccountId.isEmpty() || AStreamId.isEmpty())
+	QObject *instance = protocolRosterInstance(AAccountId, AStreamId);
+	if (!instance)
 		return false;
 
-	if (!hasActiveAccount(FPluginManager, AAccountId))
-		return false;
+	IProtocolCapabilities *capabilities = qobject_cast<IProtocolCapabilities *>(instance);
+	IProtocolAdvertActions *actions = qobject_cast<IProtocolAdvertActions *>(instance);
+	return dispatchSelfAdvertAction(capabilities, actions, AAccountId, AType);
+}
+
+QObject *RosterChanger::protocolRosterInstance(const QString &AAccountId,
+	const QString &AStreamId) const
+{
+	if (!FPluginManager || AAccountId.isEmpty() || AStreamId.isEmpty() ||
+		!hasActiveAccount(FPluginManager, AAccountId))
+		return NULL;
 
 	for (IPlugin *plugin : FPluginManager->pluginInterface("IProtocolRoster"))
 	{
 		QObject *instance = plugin ? plugin->instance() : NULL;
 		IProtocolRoster *roster = instance
 			? qobject_cast<IProtocolRoster *>(instance) : NULL;
-		if (!roster || roster->streamId() != AStreamId || roster->accountId() != AAccountId)
-			continue;
-
-		IProtocolCapabilities *capabilities = qobject_cast<IProtocolCapabilities *>(instance);
-		IProtocolAdvertActions *actions = qobject_cast<IProtocolAdvertActions *>(instance);
-		return dispatchSelfAdvertAction(capabilities, actions, AAccountId, AType);
+		if (roster && roster->streamId() == AStreamId && roster->accountId() == AAccountId)
+			return instance;
 	}
-	return false;
+	return NULL;
 }
 
 void RosterChanger::onShowProtocolAddContactDialog(bool)
@@ -1606,26 +1604,16 @@ void RosterChanger::renameGroup(const Jid &AStreamJid, const QString &AGroup) co
 
 void RosterChanger::copyGroupsToGroup(const Jid &AStreamJid, const QStringList &AGroups, const QString &AGroupTo) const
 {
-	IRoster *roster = FRosterPlugin!=NULL ? FRosterPlugin->findRoster(AStreamJid) : NULL;
-	if (roster && roster->isOpen() && !AGroups.isEmpty())
-	{
-		QString newGroupName;
-		QString groupDelim = roster->groupDelimiter();
-		if (AGroupTo.endsWith(groupDelim))
-			newGroupName = QInputDialog::getText(NULL,tr("Create new group"),tr("Enter group name:"));
-
-		for(int i=0; i<AGroups.count(); i++)
-		{
-			if (!newGroupName.isEmpty())
-				roster->copyGroupToGroup(AGroups.at(i),AGroupTo==groupDelim ? newGroupName : AGroupTo+newGroupName);
-			else if (!AGroupTo.endsWith(groupDelim))
-				roster->copyGroupToGroup(AGroups.at(i),AGroupTo);
-		}
-
-	}
+	transferGroupsToGroup(AStreamJid,AGroups,AGroupTo,false);
 }
 
 void RosterChanger::moveGroupsToGroup(const Jid &AStreamJid, const QStringList &AGroups, const QString &AGroupTo) const
+{
+	transferGroupsToGroup(AStreamJid,AGroups,AGroupTo,true);
+}
+
+void RosterChanger::transferGroupsToGroup(const Jid &AStreamJid, const QStringList &AGroups,
+	const QString &AGroupTo, bool AMove) const
 {
 	IRoster *roster = FRosterPlugin!=NULL ? FRosterPlugin->findRoster(AStreamJid) : NULL;
 	if (roster && roster->isOpen() && !AGroups.isEmpty())
@@ -1634,14 +1622,26 @@ void RosterChanger::moveGroupsToGroup(const Jid &AStreamJid, const QStringList &
 		QString groupDelim = roster->groupDelimiter();
 		if (AGroupTo.endsWith(groupDelim))
 			newGroupName = QInputDialog::getText(NULL,tr("Create new group"),tr("Enter group name:"));
-		
+
 		for(int i=0; i<AGroups.count(); i++)
 		{
 			if (!newGroupName.isEmpty())
-				roster->moveGroupToGroup(AGroups.at(i),AGroupTo==groupDelim ? newGroupName : AGroupTo+newGroupName);
+			{
+				const QString destination = AGroupTo==groupDelim ? newGroupName : AGroupTo+newGroupName;
+				if (AMove)
+					roster->moveGroupToGroup(AGroups.at(i),destination);
+				else
+					roster->copyGroupToGroup(AGroups.at(i),destination);
+			}
 			else if (!AGroupTo.endsWith(groupDelim))
-				roster->moveGroupToGroup(AGroups.at(i),AGroupTo);
+			{
+				if (AMove)
+					roster->moveGroupToGroup(AGroups.at(i),AGroupTo);
+				else
+					roster->copyGroupToGroup(AGroups.at(i),AGroupTo);
+			}
 		}
+
 	}
 }
 

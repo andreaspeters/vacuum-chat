@@ -206,16 +206,16 @@ void FileStorage::setResourcesDirs(const QList<QString> &ADirs)
 	{
 		QList<FileStorage *> updateStorages;
 		QSet<QString> oldDirs;
-		for (const QString &dir : FResourceDirs)
-			oldDirs.insert(dir);
-		for (const QString &dir : cleanDirs)
-			oldDirs.remove(dir);
+		for (QList<QString>::const_iterator it=FResourceDirs.constBegin(); it!=FResourceDirs.constEnd(); ++it)
+			oldDirs.insert(*it);
+		for (QList<QString>::const_iterator it=cleanDirs.constBegin(); it!=cleanDirs.constEnd(); ++it)
+			oldDirs.remove(*it);
 
 		QSet<QString> newDirs;
-		for (const QString &dir : cleanDirs)
-			newDirs.insert(dir);
-		for (const QString &dir : FResourceDirs)
-			newDirs.remove(dir);
+		for (QList<QString>::const_iterator it=cleanDirs.constBegin(); it!=cleanDirs.constEnd(); ++it)
+			newDirs.insert(*it);
+		for (QList<QString>::const_iterator it=FResourceDirs.constBegin(); it!=FResourceDirs.constEnd(); ++it)
+			newDirs.remove(*it);
 
 		foreach(FileStorage *fileStorage, FInstances)
 		{

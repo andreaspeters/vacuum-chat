@@ -165,6 +165,9 @@ private:
 		const QString &ARoomId);
 	bool sendProtocolSelfAdvert(const QString &AAccountId, const QString &AStreamId,
 		IProtocolAdvertActions::AdvertType AType);
+	QObject *protocolRosterInstance(const QString &AAccountId, const QString &AStreamId) const;
+	void transferGroupsToGroup(const Jid &AStreamJid, const QStringList &AGroups,
+		const QString &AGroupTo, bool AMove) const;
 
 	IPluginManager *FPluginManager;
 	IRosterPlugin *FRosterPlugin;

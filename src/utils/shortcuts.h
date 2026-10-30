@@ -7,6 +7,8 @@
 #include "utilsexport.h"
 
 class QxtGlobalShortcut;
+class QKeyEvent;
+class QLineEdit;
 
 class UTILS_EXPORT Shortcuts : 
 	public QObject
@@ -49,6 +51,7 @@ public:
 	static bool isGlobalShortcutActive(const QString &AId);
 	static void setGlobalShortcut(const QString &AId, bool AEnabled);
 	static void activateShortcut(const QString &AId, QWidget *AWidget);
+	static bool captureKeySequenceKeyPress(QLineEdit &AEditor, const QKeyEvent &AEvent);
 signals:
 	void groupDeclared(const QString &AId);
 	void shortcutDeclared(const QString &AId);

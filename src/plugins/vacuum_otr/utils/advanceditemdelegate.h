@@ -13,87 +13,7 @@
 
 #define ADVANCED_DELEGATE_EDITOR_VALUE_PROPERTY "AdvanceDelegateEditorValue"
 
-struct UTILS_EXPORT AdvancedDelegateItem
-{
-	enum Kind {
-		Null,
-		Branch,
-		CheckBox,
-		Decoration,
-		Display,
-		Stretch,
-		CustomData,
-		CustomWidget
-	};
-	enum Position {
-		Top,
-		MiddleLeft,
-		MiddleCenter,
-		MiddleRight,
-		Bottom
-	};
-	enum Hint {
-		SizeHint,
-		FontHint,
-		FontStyle,
-		FontWeight,
-		FontSize,
-		FontSizeDelta,
-		FontUnderline,
-		StatesForceOn,
-		StatesForceOff,
-		Foreground,
-		Backgound,
-		TextElideMode,
-		TextAlignment,
-		Opacity
-	};
-	enum Flag {
-		Hidden         =0x00000001,
-		Blink          =0x00000002
-	};
-	struct ExplicitData {
-		int refs;
-		quint32 id;
-		quint8 kind;
-		quint32 flags;
-		QVariant data;
-		QWidget *widget;
-		QSizePolicy sizePolicy;
-		QStyle::State showStates;
-		QStyle::State hideStates;
-		QMap<int,QVariant> hints;
-		QMap<int,QVariant> properties;
-	};
-	struct ContextData {
-		QVariant value;
-		qreal blinkOpacity;
-	};
-
-	AdvancedDelegateItem(quint32 AId = NullId);
-	AdvancedDelegateItem(const AdvancedDelegateItem &AOther);
-	~AdvancedDelegateItem();
-
-	void detach();
-	AdvancedDelegateItem &operator =(const AdvancedDelegateItem &AOther);
-	
-	static const quint16 AlignRightOrderMask = 0x8000;
-	static quint32 makeId(quint8 APosition, quint8 AFloor, quint16 AOrder);
-	static quint32 makeStretchId(quint8 APosition, quint8 AFloor);
-	static quint8 getPosition(quint32 AItemId);
-	static quint8 getFloor(quint32 AItemId);
-	static quint16 getOrder(quint32 AItemId);
-
-	static const quint32 NullId;        //= 0
-	static const quint32 BranchId;      //= makeId(MiddleLeft,128,10)
-	static const quint32 CheckStateId;  //= makeId(MiddleLeft,128,100)
-	static const quint32 DecorationId;  //= makeId(MiddleLeft,128,500)
-	static const quint32 DisplayId;     //= makeId(MiddleCenter,128,500)
-
-	ContextData *c;
-	ExplicitData *d;
-};
-typedef QMap<quint32, AdvancedDelegateItem> AdvancedDelegateItems;
+#include "../../../utils/advanceddelegateitem.h"
 
 class AdvancedItemDelegate;
 class UTILS_EXPORT AdvancedDelegateEditProxy
@@ -118,27 +38,27 @@ public:
 public:
 	AdvancedItemDelegate(QObject *AParent);
 	~AdvancedItemDelegate();
-	int itemsRole() const;
-	void setItemsRole(int ARole);
-	int verticalSpacing() const;
-	void setVertialSpacing(int ASpacing);
-	int horizontalSpacing() const;
-	void setHorizontalSpacing(int ASpacing);
-	bool focusRectVisible() const;
-	void setFocusRectVisible(bool AVisible);
-	bool defaultBranchItemEnabled() const;
-	void setDefaultBranchItemEnabled(bool AEnabled);
-	QMargins contentsMargins() const;
-	void setContentsMargings(const QMargins &AMargins);
-	BlinkMode blinkMode() const;
-	void setBlinkMode(BlinkMode AMode);
+	int itemsRole() const { return FItemsRole; }
+	void setItemsRole(int ARole) { FItemsRole = ARole; }
+	int verticalSpacing() const { return FVerticalSpacing; }
+	void setVertialSpacing(int ASpacing) { FVerticalSpacing = ASpacing; }
+	int horizontalSpacing() const { return FHorizontalSpacing; }
+	void setHorizontalSpacing(int ASpacing) { FHorizontalSpacing = ASpacing; }
+	bool focusRectVisible() const { return FFocusRectVisible; }
+	void setFocusRectVisible(bool AVisible) { FFocusRectVisible = AVisible; }
+	bool defaultBranchItemEnabled() const { return FDefaultBranchEnabled; }
+	void setDefaultBranchItemEnabled(bool AEnabled) { FDefaultBranchEnabled = AEnabled; }
+	QMargins contentsMargins() const { return FMargins; }
+	void setContentsMargings(const QMargins &AMargins) { FMargins = AMargins; }
+	BlinkMode blinkMode() const { return FBlinkMode; }
+	void setBlinkMode(BlinkMode AMode) { FBlinkMode = AMode; }
 public:
-	int editRole() const;
-	void setEditRole(int ARole);
-	quint32 editItemId() const;
-	void setEditItemId(quint32 AItemId);
-	AdvancedDelegateEditProxy *editProxy() const;
-	void setEditProxy(AdvancedDelegateEditProxy *AProxy);
+	int editRole() const { return FEditRole; }
+	void setEditRole(int ARole) { FEditRole = ARole; }
+	quint32 editItemId() const { return FEditItemId; }
+	void setEditItemId(quint32 AItemId) { FEditItemId = AItemId; }
+	AdvancedDelegateEditProxy *editProxy() const { return FEditProxy; }
+	void setEditProxy(AdvancedDelegateEditProxy *AProxy) { FEditProxy = AProxy; }
 	const QItemEditorFactory *editorFactory() const;
 public:
 	void paint(QPainter *APainter, const QStyleOptionViewItem &AOption, const QModelIndex &AIndex) const;
@@ -186,11 +106,5 @@ private:
 	quint32 FEditItemId;
 	AdvancedDelegateEditProxy *FEditProxy;
 };
-
-UTILS_EXPORT QDataStream &operator>>(QDataStream &AStream, AdvancedDelegateItem &AItem);
-UTILS_EXPORT QDataStream &operator<<(QDataStream &AStream, const AdvancedDelegateItem &AItem);
-
-Q_DECLARE_METATYPE(AdvancedDelegateItem);
-Q_DECLARE_METATYPE(AdvancedDelegateItems);
 
 #endif // ADVANCEDITEMDELEGATE_H

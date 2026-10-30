@@ -171,4 +171,36 @@ if (BUILD_TESTING)
 		"${CMAKE_SOURCE_DIR}/src")
 	target_link_libraries(system_timezone_cache_tests PRIVATE Qt6::Core)
 
+	add_executable(shortcut_key_capture_tests EXCLUDE_FROM_ALL
+		"${CMAKE_SOURCE_DIR}/tests/utils/shortcut_key_capture_test.cpp")
+	target_compile_features(shortcut_key_capture_tests PRIVATE cxx_std_11)
+	target_include_directories(shortcut_key_capture_tests PRIVATE
+		"${CMAKE_SOURCE_DIR}/src")
+	target_link_libraries(shortcut_key_capture_tests PRIVATE
+		${VACUUM_UTILS_NAME} Qt6::Widgets)
+
+	add_executable(widgetmanager_alignrect_regression_tests EXCLUDE_FROM_ALL
+		"${CMAKE_SOURCE_DIR}/tests/utils/widgetmanager_alignrect_regression_test.cpp")
+	target_compile_features(widgetmanager_alignrect_regression_tests PRIVATE cxx_std_11)
+	target_include_directories(widgetmanager_alignrect_regression_tests PRIVATE
+		"${CMAKE_SOURCE_DIR}/src")
+	target_link_libraries(widgetmanager_alignrect_regression_tests PRIVATE
+		${VACUUM_UTILS_NAME} Qt6::Widgets)
+
+	add_executable(advanceddelegate_text_tests EXCLUDE_FROM_ALL
+		"${CMAKE_SOURCE_DIR}/tests/advanceddelegate_text_test.cpp")
+	target_compile_features(advanceddelegate_text_tests PRIVATE cxx_std_11)
+	target_include_directories(advanceddelegate_text_tests PRIVATE
+		"${CMAKE_SOURCE_DIR}/src")
+	target_link_libraries(advanceddelegate_text_tests PRIVATE
+		${VACUUM_UTILS_NAME} Qt6::Widgets)
+
+	add_executable(advanceddelegateitem_semantics_tests EXCLUDE_FROM_ALL
+		"${CMAKE_SOURCE_DIR}/tests/advanceddelegateitem_semantics_test.cpp")
+	target_compile_features(advanceddelegateitem_semantics_tests PRIVATE cxx_std_11)
+	target_include_directories(advanceddelegateitem_semantics_tests PRIVATE
+		"${CMAKE_SOURCE_DIR}/src")
+	target_link_libraries(advanceddelegateitem_semantics_tests PRIVATE
+		${VACUUM_UTILS_NAME} Qt6::Widgets)
+
 endif()

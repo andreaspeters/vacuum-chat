@@ -2,6 +2,7 @@
 
 #include <QKeyEvent>
 #include <QLineEdit>
+#include <utils/shortcuts.h>
 
 ShortcutOptionsDelegate::ShortcutOptionsDelegate(QObject *AParent) : QStyledItemDelegate(AParent)
 {
@@ -71,23 +72,8 @@ bool ShortcutOptionsDelegate::eventFilter(QObject *AWatched, QEvent *AEvent)
 	{
 		if (AEvent->type() == QEvent::KeyPress)
 		{
-			static const int extKeyMask = 0x01000000;
-			static const int modifMask = Qt::META|Qt::SHIFT|Qt::CTRL|Qt::ALT;
-			static const QList<int> controlKeys =  QList<int>() <<  Qt::Key_Shift << Qt::Key_Control << Qt::Key_Meta << Qt::Key_Alt << Qt::Key_AltGr;
-			
 			QKeyEvent *keyEvent = static_cast<QKeyEvent *>(AEvent);
-			if (keyEvent->key()==0 || keyEvent->key()==Qt::Key_unknown)
-				return true;
-			if (keyEvent->key()>0x7F && (keyEvent->key() & extKeyMask)==0)
-				return true;
-			if (controlKeys.contains(keyEvent->key()))
-				return true;
-			if ((keyEvent->modifiers() & modifMask)==Qt::SHIFT && (keyEvent->key() & extKeyMask)==0)
-				return true;
-
-			QKeySequence keySeq((keyEvent->modifiers() & modifMask) | keyEvent->key());
-			editor->setText(keySeq.toString(QKeySequence::NativeText));
-			return true;
+			return Shortcuts::captureKeySequenceKeyPress(*editor, *keyEvent);
 		}
 		else if (AEvent->type() == QEvent::KeyRelease)
 		{

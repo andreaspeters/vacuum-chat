@@ -157,33 +157,15 @@ int FileMessageArchive::capabilityOrder(quint32 ACapability, const Jid &AStreamJ
 
 bool FileMessageArchive::saveMessage(const Jid &AStreamJid, const Message &AMessage, bool ADirectionIn)
 {
-	bool written = false;
-	if (isCapable(AStreamJid,DirectArchiving) && FArchiver->isReady(AStreamJid))
-	{
-		Jid itemJid = ADirectionIn ? AMessage.from() : AMessage.to();
-		Jid with = AMessage.type()==Message::GroupChat ? itemJid.bare() : itemJid;
-
-		FThreadLock.lockForWrite();
-		CollectionWriter *writer = findCollectionWriter(AStreamJid,with,AMessage.threadId());
-		if (!writer)
-		{
-			FThreadLock.unlock();
-			IArchiveHeader header = makeHeader(with,AMessage);
-			QString fileName = collectionFilePath(AStreamJid,header.with,header.start);
-			FThreadLock.lockForWrite();
-			writer = newCollectionWriter(AStreamJid,header,fileName);
-		}
-		if (writer)
-		{
-			IArchiveItemPrefs prefs = FArchiver->archiveItemPrefs(AStreamJid,itemJid,AMessage.threadId());
-			written = writer->writeMessage(AMessage,prefs.save,ADirectionIn);
-		}
-		FThreadLock.unlock();
-	}
-	return written;
+	return saveDirectItem(AStreamJid,AMessage,ADirectionIn,false);
 }
 
 bool FileMessageArchive::saveNote(const Jid &AStreamJid, const Message &AMessage, bool ADirectionIn)
+{
+	return saveDirectItem(AStreamJid,AMessage,ADirectionIn,true);
+}
+
+bool FileMessageArchive::saveDirectItem(const Jid &AStreamJid, const Message &AMessage, bool ADirectionIn, bool ANote)
 {
 	bool written = false;
 	if (isCapable(AStreamJid,DirectArchiving) && FArchiver->isReady(AStreamJid))
@@ -203,7 +185,13 @@ bool FileMessageArchive::saveNote(const Jid &AStreamJid, const Message &AMessage
 		}
 		if (writer)
 		{
-			written = writer->writeNote(AMessage.body());
+			if (ANote)
+				written = writer->writeNote(AMessage.body());
+			else
+			{
+				IArchiveItemPrefs prefs = FArchiver->archiveItemPrefs(AStreamJid,itemJid,AMessage.threadId());
+				written = writer->writeMessage(AMessage,prefs.save,ADirectionIn);
+			}
 		}
 		FThreadLock.unlock();
 	}

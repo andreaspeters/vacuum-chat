@@ -90,6 +90,7 @@ protected slots:
 	void onOptionsClosed();
 	void onDiscoInfoReceived(const IDiscoInfo &AInfo);
 private:
+	bool saveDirectItem(const Jid &AStreamJid, const Message &AMessage, bool ADirectionIn, bool ANote);
 	IPluginManager *FPluginManager;
 	IMessageArchiver *FArchiver;
 	IServiceDiscovery *FDiscovery;
