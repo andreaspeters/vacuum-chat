@@ -180,6 +180,7 @@ if (BUILD_TESTING)
 	endfunction()
 
 	add_matrix_test_target(matrix_history_retry_tests "${MATRIX_TEST_SOURCE_DIR}/matrixhistoryretry_test.cpp")
+	add_matrix_test_target(matrix_encrypted_media_tests "${CMAKE_SOURCE_DIR}/tests/matrixencryptedmedia_test.cpp")
 	add_matrix_test_target(matrix_room_encryption_tests "${MATRIX_TEST_SOURCE_DIR}/matrix_room_encryption_test.cpp")
 	add_matrix_test_target(matrix_network_login_tests "${MATRIX_TEST_SOURCE_DIR}/matrix_network_login_tests.cpp")
 	if (OLM_FOUND)

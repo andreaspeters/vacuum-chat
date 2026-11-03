@@ -106,6 +106,21 @@ int main(int argc, char **argv)
 	passed &= check(ProtocolMessageHistory::findMessageIndexByIdOrTransactionAlias(
 		history, serverEcho.messageId()) == 0,
 		"image links also resolve directly by canonical Matrix event ID");
+	BasicMessage encryptedImage(QStringLiteral("$encrypted-image"), QStringLiteral("!room:test"),
+		QStringLiteral("@other:test"), QString(), QStringLiteral("photo.png"),
+		QDateTime::fromMSecsSinceEpoch(2000, QTimeZone::utc()),
+		QStringLiteral("matrix"), BasicMessage::Incoming);
+	const QVariantMap encryptedMediaFile{{QStringLiteral("url"),
+		QStringLiteral("mxc://media.example.org/encrypted-photo")},
+		{QStringLiteral("key"), QVariantMap{{QStringLiteral("k"), QStringLiteral("test-key")}}}};
+	encryptedImage.setMetadata({{QStringLiteral("msgtype"), QStringLiteral("m.image")},
+		{QStringLiteral("file"), encryptedMediaFile}, {QStringLiteral("historical"), true}});
+	BasicMessage mediaLinkMessage;
+	passed &= check(ProtocolMessageHistory::findConversationMediaMessage(
+		{encryptedImage}, encryptedImage.messageId(), mediaLinkMessage) &&
+		mediaLinkMessage.messageId() == encryptedImage.messageId() &&
+		mediaLinkMessage.metadata().value(QStringLiteral("file")).toMap() == encryptedMediaFile,
+		"loading a media link resolves the canonical event with its encrypted file descriptor intact");
 
 	QList<BasicMessage> reverseOrder;
 	reverseOrder.append(serverEcho);
@@ -224,6 +239,31 @@ int main(int argc, char **argv)
 	differentImage.setMessageId(QStringLiteral("$different-image"));
 	passed &= check(!ProtocolMessageHistory::isMediaHydrationUpdate(imagePlaceholder, differentImage),
 		"a different Matrix event is not treated as media hydration");
+	BasicMessage failedLocalImage = imagePlaceholder;
+	QVariantMap failedLocalMetadata = failedLocalImage.metadata();
+	failedLocalMetadata.insert(QStringLiteral("file_path"), QStringLiteral("/cache/corrupt-image"));
+	failedLocalMetadata.insert(QStringLiteral("image_resource_url"), QStringLiteral("vacuum-image:/stale"));
+	failedLocalMetadata.insert(QStringLiteral("file"), QVariantMap{
+		{QStringLiteral("url"), QStringLiteral("mxc://media.example.org/encrypted-photo")},
+		{QStringLiteral("key"), QStringLiteral("test-key-material")}});
+	failedLocalImage.setMetadata(failedLocalMetadata);
+	BasicMessage retryableImage;
+	passed &= check(ProtocolMessageHistory::prepareImageRetryAfterLocalLoadFailure(
+		failedLocalImage, QStringLiteral("/cache/corrupt-image"), retryableImage),
+		"a failed local image decode prepares a retryable image event");
+	passed &= check(retryableImage.messageId() == failedLocalImage.messageId() &&
+		!retryableImage.metadata().contains(QStringLiteral("file_path")) &&
+		!retryableImage.metadata().contains(QStringLiteral("image_resource_url")) &&
+		retryableImage.metadata().value(QStringLiteral("file")).toMap() ==
+			failedLocalMetadata.value(QStringLiteral("file")).toMap(),
+		"local render state is cleared while encrypted media metadata and event identity are preserved");
+	BasicMessage staleImage = failedLocalImage;
+	QVariantMap staleMetadata = staleImage.metadata();
+	staleMetadata.insert(QStringLiteral("file_path"), QStringLiteral("/cache/new-image"));
+	staleImage.setMetadata(staleMetadata);
+	passed &= check(!ProtocolMessageHistory::prepareImageRetryAfterLocalLoadFailure(
+		staleImage, QStringLiteral("/cache/corrupt-image"), retryableImage),
+		"a stale local decode failure cannot clear a newer cache path");
 	QList<BasicMessage> partiallyLoadedHistory{imagePlaceholder, laterMessage};
 	const int replacedImageIndex = ProtocolMessageHistory::replaceExistingMessage(
 		partiallyLoadedHistory, hydratedImage);
@@ -236,6 +276,20 @@ int main(int argc, char **argv)
 	passed &= check(ProtocolMessageHistory::replaceExistingMessage(partiallyLoadedHistory,
 		serverEcho) == -1 && partiallyLoadedHistory.size() == 2,
 		"a different event ID is not mistaken for a media update");
+	const QList<BasicMessage> queuedImageHydration{imagePlaceholder, hydratedImage};
+	const QList<BasicMessage> mergedQueuedImageHydration =
+		ProtocolMessageHistory::mergeOlderPage({}, queuedImageHydration);
+	passed &= check(mergedQueuedImageHydration.size() == 1 &&
+		mergedQueuedImageHydration.first().metadata().value(QStringLiteral("decoded_image")).toString() ==
+			QStringLiteral("decoded-payload"),
+		"history completion keeps a decoded image when its hydration arrived while history was loading");
+	const QList<BasicMessage> visibleImagePlaceholder{imagePlaceholder};
+	const QList<BasicMessage> mergedVisibleImageHydration =
+		ProtocolMessageHistory::mergeOlderPage(visibleImagePlaceholder, {hydratedImage});
+	passed &= check(mergedVisibleImageHydration.size() == 1 &&
+		mergedVisibleImageHydration.first().metadata().value(QStringLiteral("decoded_image")).toString() ==
+			QStringLiteral("decoded-payload"),
+		"history completion does not let a stale visible image placeholder erase a decoded update");
 
 	ProtocolMessageHistory::ConversationRebuildScheduler rebuildScheduler(25);
 	QEventLoop rebuildLoop;

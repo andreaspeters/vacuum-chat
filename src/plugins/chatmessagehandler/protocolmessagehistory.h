@@ -98,6 +98,18 @@ inline int findMessageIndexByIdOrTransactionAlias(const QList<BasicMessage> &AHi
 	return -1;
 }
 
+inline bool findConversationMediaMessage(const QList<BasicMessage> &AHistory,
+	const QString &AEventId, BasicMessage &AMessage)
+{
+	if (AEventId.isEmpty())
+		return false;
+	const int index = findMessageIndex(AHistory, AEventId);
+	if (index < 0)
+		return false;
+	AMessage = AHistory.at(index);
+	return true;
+}
+
 inline int replaceExistingMessage(QList<BasicMessage> &AHistory, const BasicMessage &AMessage)
 {
 	const int index = findMessageIndex(AHistory, AMessage.messageId());
@@ -132,6 +144,27 @@ inline bool isImageCachePathUpdate(const BasicMessage &AExisting, const BasicMes
 		oldMetadata.value(QStringLiteral("file_path")).toString() !=
 			newMetadata.value(QStringLiteral("file_path")).toString() &&
 		!newMetadata.value(QStringLiteral("file_path")).toString().isEmpty();
+}
+
+inline bool prepareImageRetryAfterLocalLoadFailure(const BasicMessage &AMessage,
+	const QString &AFailedPath, BasicMessage &AFallbackMessage)
+{
+	const QVariantMap metadata = AMessage.metadata();
+	if (AFailedPath.isEmpty() ||
+		metadata.value(QStringLiteral("msgtype")).toString() != QStringLiteral("m.image") ||
+		metadata.value(QStringLiteral("file_path")).toString() != AFailedPath)
+		return false;
+	const QVariant decodedImage = metadata.value(QStringLiteral("decoded_image"));
+	if (decodedImage.isValid() && !decodedImage.isNull())
+		return false;
+
+	AFallbackMessage = AMessage;
+	QVariantMap fallbackMetadata = metadata;
+	fallbackMetadata.remove(QStringLiteral("file_path"));
+	fallbackMetadata.remove(QStringLiteral("decoded_image"));
+	fallbackMetadata.remove(QStringLiteral("image_resource_url"));
+	AFallbackMessage.setMetadata(fallbackMetadata);
+	return true;
 }
 
 inline bool isMediaHydrationUpdate(const BasicMessage &AExisting, const BasicMessage &AUpdated)
@@ -316,8 +349,19 @@ inline QList<BasicMessage> mergeOlderPage(const QList<BasicMessage> &AVisibleHis
 		} else if (!messageIndexes.contains(messageId)) {
 			messageIndexes.insert(messageId, merged.size());
 			merged.append(message);
-		} else if (visibleMessage) {
-			merged[messageIndexes.value(messageId)] = message;
+		} else {
+			const int existingIndex = messageIndexes.value(messageId);
+			const BasicMessage &existingMessage = merged.at(existingIndex);
+			const bool incomingMediaUpdate =
+				isMediaHydrationUpdate(existingMessage, message) ||
+				(!hasMediaPayload(existingMessage) &&
+					isImageCachePathUpdate(existingMessage, message));
+			const bool existingMediaUpdate =
+				isMediaHydrationUpdate(message, existingMessage) ||
+				(!hasMediaPayload(message) &&
+					isImageCachePathUpdate(message, existingMessage));
+			if (incomingMediaUpdate || (visibleMessage && !existingMediaUpdate))
+				merged[existingIndex] = message;
 		}
 	};
 	for (const BasicMessage &message : AOlderPage)

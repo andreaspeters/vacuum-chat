@@ -5904,8 +5904,11 @@ void MatrixNetwork::retryPendingEncryptedEvents(const QString &roomId, const QSt
 	// Updated events are emitted individually below. Re-emitting the full room
 	// history on every retry turns a no-op key retry into a burst of queued UI
 	// messages proportional to the room history size.
-	for (const MatrixTextEvent &event : updated)
+	for (const MatrixTextEvent &event : updated) {
+		if (event.roomId == FActiveRoomId && event.messageType == QStringLiteral("m.image"))
+			requestImage(event);
 		emit messageReceived(event.toBasicMessage());
+	}
 }
 
 QList<MatrixTextEvent> MatrixNetwork::historyBackfill(const QString &roomId, int limit)

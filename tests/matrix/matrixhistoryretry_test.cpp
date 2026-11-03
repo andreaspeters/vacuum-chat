@@ -45,6 +45,28 @@ public:
         network.FUserId = userId;
     }
 
+    static void setActiveRoom(MatrixNetwork &network, const QString &roomId)
+    {
+        network.FActiveRoomId = roomId;
+    }
+
+    static MatrixOlmCrypto &crypto(MatrixNetwork &network)
+    {
+        return network.FOlmCrypto;
+    }
+
+    static void retryPendingEncryptedEvents(MatrixNetwork &network,
+                                           const QString &roomId,
+                                           const QString &sessionId)
+    {
+        network.retryPendingEncryptedEvents(roomId, sessionId);
+    }
+
+    static void setDatabaseWorker(MatrixNetwork &network, QObject *worker)
+    {
+        network.setDatabaseWorker(worker);
+    }
+
     static void prepareBackfill(MatrixNetwork &network, const QString &roomId,
                                 const QString &cursor)
     {
@@ -442,11 +464,146 @@ bool testLegacyMediaFallback(MatrixNetwork &network, const QString &suffix,
     return true;
 }
 
+int testDelayedMegolmImageRetry()
+{
+#if !HAVE_OLM
+    return fail("delayed Megolm image regression requires libolm");
+#else
+    QTemporaryDir profileDirectory;
+    if (!profileDirectory.isValid())
+        return fail("could not create delayed-image profile directory");
+
+    MatrixNetwork network;
+    QThread databaseThread;
+    MatrixDatabaseWorker *databaseWorker = new MatrixDatabaseWorker;
+    databaseWorker->moveToThread(&databaseThread);
+    QObject::connect(&databaseThread, &QThread::finished,
+        databaseWorker, &QObject::deleteLater);
+    databaseThread.start();
+
+    bool databaseOpened = false;
+    QMetaObject::invokeMethod(databaseWorker, [&]() {
+        databaseOpened = databaseWorker->openForAccount(profileDirectory.path(),
+            QStringLiteral("https://late-image.example.org"),
+            QStringLiteral("@history-test:example.org"));
+    }, Qt::BlockingQueuedConnection);
+    if (!databaseOpened) {
+        databaseThread.quit();
+        databaseThread.wait();
+        return fail("could not open delayed-image database");
+    }
+    MatrixNetworkTestAccess::setDatabaseWorker(network,
+        static_cast<QObject *>(databaseWorker));
+
+    auto stopWorker = [&]() {
+        MatrixNetworkTestAccess::setDatabaseWorker(network, nullptr);
+        QMetaObject::invokeMethod(databaseWorker, [databaseWorker]() {
+            databaseWorker->close();
+        }, Qt::BlockingQueuedConnection);
+        databaseThread.quit();
+        databaseThread.wait();
+    };
+
+    const QString roomId = QStringLiteral("!late-image:example.org");
+    const QString eventId = QStringLiteral("$late-image-%1").arg(QCoreApplication::applicationPid());
+    const QString mediaId = QStringLiteral("late-image-media-%1").arg(QCoreApplication::applicationPid());
+    SyntheticMediaServer server(syntheticPng(), QByteArrayLiteral("M_UNRECOGNIZED"));
+    if (!server.listen(QHostAddress::LocalHost, 0)) {
+        stopWorker();
+        return fail("could not start delayed-image media server");
+    }
+    network.setServerUrl(QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort()));
+    MatrixNetworkTestAccess::setAccessToken(network, QStringLiteral("synthetic-test-token"));
+    MatrixNetworkTestAccess::setUserId(network, QStringLiteral("@history-test:example.org"));
+    MatrixNetworkTestAccess::setActiveRoom(network, roomId);
+
+    MatrixOlmCrypto senderCrypto;
+    QString sessionId;
+    QByteArray roomKey;
+    QByteArray outboundPickle;
+    if (!senderCrypto.createOutboundMegolmSessionData(roomId, sessionId,
+            roomKey, outboundPickle)) {
+        stopWorker();
+        return fail("could not create synthetic Megolm session");
+    }
+    const QJsonObject imageContent{
+        {QStringLiteral("msgtype"), QStringLiteral("m.image")},
+        {QStringLiteral("body"), QStringLiteral("late-image.png")},
+        {QStringLiteral("url"), QStringLiteral("mxc://media.example.org/%1").arg(mediaId)}};
+    const QJsonObject plaintextEvent{
+        {QStringLiteral("type"), QStringLiteral("m.room.message")},
+        {QStringLiteral("room_id"), roomId},
+        {QStringLiteral("sender"), QStringLiteral("@image-peer:example.org")},
+        {QStringLiteral("content"), imageContent}};
+    const QByteArray ciphertext = senderCrypto.encryptMegolmData(roomId,
+        QJsonDocument(plaintextEvent).toJson(QJsonDocument::Compact),
+        sessionId, outboundPickle);
+    QByteArray inboundPickle;
+    if (ciphertext.isEmpty() || !MatrixNetworkTestAccess::crypto(network)
+            .prepareMegolmSession(sessionId, roomKey, inboundPickle)) {
+        stopWorker();
+        return fail("could not prepare synthetic inbound Megolm session");
+    }
+
+    MatrixTimelineEvent encryptedEvent;
+    encryptedEvent.roomId = roomId;
+    encryptedEvent.eventId = eventId;
+    encryptedEvent.eventType = QStringLiteral("m.room.encrypted");
+    encryptedEvent.sender = QStringLiteral("@image-peer:example.org");
+    encryptedEvent.originTs = 3000;
+    encryptedEvent.messageType = QStringLiteral("m.encrypted");
+    encryptedEvent.content = QStringLiteral("[encrypted Matrix event]");
+    encryptedEvent.metadata.insert(QStringLiteral("session_id"), sessionId);
+    encryptedEvent.metadata.insert(QStringLiteral("ciphertext"), QString::fromUtf8(ciphertext));
+    encryptedEvent.metadata.insert(QStringLiteral("sender_key"), QStringLiteral("synthetic-sender-key"));
+    encryptedEvent.metadata.insert(QStringLiteral("decryption_status"), QStringLiteral("pending"));
+    bool fixtureSaved = false;
+    QMetaObject::invokeMethod(databaseWorker, [&]() {
+        databaseWorker->execute([&](MatrixDatabase &database) {
+            fixtureSaved = database.saveMegolmSession(sessionId, roomId,
+                    QStringLiteral("synthetic-sender-key"), inboundPickle) &&
+                database.appendTimelineEvents(roomId, QList<MatrixTimelineEvent>{encryptedEvent});
+        });
+    }, Qt::BlockingQueuedConnection);
+    if (!fixtureSaved) {
+        stopWorker();
+        return fail("could not persist synthetic encrypted image event");
+    }
+
+    bool imageDecoded = false;
+    QEventLoop imageLoop;
+    const QMetaObject::Connection connection = QObject::connect(&network,
+        &MatrixNetwork::messageReceived, &imageLoop, [&](const BasicMessage &message) {
+            if (message.messageId() != eventId)
+                return;
+            const QImage image = message.metadata().value(QStringLiteral("decoded_image")).value<QImage>();
+            if (!image.isNull()) {
+                imageDecoded = image.size() == QSize(8, 8) &&
+                    image.pixelColor(0, 0) == QColor(Qt::blue);
+                imageLoop.quit();
+            }
+        });
+    MatrixNetworkTestAccess::retryPendingEncryptedEvents(network, roomId, sessionId);
+    const bool completed = waitForEventLoop(imageLoop, 5000, [&]() { return imageDecoded; });
+    QObject::disconnect(connection);
+    const QStringList paths = server.requestPaths();
+    stopWorker();
+    if (!completed || !imageDecoded)
+        return fail("late Megolm decryption did not request and decode the room image");
+    if (paths.size() != 2 || !paths.first().contains(QStringLiteral("/_matrix/client/v1/media/download/")) ||
+        !paths.last().contains(QStringLiteral("/_matrix/media/v3/download/")))
+        return fail("late Megolm image retry used unexpected Matrix media request paths");
+    return 0;
+#endif
+}
+
 } // namespace
 
 int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
+    if (argc > 1 && QString::fromLocal8Bit(argv[1]) == QStringLiteral("--late-image-regression"))
+        return testDelayedMegolmImageRetry();
     QTemporaryDir profileDirectory;
     if (!profileDirectory.isValid())
         return fail("could not create temporary Matrix profile directory");

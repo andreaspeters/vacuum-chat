@@ -55,6 +55,15 @@ int main()
 		loadLinkQuery.queryItemValue(QStringLiteral("body")) == QStringLiteral("image & one.png") &&
 		loadLinkQuery.queryItemValue(QStringLiteral("historical")) == QStringLiteral("true"),
 		"image media-load links carry encoded room, event, MXC URL, type, body and history state");
+	const QUrl encryptedLoadLink = MatrixImageDisplay::mediaLoadUrl(QStringLiteral("!room:example.org"),
+		QStringLiteral("$encrypted-event:example.org"), QString(), QStringLiteral("m.image"),
+		QStringLiteral("secret.png"), true);
+	const QString waitingForImageHtml = MatrixImageDisplay::loadLinkHtml(encryptedLoadLink,
+		QStringLiteral("Load image"));
+	passed &= check(waitingForImageHtml.contains(QStringLiteral("Load image")) &&
+		waitingForImageHtml.contains(QStringLiteral("vacuum-media://load?")) &&
+		!waitingForImageHtml.contains(QStringLiteral("<img")),
+		"the actionable Load image fallback remains visible while local decoding is pending");
 	const QString previewHtml = MatrixImageDisplay::previewHtml(imageLink,
 		QUrl(QStringLiteral("vacuum-local-image:/resource-id")), QStringLiteral("image<&.png"), QSize(1600, 900));
 	passed &= check(previewHtml.contains(QStringLiteral("href=\"vacuum-media://open?")) &&

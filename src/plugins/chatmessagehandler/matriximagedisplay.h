@@ -67,17 +67,26 @@ inline QUrl mediaLoadUrl(const QString &conversationId, const QString &messageId
 	return url;
 }
 
+inline QString loadLinkHtml(const QUrl &loadUrl, const QString &label)
+{
+	if (loadUrl.isEmpty())
+		return QString();
+	return QStringLiteral("<a href=\"%1\">%2</a>")
+		.arg(loadUrl.toString(QUrl::FullyEncoded).toHtmlEscaped(), label.toHtmlEscaped());
+}
+
 inline QString previewHtml(const QUrl &openUrl, const QUrl &resourceUrl,
 	const QString &altText, const QSize &sourceSize)
 {
 	const QSize displaySize = sizeForDisplay(sourceSize, 0);
 	if (displaySize.isEmpty())
 		return QString();
-	return QStringLiteral("<div><a href=\"%1\"><img src=\"%2\" alt=\"%3\" width=\"%4\" height=\"%5\" /></a></div>")
-		.arg(openUrl.toString(QUrl::FullyEncoded).toHtmlEscaped(),
-			resourceUrl.toString(QUrl::FullyEncoded).toHtmlEscaped(), altText.toHtmlEscaped())
-		.arg(displaySize.width())
-		.arg(displaySize.height());
+	return QStringLiteral("<div><a href=\"") + openUrl.toString(QUrl::FullyEncoded).toHtmlEscaped() +
+		QStringLiteral("\"><img src=\"") + resourceUrl.toString(QUrl::FullyEncoded).toHtmlEscaped() +
+		QStringLiteral("\" alt=\"") + altText.toHtmlEscaped() +
+		QStringLiteral("\" width=\"") + QString::number(displaySize.width()) +
+		QStringLiteral("\" height=\"") + QString::number(displaySize.height()) +
+		QStringLiteral("\" /></a></div>");
 }
 }
 

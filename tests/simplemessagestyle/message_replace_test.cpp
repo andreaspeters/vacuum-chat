@@ -1,13 +1,21 @@
 #include <QApplication>
+#include <QColor>
 #include <QDateTime>
 #include <QFrame>
+#include <QImage>
 #include <QNetworkAccessManager>
+#include <QPainter>
 #include <QPointer>
+#include <QRectF>
 #include <QTextBrowser>
+#include <QTextDocument>
+#include <QUrl>
 #include <iostream>
 
 #include "simplemessagestyle.h"
 #include "styleviewer.h"
+#include "decorationhelper.h"
+#include "../../src/plugins/chatmessagehandler/matriximagedisplay.h"
 
 namespace
 {
@@ -81,6 +89,56 @@ int main(int argc, char **argv)
 	passed &= check(laterContent && laterContent->toPlainText().contains(
 		QStringLiteral("later message stays visible")),
 		"an unrelated later bubble remains unchanged");
+
+	const QString imageMessageId = QStringLiteral("$image-event:example.org");
+	appendMessage(imageMessageId, QStringLiteral("<p>Load image</p>"));
+	application.processEvents();
+	QImage sourceImage(16, 12, QImage::Format_ARGB32_Premultiplied);
+	sourceImage.fill(QColor(20, 220, 40));
+	const QUrl resourceUrl(QStringLiteral("vacuum-matrix-image:/%1/%2")
+		.arg(QString::fromLatin1(QUrl::toPercentEncoding(QStringLiteral("!room:example.org"))),
+			QString::fromLatin1(QUrl::toPercentEncoding(imageMessageId))));
+	view->document()->addResource(QTextDocument::ImageResource, resourceUrl, sourceImage);
+	const QString imageHtml = MatrixImageDisplay::previewHtml(
+		MatrixImageDisplay::viewerUrl(QStringLiteral("!room:example.org"), imageMessageId),
+		resourceUrl, QStringLiteral("synthetic.png"), sourceImage.size());
+	const QSet<QUrl> parsedResources = DecorationHelper::imageResourcesFromHtml(imageHtml);
+	passed &= check(view->document()->resource(QTextDocument::ImageResource, resourceUrl).isValid(),
+		"the parent document contains the encoded Matrix image resource before replacement");
+	passed &= check(parsedResources.contains(resourceUrl),
+		"the actual Matrix preview HTML parses back to the resource URL used by the handler");
+	const bool imageReplaced = style.replaceMessageContent(view, imageMessageId, imageHtml,
+		imageMessageId, false);
+	application.processEvents();
+	const QList<QFrame *> imageBubbles = view->findChildren<QFrame *>(QStringLiteral("modernChatBubbleFrame"));
+	passed &= check(imageReplaced && imageBubbles.size() == 3,
+		"the Matrix-URI image hydration replaces the existing bubble");
+	QTextBrowser *imageContent = imageBubbles.size() < 3 ? nullptr :
+		imageBubbles.at(2)->findChild<QTextBrowser *>(QStringLiteral("modernChatBubbleContent"));
+	passed &= check(imageContent != nullptr, "the Matrix image bubble has a content document");
+	if (imageContent) {
+		const QImage bubbleImage = imageContent->document()->resource(
+			QTextDocument::ImageResource, resourceUrl).value<QImage>();
+		passed &= check(!bubbleImage.isNull() && bubbleImage.size() == sourceImage.size(),
+			"the Matrix-URI resource survives replacement in the bubble document");
+		QImage rendered(QSize(320, 240), QImage::Format_ARGB32_Premultiplied);
+		rendered.fill(Qt::transparent);
+		{
+			QPainter painter(&rendered);
+			imageContent->document()->drawContents(&painter, QRectF(0, 0, rendered.width(), rendered.height()));
+		}
+		bool visibleImagePixel = false;
+		for (int y = 0; y < rendered.height() && !visibleImagePixel; ++y)
+			for (int x = 0; x < rendered.width(); ++x) {
+				const QColor pixel = rendered.pixelColor(x, y);
+				if (pixel.green() > 150 && pixel.green() > pixel.red() * 2 && pixel.green() > pixel.blue()) {
+					visibleImagePixel = true;
+					break;
+				}
+			}
+		passed &= check(visibleImagePixel,
+			"the Matrix-URI image renders visible pixels in the bubble document");
+	}
 
 	delete view;
 	return passed ? 0 : 1;

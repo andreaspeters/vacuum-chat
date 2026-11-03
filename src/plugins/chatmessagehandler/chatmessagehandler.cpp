@@ -1395,16 +1395,42 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 					const BasicMessage pendingMessage = AMessage;
 					scheduler->loadFile(filePath, this,
 						[guardedHandler, guardedWindow, guardedMessaging, pendingMessage,
-							loadKey, effectiveResourceUrl](const QImage &image) {
+							loadKey, filePath, effectiveResourceUrl](const QImage &image) {
 							if (!guardedHandler)
 								return;
 						guardedHandler->FProtocolImageLoadsInFlight.remove(loadKey);
-						if (image.isNull() || !guardedWindow || !guardedMessaging)
+						if (!guardedWindow || !guardedMessaging)
 							return;
 						IChatWindow *liveWindow = qobject_cast<IChatWindow *>(guardedWindow.data());
 						IProtocolMessaging *liveMessaging = qobject_cast<IProtocolMessaging *>(guardedMessaging.data());
 						if (!liveWindow || !liveMessaging)
 							return;
+						if (image.isNull()) {
+							const QString failedHistoryKey = liveMessaging->streamId() + QChar('\n') +
+								pendingMessage.conversationId();
+							QList<BasicMessage> &history = guardedHandler->FProtocolConversationMessages[
+								failedHistoryKey];
+							const int historyIndex = ProtocolMessageHistory::findMessageIndex(
+								history, pendingMessage.messageId());
+							const QString renderedKey = liveMessaging->streamId() + QChar('\n') +
+								pendingMessage.conversationId() + QChar('\n') + pendingMessage.messageId();
+							if (historyIndex < 0 &&
+								!guardedHandler->FProtocolRenderedMessages.contains(renderedKey))
+								return;
+							const BasicMessage currentMessage = historyIndex >= 0
+								? history.at(historyIndex) : pendingMessage;
+							BasicMessage fallbackMessage;
+							if (!ProtocolMessageHistory::prepareImageRetryAfterLocalLoadFailure(
+									currentMessage, filePath, fallbackMessage))
+								return;
+							if (historyIndex >= 0)
+								history[historyIndex] = fallbackMessage;
+							guardedHandler->renderProtocolMessage(liveWindow, liveMessaging,
+								fallbackMessage, true);
+							if (liveMessaging->supportsConversationMedia())
+								liveMessaging->loadConversationMedia(fallbackMessage);
+							return;
+						}
 						BasicMessage hydratedMessage = pendingMessage;
 						QVariantMap hydratedMetadata = hydratedMessage.metadata();
 						hydratedMetadata.insert(QStringLiteral("decoded_image"), image);
@@ -1440,15 +1466,17 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 				);
 				}
 			}
-			const QString placeholderHtml = MatrixImageDisplay::previewHtml(openUrl, imageResource,
-				body, QSize(4, 3));
-			appendOrReplace(replyHtml + placeholderHtml);
+			const QUrl requestUrl = MatrixImageDisplay::mediaLoadUrl(AMessage.conversationId(),
+				AMessage.messageId(), imageUrl, messageType, body,
+				AMessage.metadata().value(QStringLiteral("historical")).toBool());
+			appendOrReplace(replyHtml + MatrixImageDisplay::loadLinkHtml(requestUrl,
+				tr("Load image")));
 		} else {
 			const QUrl requestUrl = MatrixImageDisplay::mediaLoadUrl(AMessage.conversationId(),
 				AMessage.messageId(), imageUrl, messageType, body,
 				AMessage.metadata().value(QStringLiteral("historical")).toBool());
-			appendOrReplace(replyHtml + QStringLiteral("<a href=\"%1\">%2</a>")
-				.arg(requestUrl.toString(QUrl::FullyEncoded).toHtmlEscaped(), tr("Load image")));
+			appendOrReplace(replyHtml + MatrixImageDisplay::loadLinkHtml(requestUrl,
+				tr("Load image")));
 		}
 	}
 	else if (messageType == QStringLiteral("m.file"))
@@ -2776,15 +2804,15 @@ void ChatMessageHandler::onProtocolUrlClicked(const QUrl &AUrl)
 			}
 		if (!messaging || roomId != window->conversationId() || eventId.isEmpty())
 			return;
-		BasicMessage message(eventId, roomId, QString(), QString(),
-			query.queryItemValue(QStringLiteral("body")), QDateTime::currentDateTimeUtc(),
-			messaging->protocol(), BasicMessage::Incoming);
-		QVariantMap metadata;
-		metadata.insert(QStringLiteral("url"), query.queryItemValue(QStringLiteral("url")));
-		metadata.insert(QStringLiteral("msgtype"), query.queryItemValue(QStringLiteral("msgtype")));
-		metadata.insert(QStringLiteral("historical"),
-			query.queryItemValue(QStringLiteral("historical")) == QStringLiteral("true"));
-		message.setMetadata(metadata);
+		const QString historyKey = messaging->streamId() + QChar('\n') + roomId;
+		BasicMessage message;
+		bool foundMessage = ProtocolMessageHistory::findConversationMediaMessage(
+			FProtocolConversationMessages.value(historyKey), eventId, message);
+		if (!foundMessage)
+			foundMessage = ProtocolMessageHistory::findConversationMediaMessage(
+				messaging->conversationHistory(roomId), eventId, message);
+		if (!foundMessage)
+			return;
 		messaging->loadConversationMedia(message);
 		return;
 	}
