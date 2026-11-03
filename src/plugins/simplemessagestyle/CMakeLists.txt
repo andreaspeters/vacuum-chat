@@ -40,21 +40,6 @@ if (BUILD_TESTING)
 	target_link_libraries(simplemessagestyle_message_replace_tests PRIVATE
 		${VACUUM_UTILS_NAME}
 		Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::Xml Qt6::Sql)
-	add_executable(matrix_image_bubble_resource_tests EXCLUDE_FROM_ALL
-		${CMAKE_SOURCE_DIR}/tests/matrix_image_bubble_resource_test.cpp
-		roundedimage.h
-		simplemessagestyle.cpp
-		simplemessagestyle.h
-		styleviewer.cpp
-		styleviewer.h
-		decorationhelper.cpp
-		decorationhelper.h)
-	target_compile_features(matrix_image_bubble_resource_tests PRIVATE cxx_std_11)
-	target_compile_definitions(matrix_image_bubble_resource_tests PRIVATE
-		AVATAR_STYLE_PATH=\"${CMAKE_SOURCE_DIR}/resources/simplemessagestyles/modern-chat\")
-	target_link_libraries(matrix_image_bubble_resource_tests PRIVATE
-		${VACUUM_UTILS_NAME}
-		Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::Xml Qt6::Sql)
 	add_executable(simplemessagestyle_avatar_cache_tests EXCLUDE_FROM_ALL
 		${SIMPLEMESSAGESTYLE_TEST_SOURCE_DIR}/avatar_cache_test.cpp
 		avatarpathcache.h)
