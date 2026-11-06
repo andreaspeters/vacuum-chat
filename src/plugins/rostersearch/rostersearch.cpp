@@ -357,7 +357,10 @@ bool RosterSearch::filterAcceptsRow(int ARow, const QModelIndex &AParent) const
 				if (isSearchFieldEnabled(dataField))
 				{
 					accept = false;
-					if (filterRegularExpression().match(index.data(dataField).toString()).hasMatch())
+					QString fieldValue = index.data(dataField).toString();
+					QString pattern = searchPattern();
+					// Use case-insensitive partial string matching
+					if (fieldValue.contains(pattern, Qt::CaseInsensitive))
 						return true;
 				}
 			}
