@@ -255,7 +255,21 @@ int main(int argc, char *argv[])
         outgoingStatus.bottom() == outgoingBubble.bottom() &&
         outgoingStatus.left() > outgoingBubble.right(),
         "outgoing status stays outside the bubble, on its right, and aligns with its bottom edge");
-
+    const QRect narrowOutgoingStatus = DecorationHelper::adjacentDecorationRect(
+        QRect(20, 100, 80, 40), QSize(20, 12), QSize(120, 300), true);
+    passed &= check(narrowOutgoingStatus.isValid() &&
+        narrowOutgoingStatus.left() > 20 + 80 - 1,
+        "outgoing status remains on the bubble's right when it cannot fit on the left");
+    const QRect outgoingStatusBeyondViewport = DecorationHelper::adjacentDecorationRect(
+        QRect(70, 100, 80, 40), QSize(20, 12), QSize(160, 300), true);
+    passed &= check(outgoingStatusBeyondViewport.isValid() &&
+        outgoingStatusBeyondViewport.left() == 154,
+        "outgoing status preserves right-side placement at the viewport edge");
+    const QRect outgoingStatusWithoutViewport = DecorationHelper::adjacentDecorationRect(
+        outgoingBubble, QSize(20, 12), QSize(), true);
+    passed &= check(outgoingStatusWithoutViewport.isValid() &&
+        outgoingStatusWithoutViewport.left() == outgoingBubble.right() + 5,
+        "outgoing status remains on the right when viewport size is not yet available");
     const QRect incomingReactions = DecorationHelper::reactionDecorationRect(outgoingBubble,
         QSize(30, 12), QSize(400, 300), false);
     const QRect outgoingReactions = DecorationHelper::reactionDecorationRect(outgoingBubble,

@@ -7,6 +7,13 @@ set(PLUGIN_DEPENDENCIES accountmanager)
 
 find_package(Qt6 REQUIRED COMPONENTS SerialPort Widgets Xml)
 list(APPEND ADD_LIBS Qt6::SerialPort)
+find_package(OpenSSL QUIET)
+if (OpenSSL_FOUND)
+	list(APPEND ADD_LIBS OpenSSL::Crypto)
+	add_definitions(-DHAVE_MESHCORE_OPENSSL=1)
+else()
+	add_definitions(-DHAVE_MESHCORE_OPENSSL=0)
+endif()
 
 if (NOT OS2)
 	find_package(Qt6 REQUIRED COMPONENTS Bluetooth)
@@ -26,6 +33,12 @@ if (BUILD_TESTING)
 		meshcorecodec.cpp)
 	target_compile_features(meshcore_codec_tests PRIVATE cxx_std_11)
 	target_include_directories(meshcore_codec_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+	if (OpenSSL_FOUND)
+		target_link_libraries(meshcore_codec_tests PRIVATE Qt6::Core OpenSSL::Crypto)
+	endif()
+	if (NOT OpenSSL_FOUND)
+		target_link_libraries(meshcore_codec_tests PRIVATE Qt6::Core)
+	endif()
 
 	add_executable(meshcore_protocol_tests EXCLUDE_FROM_ALL
 		${MESHCORE_TEST_SOURCE_DIR}/meshcoreprotocol_test.cpp
@@ -41,6 +54,9 @@ if (BUILD_TESTING)
 		meshcoreserialtransport.cpp)
 	target_compile_features(meshcore_protocol_tests PRIVATE cxx_std_11)
 	target_link_libraries(meshcore_protocol_tests PRIVATE ${VACUUM_UTILS_NAME} Qt6::SerialPort Qt6::Widgets Qt6::Xml)
+	if (OpenSSL_FOUND)
+		target_link_libraries(meshcore_protocol_tests PRIVATE OpenSSL::Crypto)
+	endif()
 	target_include_directories(meshcore_protocol_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${MESHCORE_TEST_SOURCE_DIR})
 
 	add_executable(meshcore_join_dialog_tests EXCLUDE_FROM_ALL

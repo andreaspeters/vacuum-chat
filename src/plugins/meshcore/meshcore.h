@@ -4,7 +4,9 @@
 #include <QObject>
 #include <QTimer>
 #include <QByteArray>
+#include <QHash>
 #include <QList>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 #include <interfaces/imessage.h>
@@ -36,6 +38,7 @@ struct MeshCoreChannel
     QString name;
     QString topic;
     QStringList members;
+    QByteArray secret;
 };
 
 class MeshCoreProtocol : public QObject
@@ -105,6 +108,8 @@ private:
     void onTransportDisconnected();
     void onPacketReceived(const QByteArray &payload);
     void onTransportError(const QString &message);
+    void handleRxLog(const QByteArray &packet);
+    void retryOutgoingMessage(const QString &messageId);
     bool sendAppStart();
     void handlePacket(const QByteArray &payload);
     void abortContactSync();
@@ -129,10 +134,14 @@ private:
     bool persistAndSendOutgoingMessage(const BasicMessage &message,
                                        const QByteArray &command,
                                        const QString &queueError);
+    void updateOutgoingMessageStatus(const QString &messageId, int repeaterCount,
+                                     int repeatCount);
+    QByteArray encodeRawPacketCommand(const QByteArray &packet, quint8 priority) const;
     QString backend;
     QString devicePath;
     QString deviceMacAddress;
     QString currentPublicKeyHex;
+    QString localNodeName;
     State protocolState = Idle;
     DeviceState deviceState = UnknownDevice;
     MeshCoreTransport* transport = nullptr;
@@ -143,6 +152,18 @@ private:
     QList<MeshCoreChannel> pendingChannels;
     QList<int> freeChannelSlots;
     QList<int> pendingFreeChannelSlots;
+    QHash<QString, QByteArray> outgoingChannelPackets;
+    QHash<QString, QSet<QString>> outgoingChannelRepeaters;
+    QHash<QString, int> outgoingChannelRepeatCounts;
+    QHash<QString, BasicMessage> outgoingChannelMessages;
+    QHash<QString, QByteArray> outgoingChannelCommands;
+    QHash<QString, QTimer *> outgoingChannelRetryTimers;
+    QHash<QString, QString> outgoingChannelCorrelations;
+    QHash<QString, QByteArray> outgoingChannelWireTexts;
+    QHash<QString, QByteArray> outgoingChannelBodies;
+    QHash<QString, quint32> outgoingChannelTimestamps;
+    QHash<QString, quint8> outgoingChannelIndices;
+    QHash<QString, QString> outgoingChannelStatusKeys;
     quint32 expectedContactCount = 0;
     quint8 requestedChannelIndex = 0;
     bool channelSyncInProgress = false;

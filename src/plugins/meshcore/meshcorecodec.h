@@ -76,6 +76,30 @@ struct MeshCoreAck
     std::uint32_t tripTimeMs = 0;
 };
 
+struct MeshCoreRxLogEntry
+{
+    std::int8_t snrQuarterDb = 0;
+    std::int8_t rssi = 0;
+    std::vector<std::uint8_t> rawPacket;
+    bool hasPacketHeader = false;
+    std::uint8_t routeType = 0;
+    std::uint8_t payloadType = 0;
+    std::uint8_t payloadVersion = 0;
+    std::uint8_t pathLength = 0;
+    int pathHashBytes = 0;
+    int pathHops = 0;
+    std::vector<std::uint8_t> path;
+    std::vector<std::uint8_t> payload;
+};
+
+struct MeshCoreChannelText
+{
+    std::uint32_t timestamp = 0;
+    std::uint8_t flags = 0;
+    std::uint8_t attempt = 0;
+    std::string text;
+};
+
 class MeshCoreCompanionCodec
 {
 public:
@@ -121,6 +145,18 @@ public:
                                   MeshCoreMessageSent &result);
     static bool decodeAck(const std::vector<std::uint8_t> &packet,
                           MeshCoreAck &result);
+    // Companion PUSH_CODE_LOG_RX_DATA (0x88): signed SNR/RSSI followed by
+    // the unchanged on-air packet bytes. Does not decrypt or infer delivery.
+    static bool decodeRxLogFrame(const std::vector<std::uint8_t> &packet,
+                                 MeshCoreRxLogEntry &result);
+    static bool decodeChannelTextPayload(const std::vector<std::uint8_t> &payload,
+                                         const std::vector<std::uint8_t> &secret,
+                                         MeshCoreChannelText &result);
+    static bool encodeChannelTextPayload(const std::vector<std::uint8_t> &secret,
+                                         std::uint32_t timestamp,
+                                         const std::string &text,
+                                         std::uint8_t attempt,
+                                         std::vector<std::uint8_t> &payload);
     static bool decodeContactListStart(const std::vector<std::uint8_t> &packet,
                                        std::uint32_t &contactCount);
     static bool decodeContactListEnd(const std::vector<std::uint8_t> &packet,

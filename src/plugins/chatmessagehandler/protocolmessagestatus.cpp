@@ -59,17 +59,26 @@ QString messageStateKey(const QString &streamId, const QString &conversationId,
 namespace ProtocolMessageStatus
 {
 QString buildReadReceiptFooter(bool isSentSuccess, const QList<QString> &readerNames,
-	const QList<QString> &avatarUrls)
+	const QList<QString> &avatarUrls, const QString &deliveryStatus)
 {
-	if (!isSentSuccess && readerNames.isEmpty())
+	if (!isSentSuccess && readerNames.isEmpty() && deliveryStatus.isEmpty())
 		return QString();
 
 	QString html = QStringLiteral(
 		"<div style=\"text-align:right;white-space:nowrap;line-height:10px;margin-top:2px;\">");
+	const bool hasDeliveryStatus = !deliveryStatus.isEmpty();
 	if (isSentSuccess) {
 		html += QStringLiteral(
 			"<span style=\"display:inline-block;color:#888;font-size:10px;line-height:10px;vertical-align:middle;\" "
 			"title=\"Gesendet\">&#10003;</span>");
+		if (!readerNames.isEmpty() || hasDeliveryStatus)
+			html += QStringLiteral("&nbsp;");
+	}
+	if (!deliveryStatus.isEmpty()) {
+		html += QStringLiteral(
+			"<span style=\"color:#888;font-size:8px;line-height:10px;vertical-align:middle;\" "
+			"title=\"MeshCore propagation status\">%1</span>")
+			.arg(deliveryStatus.toHtmlEscaped());
 		if (!readerNames.isEmpty())
 			html += QStringLiteral("&nbsp;");
 	}

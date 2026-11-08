@@ -792,6 +792,8 @@ void ChatMessageHandler::onProtocolMessageReceived(const BasicMessage &AMessage)
 			ProtocolMessageHistory::isMediaHydrationUpdate(history.at(existingIndex), AMessage);
 		const bool imageCachePathUpdate = existingIndex >= 0 &&
 			ProtocolMessageHistory::isImageCachePathUpdate(history.at(existingIndex), AMessage);
+		const bool deliveryStatusUpdate = existingIndex >= 0 &&
+			AMessage.metadata().contains(QStringLiteral("delivery_status_text"));
 		const int duplicateIndex = ProtocolMessageHistory::replaceExistingMessage(history, AMessage);
 		if (duplicateIndex >= 0) {
 			const QString prefix = messaging->streamId() + QChar('\n') +
@@ -804,6 +806,8 @@ void ChatMessageHandler::onProtocolMessageReceived(const BasicMessage &AMessage)
 				// Hydrate the existing event in place; appending is only a fallback when it
 				// has not reached this window yet.
 				renderProtocolMessage(window, messaging, AMessage, true);
+			} else if (deliveryStatusUpdate) {
+				updateProtocolMessageStatusDecoration(window, messaging, AMessage);
 			} else if (!alreadyRendered) {
 				const int currentIndex = ProtocolMessageHistory::findMessageIndex(history,
 					AMessage.messageId());
@@ -1751,8 +1755,12 @@ void ChatMessageHandler::updateProtocolMessageStatusDecoration(IChatWindow *AWin
 			avatarUrls.append(avatarUrl);
 		}
 	}
+	const QVariantMap messageMetadata = AMessage.metadata();
 	const QString html = ProtocolMessageStatus::buildReadReceiptFooter(
-		outgoing && state.sentSuccessfully, readerNames, avatarUrls);
+		outgoing && (state.sentSuccessfully ||
+			messageMetadata.value(QStringLiteral("delivery_send_accepted")).toBool()),
+		readerNames, avatarUrls,
+		messageMetadata.value(QStringLiteral("delivery_status_text")).toString());
 	AWindow->viewWidget()->setMessageDecoration(displayMessageId,
 		QStringLiteral("protocol-message-status"), html);
 }

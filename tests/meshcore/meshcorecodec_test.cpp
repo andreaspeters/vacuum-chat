@@ -1,6 +1,7 @@
 #include "meshcorecodec.h"
 
 #include <iostream>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -167,6 +168,82 @@ bool decodeAckRejects(const char *name, const std::vector<std::uint8_t> &packet)
            actual.hasTripTime == empty.hasTripTime &&
            actual.tripTimeMs == empty.tripTimeMs);
 }
+
+bool decodeRxLogMatches(const char *name, const std::vector<std::uint8_t> &packet,
+                        const MeshCoreRxLogEntry &expected)
+{
+    MeshCoreRxLogEntry actual;
+    const bool decoded = MeshCoreCompanionCodec::decodeRxLogFrame(packet, actual);
+    return check(name, decoded && actual.snrQuarterDb == expected.snrQuarterDb &&
+           actual.rssi == expected.rssi && actual.rawPacket == expected.rawPacket &&
+           actual.hasPacketHeader == expected.hasPacketHeader &&
+           actual.routeType == expected.routeType &&
+           actual.payloadType == expected.payloadType &&
+           actual.payloadVersion == expected.payloadVersion &&
+           actual.pathLength == expected.pathLength &&
+           actual.pathHashBytes == expected.pathHashBytes &&
+           actual.pathHops == expected.pathHops && actual.path == expected.path &&
+           actual.payload == expected.payload);
+}
+
+bool decodeRxLogRejects(const char *name, const std::vector<std::uint8_t> &packet)
+{
+    MeshCoreRxLogEntry actual;
+    actual.rawPacket = {0xaa};
+    const bool decoded = MeshCoreCompanionCodec::decodeRxLogFrame(packet, actual);
+    return check(name, !decoded && actual.snrQuarterDb == 0 && actual.rssi == 0 &&
+           actual.rawPacket.empty() && !actual.hasPacketHeader && actual.path.empty() &&
+           actual.payload.empty());
+}
+
+bool decodeChannelTextMatches(const char *name,
+                              const std::vector<std::uint8_t> &payload,
+                              const std::vector<std::uint8_t> &secret,
+                              const MeshCoreChannelText &expected)
+{
+    MeshCoreChannelText actual;
+    const bool decoded = MeshCoreCompanionCodec::decodeChannelTextPayload(
+        payload, secret, actual);
+    return check(name, decoded && actual.timestamp == expected.timestamp &&
+           actual.flags == expected.flags && actual.attempt == expected.attempt &&
+           actual.text == expected.text);
+}
+
+bool decodeChannelTextRejects(const char *name,
+                              const std::vector<std::uint8_t> &payload,
+                              const std::vector<std::uint8_t> &secret)
+{
+    MeshCoreChannelText actual;
+    actual.timestamp = 123;
+    actual.text = "stale";
+    const bool decoded = MeshCoreCompanionCodec::decodeChannelTextPayload(
+        payload, secret, actual);
+    return check(name, !decoded && actual.timestamp == 0 && actual.flags == 0 &&
+           actual.text.empty());
+}
+
+bool encodeChannelTextMatches(const char *name,
+                              const std::vector<std::uint8_t> &secret,
+                              std::uint32_t timestamp, const std::string &text,
+                              std::uint8_t attempt,
+                              const std::vector<std::uint8_t> &expected)
+{
+    std::vector<std::uint8_t> actual;
+    const bool encoded = MeshCoreCompanionCodec::encodeChannelTextPayload(
+        secret, timestamp, text, attempt, actual);
+    return check(name, encoded && actual == expected);
+}
+
+bool encodeChannelTextRejects(const char *name,
+                              const std::vector<std::uint8_t> &secret,
+                              std::uint32_t timestamp, const std::string &text,
+                              std::uint8_t attempt)
+{
+    std::vector<std::uint8_t> payload = {0xaa};
+    const bool encoded = MeshCoreCompanionCodec::encodeChannelTextPayload(
+        secret, timestamp, text, attempt, payload);
+    return check(name, !encoded && payload.empty());
+}
 }
 
 int main()
@@ -319,6 +396,91 @@ int main()
     passed &= decodeAckRejects("truncated ACK trip time",
                                {0x82, 1, 2, 3, 4, 0x78});
     passed &= decodeAckRejects("wrong ACK packet type", {0x06, 1, 2, 3, 4});
+
+    MeshCoreRxLogEntry rxLogExpected;
+    rxLogExpected.snrQuarterDb = -7;
+    rxLogExpected.rssi = -103;
+    rxLogExpected.rawPacket = {0x45, 0x03, 0x10, 0x20, 0x30};
+    rxLogExpected.hasPacketHeader = true;
+    rxLogExpected.routeType = 1;
+    rxLogExpected.payloadType = 1;
+    rxLogExpected.payloadVersion = 1;
+    rxLogExpected.pathLength = 0x03;
+    rxLogExpected.pathHashBytes = 1;
+    rxLogExpected.pathHops = 3;
+    rxLogExpected.path = {0x10, 0x20, 0x30};
+    rxLogExpected.payload = {};
+    passed &= decodeRxLogMatches("LOG_RX_DATA signed radio metrics and raw packet",
+        {0x88, 0xf9, 0x99, 0x45, 0x03, 0x10, 0x20, 0x30},
+        rxLogExpected);
+    MeshCoreRxLogEntry transportRxLogExpected;
+    transportRxLogExpected.snrQuarterDb = 4;
+    transportRxLogExpected.rssi = 0x55;
+    transportRxLogExpected.rawPacket = {0x40, 1, 2, 3, 4, 0x00, 0x05, 0x10};
+    transportRxLogExpected.hasPacketHeader = true;
+    transportRxLogExpected.routeType = 0;
+    transportRxLogExpected.payloadType = 0;
+    transportRxLogExpected.payloadVersion = 1;
+    transportRxLogExpected.pathLength = 0x00;
+    transportRxLogExpected.pathHashBytes = 1;
+    transportRxLogExpected.pathHops = 0;
+    transportRxLogExpected.path = {};
+    transportRxLogExpected.payload = {0x05, 0x10};
+    passed &= decodeRxLogMatches("LOG_RX_DATA skips transport codes before path",
+        {0x88, 0x04, 0x55, 0x40, 1, 2, 3, 4, 0x00, 0x05, 0x10},
+        transportRxLogExpected);
+    passed &= decodeRxLogRejects("LOG_RX_DATA truncated metrics", {0x88, 0x01, 0x02});
+    passed &= decodeRxLogRejects("LOG_RX_DATA wrong packet type", {0x87, 0x01, 0x02, 0x03});
+    passed &= decodeRxLogRejects("LOG_RX_DATA truncated packet header", {0x88, 0, 0, 0x41});
+    passed &= decodeRxLogRejects("LOG_RX_DATA reserved path hash mode",
+        {0x88, 0, 0, 0x41, 0xc0});
+
+    const std::vector<std::uint8_t> channelSecret = {
+        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+        0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10
+    };
+    const std::vector<std::uint8_t> encryptedChannelText = {
+        0x5d, 0x54, 0x4d, 0xea, 0x83, 0xe3, 0x4c, 0x63,
+        0x66, 0x0e, 0x16, 0x58, 0xdf, 0x75, 0xa2, 0xfe,
+        0x21, 0xb6, 0x1f, 0xf9, 0xd0, 0xb6, 0x43, 0xd3,
+        0xb6, 0x3f, 0x74, 0x29, 0xb1, 0x1c, 0x84, 0xf9,
+        0x1f, 0xe9, 0x4e
+    };
+    MeshCoreChannelText channelTextExpected;
+    channelTextExpected.timestamp = 0x12345678;
+    channelTextExpected.flags = 0;
+    channelTextExpected.attempt = 0;
+    channelTextExpected.text = "Node: room echo";
+    passed &= decodeChannelTextMatches("authenticated encrypted GRP_TXT",
+        encryptedChannelText, channelSecret, channelTextExpected);
+    std::vector<std::uint8_t> corruptChannelMac = encryptedChannelText;
+    corruptChannelMac[1] ^= 0x01;
+    passed &= decodeChannelTextRejects("reject GRP_TXT with invalid MAC",
+        corruptChannelMac, channelSecret);
+    passed &= decodeChannelTextRejects("reject GRP_TXT with wrong channel secret",
+        encryptedChannelText, std::vector<std::uint8_t>(16, 0));
+    passed &= decodeChannelTextRejects("reject truncated GRP_TXT payload",
+        {0x5d, 0x54, 0x4d}, channelSecret);
+    passed &= encodeChannelTextMatches("encode attempt-zero GRP_TXT payload",
+        channelSecret, 0x12345678, "Node: room echo", 0, encryptedChannelText);
+    passed &= encodeChannelTextMatches("encode retry GRP_TXT with distinct attempt",
+        channelSecret, 0x12345678, "Node: room echo", 1,
+        {0x5d, 0x41, 0xe0, 0x5a, 0x4f, 0x01, 0x53, 0x5d,
+         0xc1, 0xbd, 0xc4, 0x7c, 0x3d, 0x25, 0x9d, 0x7e,
+         0x45, 0x2c, 0x88, 0xf9, 0xd0, 0xb6, 0x43, 0xd3,
+         0xb6, 0x3f, 0x74, 0x29, 0xb1, 0x1c, 0x84, 0xf9,
+         0x1f, 0xe9, 0x4e});
+    channelTextExpected.attempt = 1;
+    passed &= decodeChannelTextMatches("decode retry attempt from low flags bits",
+        {0x5d, 0x41, 0xe0, 0x5a, 0x4f, 0x01, 0x53, 0x5d,
+         0xc1, 0xbd, 0xc4, 0x7c, 0x3d, 0x25, 0x9d, 0x7e,
+         0x45, 0x2c, 0x88, 0xf9, 0xd0, 0xb6, 0x43, 0xd3,
+         0xb6, 0x3f, 0x74, 0x29, 0xb1, 0x1c, 0x84, 0xf9,
+         0x1f, 0xe9, 0x4e}, channelSecret, channelTextExpected);
+    passed &= encodeChannelTextRejects("reject GRP_TXT attempt beyond retransmission field",
+        channelSecret, 0x12345678, "Node: room echo", 4);
+    passed &= encodeChannelTextRejects("reject GRP_TXT embedded NUL",
+        channelSecret, 0x12345678, std::string("Node\0: bad", 10), 0);
 
     const std::vector<std::uint8_t> directV2 = {
         7, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x05, 0x01,

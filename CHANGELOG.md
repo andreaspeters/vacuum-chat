@@ -6,6 +6,7 @@
 - FIX:    [matrix] heavy load during message sync.
 - FIX:    [matrix] message reply bubble
 - FIX:    [matrix] join a matrix room by id.
+- ADD:    [meshcore] Show delivery and send-repeat status.
 
 ## v2.2.0
 

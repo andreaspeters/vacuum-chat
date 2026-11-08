@@ -31,6 +31,23 @@ int main()
 	passed &= check(!notSent.contains(QStringLiteral("&#10003;")),
 		"unsent message has no success check mark");
 
+	const QString repeaterStatus = ProtocolMessageStatus::buildReadReceiptFooter(
+		true, {}, {}, QStringLiteral("2 Repeaters"));
+	passed &= check(repeaterStatus.contains(QStringLiteral("&#10003;")) &&
+		repeaterStatus.contains(QStringLiteral("2 Repeaters")) &&
+		repeaterStatus.contains(QStringLiteral("font-size:8px")),
+		"small delivery status appears beside the send check");
+	const QString repeatStatus = ProtocolMessageStatus::buildReadReceiptFooter(
+		true, {}, {}, QStringLiteral("Repeat 1"));
+	passed &= check(repeatStatus.contains(QStringLiteral("Repeat 1")) &&
+		repeatStatus.contains(QStringLiteral("font-size:8px")),
+		"small retry number appears beside the send check");
+	const QString escapedDeliveryStatus = ProtocolMessageStatus::buildReadReceiptFooter(
+		true, {}, {}, QStringLiteral("<retry>"));
+	passed &= check(escapedDeliveryStatus.contains(QStringLiteral("&lt;retry&gt;")) &&
+		!escapedDeliveryStatus.contains(QStringLiteral("<retry>")),
+		"MeshCore delivery status is HTML-escaped");
+
 	const QString multipleReaders = ProtocolMessageStatus::buildReadReceiptFooter(
 		true, {QStringLiteral("Alice"), QStringLiteral("Bob")},
 		{QStringLiteral("vacuum-avatar:/alice"), QString()});

@@ -3,6 +3,12 @@
 #include <algorithm>
 #include <limits>
 
+#include <QtCore/QCryptographicHash>
+#include <QtCore/QMessageAuthenticationCode>
+#if HAVE_MESHCORE_OPENSSL
+#include <openssl/evp.h>
+#endif
+
 namespace
 {
 int hexNibble(char value)
@@ -488,6 +494,190 @@ bool MeshCoreCompanionCodec::decodeAck(
 
     result = decoded;
     return true;
+}
+
+bool MeshCoreCompanionCodec::decodeRxLogFrame(
+    const std::vector<std::uint8_t> &packet, MeshCoreRxLogEntry &result)
+{
+    result = MeshCoreRxLogEntry();
+    if (packet.size() <= 3 || packet[0] != 0x88)
+        return false;
+
+    const int snr = packet[1] > 0x7f
+        ? static_cast<int>(packet[1]) - 0x100 : static_cast<int>(packet[1]);
+    const int rssi = packet[2] > 0x7f
+        ? static_cast<int>(packet[2]) - 0x100 : static_cast<int>(packet[2]);
+    MeshCoreRxLogEntry decoded;
+    decoded.snrQuarterDb = static_cast<std::int8_t>(snr);
+    decoded.rssi = static_cast<std::int8_t>(rssi);
+    decoded.rawPacket.assign(packet.begin() + 3, packet.end());
+
+    const std::vector<std::uint8_t> &raw = decoded.rawPacket;
+    if (raw.size() < 2)
+        return false;
+
+    const std::uint8_t header = raw[0];
+    decoded.routeType = header & 0x03;
+    decoded.payloadType = (header >> 2) & 0x0f;
+    decoded.payloadVersion = header >> 6;
+    if (decoded.payloadVersion > 1)
+        return false;
+    std::size_t pathLengthOffset = 1;
+    if (decoded.routeType == 0 || decoded.routeType == 3)
+        pathLengthOffset += 4; // transport codes precede path length
+    if (raw.size() <= pathLengthOffset)
+        return false;
+
+    const std::uint8_t pathLength = raw[pathLengthOffset];
+    const bool directRoute = decoded.routeType == 2 || decoded.routeType == 3;
+    if (directRoute && pathLength != 0xff)
+        return false;
+    decoded.pathLength = pathLength;
+    int pathHashMode = pathLength >> 6;
+    if (pathLength == 0xff) {
+        pathHashMode = 0;
+        decoded.pathHops = 0;
+    } else {
+        if (pathHashMode == 3)
+            return false;
+        decoded.pathHops = pathLength & 0x3f;
+    }
+    decoded.pathHashBytes = pathHashMode + 1;
+    const std::size_t pathBytes = static_cast<std::size_t>(decoded.pathHops) *
+        static_cast<std::size_t>(decoded.pathHashBytes);
+    if (pathBytes > 64 || raw.size() < pathLengthOffset + 1 + pathBytes)
+        return false;
+
+    decoded.hasPacketHeader = true;
+    const std::size_t pathOffset = pathLengthOffset + 1;
+    decoded.path.assign(raw.begin() + static_cast<std::ptrdiff_t>(pathOffset),
+                        raw.begin() + static_cast<std::ptrdiff_t>(pathOffset + pathBytes));
+    decoded.payload.assign(raw.begin() + static_cast<std::ptrdiff_t>(pathOffset + pathBytes),
+                           raw.end());
+    result = decoded;
+    return true;
+}
+
+bool MeshCoreCompanionCodec::decodeChannelTextPayload(
+    const std::vector<std::uint8_t> &payload,
+    const std::vector<std::uint8_t> &secret,
+    MeshCoreChannelText &result)
+{
+    result = MeshCoreChannelText();
+#if !HAVE_MESHCORE_OPENSSL
+    (void)payload;
+    (void)secret;
+    return false;
+#else
+    if (payload.size() < 19 || secret.size() != 16)
+        return false;
+
+    const QByteArray key(reinterpret_cast<const char *>(secret.data()),
+                         static_cast<int>(secret.size()));
+    const QByteArray hash = QCryptographicHash::hash(key, QCryptographicHash::Sha256);
+    if (payload[0] != static_cast<std::uint8_t>(hash.at(0)))
+        return false;
+    const std::size_t ciphertextSize = payload.size() - 3;
+    if (ciphertextSize == 0 || ciphertextSize % 16 != 0)
+        return false;
+
+    const QByteArray ciphertext(reinterpret_cast<const char *>(payload.data() + 3),
+                                static_cast<int>(ciphertextSize));
+    const QByteArray mac = QMessageAuthenticationCode::hash(
+        ciphertext, key + QByteArray(16, '\0'), QCryptographicHash::Sha256);
+    if (payload[1] != static_cast<std::uint8_t>(mac.at(0)) ||
+        payload[2] != static_cast<std::uint8_t>(mac.at(1)))
+        return false;
+
+    EVP_CIPHER_CTX *context = EVP_CIPHER_CTX_new();
+    if (!context)
+        return false;
+    QByteArray plaintext(static_cast<int>(ciphertextSize), Qt::Uninitialized);
+    int produced = 0;
+    int finalProduced = 0;
+    const bool decrypted = EVP_DecryptInit_ex(context, EVP_aes_128_ecb(), nullptr,
+            secret.data(), nullptr) == 1 && EVP_CIPHER_CTX_set_padding(context, 0) == 1 &&
+        EVP_DecryptUpdate(context, reinterpret_cast<unsigned char *>(plaintext.data()),
+            &produced, reinterpret_cast<const unsigned char *>(ciphertext.constData()),
+            ciphertext.size()) == 1 &&
+        EVP_DecryptFinal_ex(context,
+            reinterpret_cast<unsigned char *>(plaintext.data()) + produced,
+            &finalProduced) == 1;
+    EVP_CIPHER_CTX_free(context);
+    if (!decrypted || produced + finalProduced < 5)
+        return false;
+    plaintext.resize(produced + finalProduced);
+
+    MeshCoreChannelText decoded;
+    decoded.timestamp = static_cast<std::uint32_t>(
+        static_cast<unsigned char>(plaintext.at(0))) |
+        (static_cast<std::uint32_t>(static_cast<unsigned char>(plaintext.at(1))) << 8) |
+        (static_cast<std::uint32_t>(static_cast<unsigned char>(plaintext.at(2))) << 16) |
+        (static_cast<std::uint32_t>(static_cast<unsigned char>(plaintext.at(3))) << 24);
+    decoded.flags = static_cast<std::uint8_t>(plaintext.at(4));
+    decoded.attempt = decoded.flags & 0x03;
+    decoded.flags &= 0xfc;
+    int textEnd = plaintext.size();
+    while (textEnd > 5 && plaintext.at(textEnd - 1) == '\0')
+        --textEnd;
+    decoded.text.assign(plaintext.constData() + 5,
+                         static_cast<std::size_t>(textEnd - 5));
+    result = decoded;
+    return true;
+#endif
+}
+
+bool MeshCoreCompanionCodec::encodeChannelTextPayload(
+    const std::vector<std::uint8_t> &secret, std::uint32_t timestamp,
+    const std::string &text, std::uint8_t attempt,
+    std::vector<std::uint8_t> &payload)
+{
+    payload.clear();
+#if !HAVE_MESHCORE_OPENSSL
+    (void)secret; (void)timestamp; (void)text; (void)attempt;
+    return false;
+#else
+    if (secret.size() != 16 || attempt > 3 || text.find('\0') != std::string::npos)
+        return false;
+
+    std::vector<std::uint8_t> plaintext;
+    appendLittleEndian32(plaintext, timestamp);
+    // GRP_TXT uses the lower two bits as the attempt number; the upper bits
+    // select the text type (zero for plain text).
+    plaintext.push_back(static_cast<std::uint8_t>(attempt & 0x03));
+    plaintext.insert(plaintext.end(), text.begin(), text.end());
+    plaintext.push_back(0);
+    while (plaintext.size() % 16 != 0)
+        plaintext.push_back(0);
+    EVP_CIPHER_CTX *context = EVP_CIPHER_CTX_new();
+    if (!context)
+        return false;
+    std::vector<std::uint8_t> ciphertext(plaintext.size() + 16);
+    int produced = 0;
+    int finalProduced = 0;
+    const bool encrypted = EVP_EncryptInit_ex(context, EVP_aes_128_ecb(), nullptr,
+            secret.data(), nullptr) == 1 && EVP_CIPHER_CTX_set_padding(context, 0) == 1 &&
+        EVP_EncryptUpdate(context, ciphertext.data(), &produced, plaintext.data(),
+            static_cast<int>(plaintext.size())) == 1 &&
+        EVP_EncryptFinal_ex(context, ciphertext.data() + produced, &finalProduced) == 1;
+    EVP_CIPHER_CTX_free(context);
+    if (!encrypted)
+        return false;
+    ciphertext.resize(static_cast<std::size_t>(produced + finalProduced));
+
+    const QByteArray key(reinterpret_cast<const char *>(secret.data()),
+                         static_cast<int>(secret.size()));
+    const QByteArray cipher(reinterpret_cast<const char *>(ciphertext.data()),
+                             static_cast<int>(ciphertext.size()));
+    const QByteArray hash = QCryptographicHash::hash(key, QCryptographicHash::Sha256);
+    const QByteArray mac = QMessageAuthenticationCode::hash(
+        cipher, key + QByteArray(16, '\0'), QCryptographicHash::Sha256);
+    payload.push_back(static_cast<std::uint8_t>(hash.at(0)));
+    payload.push_back(static_cast<std::uint8_t>(mac.at(0)));
+    payload.push_back(static_cast<std::uint8_t>(mac.at(1)));
+    payload.insert(payload.end(), ciphertext.begin(), ciphertext.end());
+    return true;
+#endif
 }
 
 bool MeshCoreCompanionCodec::decodeContactListStart(

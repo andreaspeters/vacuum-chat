@@ -7,7 +7,8 @@
 
 namespace ProtocolMessageStatus
 {
-	QString buildReadReceiptFooter(bool AIsSentSuccess, const QList<QString> &AReaderNames, const QList<QString> &AAvatarUrls);
+	QString buildReadReceiptFooter(bool AIsSentSuccess, const QList<QString> &AReaderNames,
+		const QList<QString> &AAvatarUrls, const QString &ADeliveryStatus = QString());
 
 	struct Reader
 	{

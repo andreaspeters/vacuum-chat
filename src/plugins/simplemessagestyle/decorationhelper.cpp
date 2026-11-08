@@ -53,13 +53,11 @@ QRect DecorationHelper::adjacentDecorationRect(const QRect &bubbleRect,
     const int left = bubbleRect.left() - decorationSize.width() - gap;
     const int right = bubbleRect.right() + gap + 1;
     const bool leftFits = left >= 0;
-    const bool rightFits = right + decorationSize.width() <= viewportSize.width();
-    if (!leftFits && !rightFits)
+    const bool rightFits = viewportSize.width() <= 0 ||
+        right + decorationSize.width() <= viewportSize.width();
+    if (!outgoing && !leftFits && !rightFits)
         return QRect();
-
-    const int x = outgoing
-    	? (rightFits ? right : left)
-    	: (leftFits ? left : right);
+    const int x = outgoing ? right : (leftFits ? left : right);
     const int y = qMax(0, bubbleRect.bottom() - decorationSize.height() + 1);
     return QRect(x, y, decorationSize.width(), decorationSize.height());
 }

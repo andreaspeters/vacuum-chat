@@ -17,6 +17,11 @@
 #include <QSaveFile>
 #include <QStandardPaths>
 #include <QUuid>
+#include <QtCore/QMessageAuthenticationCode>
+
+#if HAVE_MESHCORE_OPENSSL
+#include <openssl/evp.h>
+#endif
 
 #include <algorithm>
 #include <cstdint>
@@ -64,6 +69,26 @@ QString stableMessageId(const BasicMessage &message, const QByteArray &kind,
     appendHashPart(identity, message.body().toUtf8());
     return QStringLiteral("meshcore-") + QString::fromLatin1(
         QCryptographicHash::hash(identity, QCryptographicHash::Sha256).toHex());
+}
+
+QString outgoingChannelCorrelationKey(quint8 channelIndex, quint32 timestamp,
+                                      const QByteArray &wireText)
+{
+    QByteArray identity;
+    identity.append(static_cast<char>(channelIndex));
+    identity.append(static_cast<char>(timestamp & 0xff));
+    identity.append(static_cast<char>((timestamp >> 8) & 0xff));
+    identity.append(static_cast<char>((timestamp >> 16) & 0xff));
+    identity.append(static_cast<char>((timestamp >> 24) & 0xff));
+    identity.append(wireText);
+    return QString::fromLatin1(QCryptographicHash::hash(
+        identity, QCryptographicHash::Sha256).toHex());
+}
+
+QString repeaterCountLabel(int count)
+{
+    return QStringLiteral("%1 %2").arg(count)
+        .arg(count == 1 ? QStringLiteral("Repeater") : QStringLiteral("Repeaters"));
 }
 }
 
@@ -487,6 +512,7 @@ void MeshCoreProtocol::handleChannelInfo(const QByteArray &packet)
         MeshCoreChannel channel;
         channel.id = QString::number(requestedChannelIndex);
         channel.name = name;
+        channel.secret = packet.mid(34, 16);
         pendingChannels.append(channel);
     } else {
         bool hasZeroSecret = true;
@@ -637,10 +663,21 @@ bool MeshCoreProtocol::persistMessage(const BasicMessage &message, bool &inserte
         return false;
 
     const QString path = QDir(conversationDirectory).filePath(message.messageId() + QStringLiteral(".json"));
-    if (QFile::exists(path))
-        return true;
-
     QJsonObject object;
+    const bool existed = QFile::exists(path);
+    if (existed) {
+        QFile existingFile(path);
+        if (!existingFile.open(QIODevice::ReadOnly))
+            return false;
+        const QJsonDocument existingDocument = QJsonDocument::fromJson(existingFile.readAll());
+        if (!existingDocument.isObject() ||
+            existingDocument.object().value(QStringLiteral("conversation_id")).toString() !=
+                message.conversationId() ||
+            existingDocument.object().value(QStringLiteral("message_id")).toString() !=
+                message.messageId())
+            return false;
+        object = existingDocument.object();
+    }
     object.insert(QStringLiteral("message_id"), message.messageId());
     object.insert(QStringLiteral("conversation_id"), message.conversationId());
     object.insert(QStringLiteral("sender"), message.sender());
@@ -649,6 +686,7 @@ bool MeshCoreProtocol::persistMessage(const BasicMessage &message, bool &inserte
     object.insert(QStringLiteral("timestamp"), message.timestamp().toUTC().toString(Qt::ISODateWithMs));
     object.insert(QStringLiteral("protocol"), message.protocol());
     object.insert(QStringLiteral("direction"), static_cast<int>(message.direction()));
+    object.insert(QStringLiteral("metadata"), QJsonObject::fromVariantMap(message.metadata()));
 
     QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly))
@@ -658,7 +696,7 @@ bool MeshCoreProtocol::persistMessage(const BasicMessage &message, bool &inserte
     if (file.write(contents) != contents.size() || !file.commit())
         return false;
     QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
-    inserted = true;
+    inserted = !existed;
     return true;
 }
 
@@ -715,6 +753,9 @@ QList<BasicMessage> MeshCoreProtocol::conversationHistory(const QString &convers
             sender, object.value(QStringLiteral("recipient")).toString(), body, timestamp,
             object.value(QStringLiteral("protocol")).toString(),
             static_cast<BasicMessage::Direction>(direction));
+        const QJsonObject metadata = object.value(QStringLiteral("metadata")).toObject();
+        if (!metadata.isEmpty())
+            message.setMetadata(metadata.toVariantMap());
         result.append(message);
     }
 
@@ -775,6 +816,10 @@ void MeshCoreProtocol::handlePacket(const QByteArray &payload)
 
     const std::vector<std::uint8_t> packet = toBytes(payload);
     const std::uint8_t packetType = packet.front();
+    if (packetType == 0x88) {
+        handleRxLog(payload);
+        return;
+    }
     if (packetType == 0x05 && awaitingSelfInfo) {
         MeshCoreSelfInfo selfInfo;
         if (!MeshCoreCompanionCodec::decodeSelfInfo(packet, selfInfo)) {
@@ -786,6 +831,8 @@ void MeshCoreProtocol::handlePacket(const QByteArray &payload)
         initialRosterSyncStage = InitialRosterSyncStage::Channels;
         // Store the public key from SELF_INFO packet
         currentPublicKeyHex = QString::fromStdString(selfInfo.publicKeyHex);
+        localNodeName = QString::fromUtf8(selfInfo.name.data(),
+            static_cast<int>(selfInfo.name.size())).section(QChar('\0'), 0, 0).trimmed();
         QByteArray deviceQuery = QByteArray::fromHex("1603"); // CMD_DEVICE_QUERY protocol version 3
         awaitingDeviceInfo = true;
         if (!transport->sendPayload(deviceQuery)) {
@@ -1063,6 +1110,138 @@ void MeshCoreProtocol::onTransportDisconnected()
     }
 }
 
+void MeshCoreProtocol::handleRxLog(const QByteArray &payload)
+{
+    MeshCoreRxLogEntry rxLog;
+    if (!MeshCoreCompanionCodec::decodeRxLogFrame(toBytes(payload), rxLog) ||
+        !rxLog.hasPacketHeader || rxLog.payloadType != 0x05 ||
+        (rxLog.routeType != 0 && rxLog.routeType != 1))
+        return;
+
+    for (const MeshCoreChannel &channel : channels) {
+        if (channel.secret.size() != 16)
+            continue;
+        MeshCoreChannelText text;
+        if (!MeshCoreCompanionCodec::decodeChannelTextPayload(
+                rxLog.payload, toBytes(channel.secret), text) || text.flags != 0)
+            continue;
+
+        const QByteArray echoedText = QByteArray::fromStdString(text.text);
+        const QString correlationId = outgoingChannelCorrelationKey(
+            static_cast<quint8>(channel.id.toUInt()), text.timestamp, echoedText);
+        const QByteArray statusCorrelation = QByteArray::number(channel.id.toUInt()) +
+            QChar('\n').toLatin1() + QByteArray::number(text.timestamp) +
+            QChar('\n').toLatin1() + echoedText;
+        const QString statusKey = QString::fromLatin1(
+            QCryptographicHash::hash(statusCorrelation, QCryptographicHash::Sha256).toHex());
+        const QString messageId = outgoingChannelCorrelations.value(correlationId);
+        QString matchedMessageId = messageId;
+        if (matchedMessageId.isEmpty())
+            matchedMessageId = outgoingChannelStatusKeys.key(statusKey);
+        if (matchedMessageId.isEmpty())
+            continue;
+
+        const int hashBytes = qMax(1, rxLog.pathHashBytes);
+        if (rxLog.pathHops <= 0)
+            continue;
+        for (int offset = 0; offset + hashBytes <= static_cast<int>(rxLog.path.size());
+             offset += hashBytes) {
+            const QByteArray hash(reinterpret_cast<const char *>(rxLog.path.data() + offset),
+                                  hashBytes);
+            outgoingChannelRepeaters[matchedMessageId].insert(QString::fromLatin1(hash.toHex()));
+        }
+        const int repeaterCount = outgoingChannelRepeaters.value(matchedMessageId).size();
+        const int repeatCount = outgoingChannelRepeatCounts.value(matchedMessageId, 0);
+        updateOutgoingMessageStatus(matchedMessageId, repeaterCount, repeatCount);
+        if (repeaterCount > 0 &&
+            outgoingChannelRetryTimers.contains(matchedMessageId))
+            outgoingChannelRetryTimers.value(matchedMessageId)->stop();
+        break;
+    }
+}
+
+void MeshCoreProtocol::updateOutgoingMessageStatus(const QString &messageId,
+                                                   int repeaterCount, int repeatCount)
+{
+    auto messageIt = outgoingChannelMessages.find(messageId);
+    if (messageIt == outgoingChannelMessages.end())
+        return;
+    BasicMessage message = messageIt.value();
+    QVariantMap metadata = message.metadata();
+    metadata.insert(QStringLiteral("delivery_send_accepted"), true);
+    metadata.insert(QStringLiteral("delivery_status_text"), repeaterCount > 0
+        ? repeaterCountLabel(repeaterCount)
+        : (repeatCount > 0 ? QStringLiteral("Repeat %1").arg(repeatCount)
+                           : repeaterCountLabel(0)));
+    message.setMetadata(metadata);
+    messageIt.value() = message;
+    bool inserted = false;
+    persistMessage(message, inserted);
+    emit messageReceived(message);
+}
+
+void MeshCoreProtocol::retryOutgoingMessage(const QString &messageId)
+{
+    if (protocolState != Connected || !transport ||
+        outgoingChannelRepeaters.value(messageId).size() > 0 ||
+        !outgoingChannelMessages.contains(messageId))
+        return;
+    int repeatCount = outgoingChannelRepeatCounts.value(messageId, 0);
+    if (repeatCount >= 3) {
+        if (QTimer *timer = outgoingChannelRetryTimers.take(messageId))
+            timer->deleteLater();
+        return;
+    }
+    const QByteArray wireText = outgoingChannelWireTexts.value(messageId);
+    const quint32 timestamp = outgoingChannelTimestamps.value(messageId);
+    const quint8 channelIndex = outgoingChannelIndices.value(messageId);
+    const auto channel = std::find_if(channels.cbegin(), channels.cend(),
+        [channelIndex](const MeshCoreChannel &candidate) {
+            return candidate.id.toUInt() == channelIndex;
+        });
+    if (channel != channels.cend()) {
+        std::vector<std::uint8_t> retryPayload;
+        const QByteArray messageBody = outgoingChannelBodies.value(messageId);
+        const std::string plainText(messageBody.constData(),
+                                    static_cast<std::size_t>(messageBody.size()));
+        if (MeshCoreCompanionCodec::encodeChannelTextPayload(
+                toBytes(channel->secret), timestamp,
+                std::string(wireText.constData(), static_cast<std::size_t>(wireText.size())),
+                static_cast<std::uint8_t>(repeatCount + 1), retryPayload)) {
+            QByteArray retryPacket;
+            retryPacket.append(static_cast<char>(0x15));
+            retryPacket.append(static_cast<char>(0));
+            retryPacket.append(reinterpret_cast<const char *>(retryPayload.data()),
+                               static_cast<int>(retryPayload.size()));
+            const QByteArray retryCommand = encodeRawPacketCommand(retryPacket, 0);
+            if (retryCommand.isEmpty() || !transport->sendPayload(retryCommand))
+                return;
+            outgoingChannelPackets.insert(messageId, retryPacket);
+            outgoingChannelCommands.insert(messageId, retryCommand);
+            const QByteArray statusCorrelation = QByteArray::number(channelIndex) + QChar('\n').toLatin1() +
+                QByteArray::number(timestamp) + QChar('\n').toLatin1() + messageBody;
+            outgoingChannelStatusKeys.insert(messageId, QString::fromLatin1(
+                QCryptographicHash::hash(statusCorrelation, QCryptographicHash::Sha256).toHex()));
+        } else {
+            return;
+        }
+    } else {
+        return;
+    }
+    ++repeatCount;
+    outgoingChannelRepeatCounts.insert(messageId, repeatCount);
+    updateOutgoingMessageStatus(messageId, 0, repeatCount);
+    QTimer *timer = outgoingChannelRetryTimers.value(messageId, nullptr);
+    if (!timer) {
+        timer = new QTimer(this);
+        timer->setSingleShot(true);
+        outgoingChannelRetryTimers.insert(messageId, timer);
+        connect(timer, &QTimer::timeout, this,
+                [this, messageId]() { retryOutgoingMessage(messageId); });
+    }
+    timer->start(120000);
+}
+
 void MeshCoreProtocol::onPacketReceived(const QByteArray &payload)
 {
     if (rosterSyncActive && !payload.isEmpty())
@@ -1105,6 +1284,19 @@ bool MeshCoreProtocol::persistAndSendOutgoingMessage(
 
     emit messageReceived(message);
     return true;
+}
+
+QByteArray MeshCoreProtocol::encodeRawPacketCommand(const QByteArray &packet,
+                                                    quint8 priority) const
+{
+    if (packet.size() < 3 || packet.size() > 255)
+        return QByteArray();
+    QByteArray command;
+    command.reserve(packet.size() + 2);
+    command.append(static_cast<char>(0x41)); // CMD_SEND_RAW_PACKET
+    command.append(static_cast<char>(priority));
+    command.append(packet);
+    return command;
 }
 
 bool MeshCoreProtocol::sendMessage(const QString &recipient, const QString &message)
@@ -1158,6 +1350,11 @@ bool MeshCoreProtocol::sendBroadcastMessage(const QString &message)
 
 bool MeshCoreProtocol::sendGroupMessage(const QString &channelName, const QString &message)
 {
+#if !HAVE_MESHCORE_OPENSSL
+    Q_UNUSED(channelName);
+    Q_UNUSED(message);
+    return false;
+#else
     if (protocolState != Connected || !transport || channelName.isEmpty() || message.isEmpty())
         return false;
 
@@ -1179,11 +1376,15 @@ bool MeshCoreProtocol::sendGroupMessage(const QString &channelName, const QStrin
     if (!indexOk || channelIndex >= 8)
         return false;
 
-    const QByteArray text = message.toUtf8();
+    const QByteArray wireText = localNodeName.isEmpty()
+        ? QByteArray() : (localNodeName + QStringLiteral(": ") + message).toUtf8();
+    const QByteArray plainText = message.toUtf8();
+    if (plainText.size() > 133 || (wireText.isEmpty() ? plainText.size() : wireText.size()) > 155)
+        return false;
     const std::uint32_t sentAt = static_cast<std::uint32_t>(QDateTime::currentSecsSinceEpoch());
     const std::vector<std::uint8_t> encoded = MeshCoreCompanionCodec::encodeChannelTextCommand(
         static_cast<std::uint8_t>(channelIndex), sentAt,
-        std::string(text.constData(), static_cast<std::size_t>(text.size())));
+        std::string(plainText.constData(), static_cast<std::size_t>(plainText.size())));
     if (encoded.empty())
         return false;
 
@@ -1198,8 +1399,72 @@ bool MeshCoreProtocol::sendGroupMessage(const QString &channelName, const QStrin
     metadata.insert(QStringLiteral("delivery_status"), QStringLiteral("sending"));
     localEcho.setMetadata(metadata);
 
-    const QByteArray command(reinterpret_cast<const char *>(encoded.data()),
-                             static_cast<int>(encoded.size()));
-    return persistAndSendOutgoingMessage(
-        localEcho, command, QStringLiteral("Failed to queue MeshCore room message"));
+    const QByteArray key = selectedChannel->secret;
+    if (key.size() != 16)
+        return false;
+    const QByteArray encodedText = wireText.isEmpty() ? plainText : wireText;
+    const std::string outgoingWireText(encodedText.constData(),
+        static_cast<std::size_t>(encodedText.size()));
+    std::vector<std::uint8_t> grpPayload;
+    if (!MeshCoreCompanionCodec::encodeChannelTextPayload(
+            toBytes(key), sentAt, outgoingWireText, 0, grpPayload))
+        return false;
+    QByteArray rawPacket;
+    rawPacket.append(static_cast<char>(0x15)); // PAYLOAD_TYPE_GRP_TXT, ROUTE_TYPE_FLOOD
+    rawPacket.append(static_cast<char>(0));
+    rawPacket.append(reinterpret_cast<const char *>(grpPayload.data()),
+                      static_cast<int>(grpPayload.size()));
+    const QByteArray command = encodeRawPacketCommand(rawPacket, 0);
+    if (command.isEmpty())
+        return false;
+
+    QVariantMap deliveryMetadata = localEcho.metadata();
+    deliveryMetadata.insert(QStringLiteral("delivery_send_accepted"), true);
+    constexpr int companionRxLogMaximumRawBytes = 173;
+    constexpr int maximumMeshPathBytes = 64;
+    const bool repeaterEchoObservable = rawPacket.size() + maximumMeshPathBytes <=
+        companionRxLogMaximumRawBytes;
+    deliveryMetadata.insert(QStringLiteral("delivery_status_text"), repeaterEchoObservable
+        ? QStringLiteral("0 Repeaters")
+        : QStringLiteral("Repeater-Status nicht verfügbar"));
+    localEcho.setMetadata(deliveryMetadata);
+    bool inserted = false;
+    if (!persistMessage(localEcho, inserted) || !inserted)
+        return false;
+    if (!transport->sendPayload(command)) {
+        removePersistedMessage(localEcho);
+        onTransportError(QStringLiteral("Failed to queue MeshCore room message"));
+        return false;
+    }
+
+    const QByteArray correlationText = wireText.isEmpty() ? plainText : wireText;
+    const QString correlationId = outgoingChannelCorrelationKey(
+        static_cast<quint8>(channelIndex), sentAt, correlationText);
+    const QByteArray statusCorrelation = QByteArray::number(channelIndex) + QChar('\n').toLatin1() +
+        QByteArray::number(sentAt) + QChar('\n').toLatin1() + plainText;
+    const QString statusKey = QString::fromLatin1(
+        QCryptographicHash::hash(statusCorrelation, QCryptographicHash::Sha256).toHex());
+    outgoingChannelPackets.insert(transactionId, rawPacket);
+    outgoingChannelWireTexts.insert(transactionId, correlationText);
+    outgoingChannelBodies.insert(transactionId, plainText);
+    outgoingChannelTimestamps.insert(transactionId, sentAt);
+    outgoingChannelIndices.insert(transactionId, static_cast<quint8>(channelIndex));
+    outgoingChannelStatusKeys.insert(transactionId, statusKey);
+    outgoingChannelRepeaters.insert(transactionId, QSet<QString>());
+    outgoingChannelRepeatCounts.insert(transactionId, 0);
+    outgoingChannelMessages.insert(transactionId, localEcho);
+    outgoingChannelCommands.insert(transactionId, command);
+    outgoingChannelCorrelations.insert(correlationId, transactionId);
+    if (repeaterEchoObservable) {
+        QTimer *retryTimer = new QTimer(this);
+        retryTimer->setSingleShot(true);
+        retryTimer->setProperty("meshcoreMessageId", transactionId);
+        outgoingChannelRetryTimers.insert(transactionId, retryTimer);
+        connect(retryTimer, &QTimer::timeout, this,
+                [this, transactionId]() { retryOutgoingMessage(transactionId); });
+        retryTimer->start(120000);
+    }
+    emit messageReceived(localEcho);
+    return true;
+#endif
 }

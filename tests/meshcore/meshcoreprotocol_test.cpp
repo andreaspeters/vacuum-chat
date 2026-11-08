@@ -196,7 +196,8 @@ QByteArray contactRecord(const QByteArray &name, quint32 lastAdvert,
     return record;
 }
 
-QByteArray channelInfoPacket(quint8 index, const QByteArray &name, bool zeroSecret = false)
+QByteArray channelInfoPacket(quint8 index, const QByteArray &name, bool zeroSecret = false,
+                             const QByteArray &secret = QByteArray())
 {
     QByteArray packet(50, '\0');
     packet[0] = static_cast<char>(0x12);
@@ -204,7 +205,9 @@ QByteArray channelInfoPacket(quint8 index, const QByteArray &name, bool zeroSecr
     const QByteArray encodedName = name.left(32);
     for (int i = 0; i < encodedName.size(); ++i)
         packet[2 + i] = encodedName.at(i);
-    if (!zeroSecret) {
+    if (secret.size() == 16) {
+        packet.replace(34, 16, secret);
+    } else if (!zeroSecret) {
         for (int i = 0; i < 16; ++i)
             packet[34 + i] = static_cast<char>(0xa0 + i); // Must never be exposed as room data.
     }
@@ -489,7 +492,8 @@ int main(int argc, char *argv[])
         if (index == 4)
             transport->receivePacket(QByteArray(1, static_cast<char>(0x01)));
         else
-            transport->receivePacket(channelInfoPacket(index, name, index == 2 || index == 3));
+            transport->receivePacket(channelInfoPacket(index, name, index == 2 || index == 3,
+                index == 0 ? QByteArray(16, static_cast<char>(0xa0)) : QByteArray()));
         if (index == 0) {
             const QList<MeshCoreChannel> visibleRooms = protocol.discoverChannels();
             if (channelsChangedCount != 1 || visibleRooms.size() != 1 ||
@@ -986,15 +990,195 @@ int main(int argc, char *argv[])
         return 1;
     }
     const QByteArray roomCommand = transport->sentPayloads.constLast();
-    if (roomCommand.size() != 7 + outgoingRoomText.toUtf8().size() ||
-        roomCommand.left(3) != QByteArray::fromHex("030000") ||
-        roomCommand.mid(7) != outgoingRoomText.toUtf8() ||
+    if (roomCommand.size() < 2 + 6 ||
+        roomCommand.left(2) != QByteArray::fromHex("4100") ||
+        static_cast<quint8>(roomCommand.at(2)) != 0x15 ||
+        roomCommand.at(3) != 0 ||
         lastReceivedMessage.direction() != BasicMessage::Outgoing ||
         lastReceivedMessage.conversationId() != QStringLiteral("channel:0") ||
         lastReceivedMessage.body() != outgoingRoomText) {
         std::cerr << "room message command or local echo was malformed\n";
         return 1;
     }
+
+    const QByteArray sentRawPacket = roomCommand.mid(2);
+    if (sentRawPacket.size() < 3 || static_cast<quint8>(sentRawPacket.at(0)) != 0x15 ||
+        sentRawPacket.at(1) != 0) {
+        std::cerr << "outgoing raw room packet fixture has invalid framing\n";
+        return 1;
+    }
+    QByteArray roomEchoPacket;
+    roomEchoPacket.append(sentRawPacket.at(0));
+    roomEchoPacket.append(static_cast<char>(0x01)); // flood route, one-byte hashes
+    roomEchoPacket.append(static_cast<char>(0x7a)); // one repeater hop
+    roomEchoPacket.append(sentRawPacket.mid(2 + static_cast<int>(sentRawPacket.at(1))));
+    QByteArray rxLog(3, '\0');
+    rxLog[0] = static_cast<char>(0x88);
+    rxLog[1] = static_cast<char>(4); // SNR × 4
+    rxLog[2] = static_cast<char>(-90); // RSSI
+    rxLog.append(roomEchoPacket);
+    QTimer *initialRetryTimer = nullptr;
+    for (QTimer *candidate : protocol.findChildren<QTimer *>())
+        if (candidate->interval() == 120000 && candidate->isActive())
+            initialRetryTimer = candidate;
+    QByteArray zeroHopEcho(3, '\0');
+    zeroHopEcho[0] = static_cast<char>(0x88);
+    zeroHopEcho[1] = static_cast<char>(4);
+    zeroHopEcho[2] = static_cast<char>(-90);
+    zeroHopEcho.append(sentRawPacket.at(0));
+    zeroHopEcho.append(static_cast<char>(0)); // no repeater path
+    zeroHopEcho.append(sentRawPacket.mid(2 + static_cast<int>(sentRawPacket.at(1))));
+    transport->receivePacket(zeroHopEcho);
+    if (!initialRetryTimer || !initialRetryTimer->isActive() ||
+        lastReceivedMessage.metadata().value(QStringLiteral("delivery_status_text")).toString() !=
+            QStringLiteral("0 Repeaters")) {
+        std::cerr << "zero-hop channel echo was incorrectly treated as repeater delivery\n";
+        return 1;
+    }
+    transport->receivePacket(rxLog);
+    if (lastReceivedMessage.metadata().value(QStringLiteral("delivery_status_text")).toString() !=
+        QStringLiteral("1 Repeater")) {
+        std::cerr << "heard channel echo did not update the outgoing repeater count\n";
+        return 1;
+    }
+    const QString statusMessageId = lastReceivedMessage.messageId();
+    bool storedRepeaterStatus = false;
+    for (const BasicMessage &stored : protocol.conversationHistory(QStringLiteral("channel:0")))
+        if (stored.messageId() == statusMessageId)
+            storedRepeaterStatus = stored.metadata().value(
+                QStringLiteral("delivery_status_text")).toString() == QStringLiteral("1 Repeater");
+    if (!storedRepeaterStatus) {
+        std::cerr << "repeater status was not persisted with outgoing channel history\n";
+        return 1;
+    }
+    const QList<BasicMessage> reloadedOutgoingHistory =
+        historyReader.conversationHistory(QStringLiteral("channel:0"));
+    bool reloadedRepeaterStatus = false;
+    for (const BasicMessage &stored : reloadedOutgoingHistory)
+        if (stored.messageId() == statusMessageId)
+            reloadedRepeaterStatus = stored.metadata().value(
+                QStringLiteral("delivery_status_text")).toString() == QStringLiteral("1 Repeater");
+    if (!reloadedRepeaterStatus) {
+        std::cerr << "repeater status metadata did not survive history reload\n";
+        return 1;
+    }
+
+    QByteArray multiRepeaterEcho(3, '\0');
+    multiRepeaterEcho[0] = static_cast<char>(0x88);
+    multiRepeaterEcho[1] = static_cast<char>(4);
+    multiRepeaterEcho[2] = static_cast<char>(-90);
+    multiRepeaterEcho.append(sentRawPacket.at(0));
+    multiRepeaterEcho.append(static_cast<char>(0x02)); // two one-byte repeater hashes
+    multiRepeaterEcho.append(static_cast<char>(0x7a));
+    multiRepeaterEcho.append(static_cast<char>(0x7b));
+    multiRepeaterEcho.append(sentRawPacket.mid(2 + static_cast<int>(sentRawPacket.at(1))));
+    transport->receivePacket(multiRepeaterEcho);
+    if (lastReceivedMessage.metadata().value(QStringLiteral("delivery_status_text")).toString() !=
+        QStringLiteral("2 Repeaters")) {
+        std::cerr << "distinct heard repeater hashes were not counted separately\n";
+        return 1;
+    }
+    transport->receivePacket(multiRepeaterEcho);
+    if (lastReceivedMessage.metadata().value(QStringLiteral("delivery_status_text")).toString() !=
+        QStringLiteral("2 Repeaters")) {
+        std::cerr << "duplicate repeater hashes inflated the repeater count\n";
+        return 1;
+    }
+
+    QEventLoop echoStopsRetryLoop;
+    QTimer::singleShot(20, &echoStopsRetryLoop, &QEventLoop::quit);
+    echoStopsRetryLoop.exec();
+    const int sendsAfterHeardEcho = transport->sentPayloads.size();
+    QEventLoop stoppedRetryLoop;
+    QTimer::singleShot(50, &stoppedRetryLoop, &QEventLoop::quit);
+    stoppedRetryLoop.exec();
+    if (transport->sentPayloads.size() != sendsAfterHeardEcho) {
+        std::cerr << "heard repeater echo did not cancel pending retries\n";
+        return 1;
+    }
+
+    const QString retryRoomText = QStringLiteral("retry without echo");
+    if (!protocol.sendGroupMessage(QStringLiteral("channel:0"), retryRoomText)) {
+        std::cerr << "retry-path room send was not accepted\n";
+        return 1;
+    }
+    std::vector<std::uint8_t> retryChannelKey;
+    for (int index = 0; index < 16; ++index)
+        retryChannelKey.push_back(static_cast<std::uint8_t>(0xa0 + index));
+    QTimer *retryTimer = nullptr;
+    for (QTimer *candidate : protocol.findChildren<QTimer *>())
+        if (candidate->interval() == 120000 && candidate->isActive())
+            retryTimer = candidate;
+    if (!retryTimer) {
+        std::cerr << "outgoing room send did not arm its two-minute retry timer\n";
+        return 1;
+    }
+    for (int attempt = 1; attempt <= 3; ++attempt) {
+        if (!QMetaObject::invokeMethod(retryTimer, "timeout", Qt::DirectConnection) ||
+            lastReceivedMessage.metadata().value(QStringLiteral("delivery_status_text")).toString() !=
+                QStringLiteral("Repeat %1").arg(attempt) ||
+            transport->sentPayloads.size() != sendsAfterHeardEcho + 1 + attempt) {
+            std::cerr << "outgoing room retry count or send packet was incorrect\n";
+            return 1;
+        }
+        MeshCoreChannelText retriedText;
+        const QByteArray lastRawCommand = transport->sentPayloads.constLast();
+        const std::vector<std::uint8_t> retryPayload = [&lastRawCommand]() {
+            std::vector<std::uint8_t> bytes;
+            const QByteArray payload = lastRawCommand.mid(4);
+            for (char byte : payload)
+                bytes.push_back(static_cast<std::uint8_t>(static_cast<unsigned char>(byte)));
+            return bytes;
+        }();
+        if (!MeshCoreCompanionCodec::decodeChannelTextPayload(
+                retryPayload, retryChannelKey, retriedText) || retriedText.attempt != attempt ||
+            retriedText.timestamp != static_cast<quint32>(
+                lastReceivedMessage.timestamp().toSecsSinceEpoch())) {
+            std::cerr << "retry did not encode the correct attempt and original timestamp\n";
+            return 1;
+        }
+    }
+    if (!QMetaObject::invokeMethod(retryTimer, "timeout", Qt::DirectConnection) ||
+        transport->sentPayloads.size() != sendsAfterHeardEcho + 4 ||
+        lastReceivedMessage.metadata().value(QStringLiteral("delivery_status_text")).toString() !=
+            QStringLiteral("Repeat 3")) {
+        std::cerr << "room retry exceeded the three-attempt cap\n";
+        return 1;
+    }
+    bool storedRetryStatus = false;
+    for (const BasicMessage &stored : protocol.conversationHistory(QStringLiteral("channel:0")))
+        if (stored.messageId() == lastReceivedMessage.messageId())
+            storedRetryStatus = stored.metadata().value(
+                QStringLiteral("delivery_status_text")).toString() == QStringLiteral("Repeat 3");
+    if (!storedRetryStatus) {
+        std::cerr << "retry status was not persisted with outgoing channel history\n";
+        return 1;
+    }
+    bool reloadedRetryStatus = false;
+    for (const BasicMessage &stored : historyReader.conversationHistory(QStringLiteral("channel:0")))
+        if (stored.messageId() == lastReceivedMessage.messageId())
+            reloadedRetryStatus = stored.metadata().value(
+                QStringLiteral("delivery_status_text")).toString() == QStringLiteral("Repeat 3");
+    if (!reloadedRetryStatus) {
+        std::cerr << "retry status metadata did not survive history reload\n";
+        return 1;
+    }
+
+    const int sendsBeforeUnobservableMessage = transport->sentPayloads.size();
+    if (!protocol.sendGroupMessage(QStringLiteral("channel:0"), QString(120, QLatin1Char('x'))) ||
+        transport->sentPayloads.size() != sendsBeforeUnobservableMessage + 1 ||
+        lastReceivedMessage.metadata().value(QStringLiteral("delivery_status_text")).toString() !=
+            QStringLiteral("Repeater-Status nicht verfügbar")) {
+        std::cerr << "message beyond Companion RX-log path budget was not marked unobservable\n";
+        return 1;
+    }
+    for (QTimer *candidate : protocol.findChildren<QTimer *>())
+        if (candidate->interval() == 120000 && candidate->isActive() &&
+            candidate->parent() == &protocol &&
+            candidate->property("meshcoreMessageId").toString() == lastReceivedMessage.messageId()) {
+            std::cerr << "unobservable channel message armed a blind retry\n";
+            return 1;
+        }
 
     const int storedBeforeRejectedSend = storedMessageCount(historyDirectory);
     const int messagesBeforeRejectedSend = messagesReceivedCount;
@@ -1079,8 +1263,9 @@ int main(int argc, char *argv[])
     if (!genericMessaging->sendMessage(interfaceRoomMessage) || interfaceMessageCount != 2 ||
         lastInterfaceMessage.conversationId() != QStringLiteral("channel:0") ||
         lastInterfaceMessage.body() != interfaceRoomText ||
-        interfaceTransport->sentPayloads.constLast().left(3) != QByteArray::fromHex("030000") ||
-        interfaceTransport->sentPayloads.constLast().mid(7) != interfaceRoomText.toUtf8() ||
+        interfaceTransport->sentPayloads.constLast().left(2) != QByteArray::fromHex("4100") ||
+        static_cast<quint8>(interfaceTransport->sentPayloads.constLast().at(2)) != 0x15 ||
+        interfaceTransport->sentPayloads.constLast().at(3) != 0 ||
         genericMessaging->conversationDisplayName(QStringLiteral("channel:0")) !=
             QStringLiteral("Operations")) {
         std::cerr << "room message did not traverse IProtocolMessaging to the transport\n";
