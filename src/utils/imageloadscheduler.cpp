@@ -39,7 +39,11 @@ void logImageReaderFailure(const char *operation, const QImageReader &reader)
 
 QImage readImageFile(const QString &path)
 {
+    if (!QFileInfo::exists(path))
+        return QImage();
+
     QImageReader reader(path);
+    reader.setDecideFormatFromContent(true);
     reader.setAutoTransform(true);
     const QSize sourceSize = reader.size();
     if (sourceSize.isValid() && (sourceSize.width() > MaximumDecodedImageSize.width() ||

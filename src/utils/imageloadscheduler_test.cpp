@@ -4,10 +4,12 @@
 #include <QDebug>
 #include <QElapsedTimer>
 #include <QEventLoop>
+#include <QImage>
 #include <QList>
 #include <QPointer>
 #include <QSharedPointer>
 #include <QStringList>
+#include <QTemporaryDir>
 #include <QTimer>
 
 #include <iostream>
@@ -35,6 +37,41 @@ int main(int argc, char **argv)
     if (!scheduler)
         return fail("image load scheduler was not created");
 
+    QTemporaryDir imageDirectory;
+    if (!imageDirectory.isValid())
+        return fail("could not create a temporary image directory");
+    const QString contentDetectedImagePath = imageDirectory.filePath(
+        QStringLiteral("scheduler-content-detection.bin"));
+    QImage sourceImage(32, 24, QImage::Format_ARGB32_Premultiplied);
+    sourceImage.fill(Qt::blue);
+    if (!sourceImage.save(contentDetectedImagePath, "PNG"))
+        return fail("could not write a PNG image with a non-image suffix");
+
+    QEventLoop contentDetectionLoop;
+    QPointer<QEventLoop> guardedContentDetectionLoop(&contentDetectionLoop);
+    QTimer contentDetectionTimeout;
+    contentDetectionTimeout.setSingleShot(true);
+    QObject::connect(&contentDetectionTimeout, &QTimer::timeout,
+        &contentDetectionLoop, &QEventLoop::quit);
+    struct ContentDetectionResult {
+        bool completed = false;
+        QSize imageSize;
+    };
+    const QSharedPointer<ContentDetectionResult> contentDetectionResult(
+        new ContentDetectionResult);
+    scheduler->decodeFileAsync(contentDetectedImagePath,
+        [contentDetectionResult, guardedContentDetectionLoop](const QImage &image) {
+            contentDetectionResult->completed = true;
+            contentDetectionResult->imageSize = image.size();
+            if (guardedContentDetectionLoop)
+                guardedContentDetectionLoop->quit();
+        });
+    contentDetectionTimeout.start(5000);
+    contentDetectionLoop.exec();
+    contentDetectionTimeout.stop();
+    if (!contentDetectionResult->completed || contentDetectionResult->imageSize != QSize(32, 24))
+        return fail("image decoder did not detect image format from cached file contents");
+
     const bool debugEnabled = application.arguments().contains(QStringLiteral("--debug"));
     capturedDebugMessages.clear();
     const QtMessageHandler previousMessageHandler = qInstallMessageHandler(captureDebugMessage);
@@ -58,13 +95,42 @@ int main(int argc, char **argv)
     decodeTimeout.start(5000);
     decodeLoop.exec();
     decodeTimeout.stop();
-    qInstallMessageHandler(previousMessageHandler);
     if (!decodeResult->completed || !decodeResult->nullImage)
         return fail("invalid image data did not complete with a null image");
     const bool hasDecodeDiagnostic = capturedDebugMessages.join(QLatin1Char('\n'))
         .contains(QStringLiteral("ImageLoadScheduler: readImageData failed"));
     if (hasDecodeDiagnostic != debugEnabled)
         return fail("image decoder diagnostics did not follow the existing --debug flag");
+
+    capturedDebugMessages.clear();
+    const QString missingCachePath = imageDirectory.filePath(
+        QStringLiteral("missing-avatar-cache.bin"));
+    QEventLoop missingCacheLoop;
+    QPointer<QEventLoop> guardedMissingCacheLoop(&missingCacheLoop);
+    QTimer missingCacheTimeout;
+    missingCacheTimeout.setSingleShot(true);
+    QObject::connect(&missingCacheTimeout, &QTimer::timeout,
+        &missingCacheLoop, &QEventLoop::quit);
+    struct MissingCacheResult {
+        bool completed = false;
+        bool nullImage = false;
+    };
+    const QSharedPointer<MissingCacheResult> missingCacheResult(new MissingCacheResult);
+    scheduler->decodeFileAsync(missingCachePath,
+        [missingCacheResult, guardedMissingCacheLoop](const QImage &image) {
+            missingCacheResult->completed = true;
+            missingCacheResult->nullImage = image.isNull();
+            if (guardedMissingCacheLoop)
+                guardedMissingCacheLoop->quit();
+        });
+    missingCacheTimeout.start(5000);
+    missingCacheLoop.exec();
+    missingCacheTimeout.stop();
+    if (!missingCacheResult->completed || !missingCacheResult->nullImage)
+        return fail("missing image cache entry did not complete with a null image");
+    qInstallMessageHandler(previousMessageHandler);
+    if (!capturedDebugMessages.isEmpty())
+        return fail("missing image cache entry should not invoke image reader diagnostics");
 
     const QStringList sources = {
         QStringLiteral("matrix"), QStringLiteral("meshcore"),

@@ -5,6 +5,8 @@
 #include <QFile>
 #include <QFileDevice>
 #include <QFileInfo>
+#include <QSqlDatabase>
+#include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QVariantMap>
 
@@ -283,6 +285,39 @@ int runPendingEncryptedEventQueryTest()
 
     if (database.pendingEncryptedEvents(roomId).size() != 3)
         return fail("room retry query must exclude plain timeline events");
+
+    const QString connectionName = QStringLiteral("pending-event-plan-test");
+    QStringList queryPlan;
+    {
+        QSqlDatabase planDatabase = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"),
+            connectionName);
+        planDatabase.setDatabaseName(profileDirectory.filePath(QStringLiteral("matrix.db")));
+        if (!planDatabase.open())
+            return fail("could not open Matrix database for the pending-event query-plan test");
+        {
+            QSqlQuery planQuery(planDatabase);
+            if (!planQuery.exec(QStringLiteral(
+                    "EXPLAIN QUERY PLAN SELECT room_id, event_id, event_type, sender, "
+                    "origin_ts, message_type, content, metadata FROM timeline_events "
+                    "WHERE room_id = '%1' AND event_type = 'm.room.encrypted' "
+                    "ORDER BY origin_ts ASC, event_id ASC").arg(roomId)))
+                return fail("could not inspect pending encrypted-event query plan");
+            while (planQuery.next())
+                queryPlan.append(planQuery.value(3).toString());
+        }
+        planDatabase.close();
+    }
+    QSqlDatabase::removeDatabase(connectionName);
+    bool usesOrderedRoomTypeIndex = false;
+    bool sortsWithTemporaryBtree = false;
+    for (const QString &detail : queryPlan) {
+        usesOrderedRoomTypeIndex = usesOrderedRoomTypeIndex ||
+            detail.contains(QStringLiteral("idx_timeline_events_room_encrypted_time"));
+        sortsWithTemporaryBtree = sortsWithTemporaryBtree ||
+            detail.contains(QStringLiteral("USE TEMP B-TREE FOR ORDER BY"));
+    }
+    if (!usesOrderedRoomTypeIndex || sortsWithTemporaryBtree)
+        return fail("room-wide encrypted-event retry must use the ordered room/type index without a temporary sort");
 
     database.close();
     return 0;

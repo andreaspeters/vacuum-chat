@@ -195,6 +195,11 @@ void MatrixDatabase::createTables()
         qWarning() << "Failed to create timeline_events encrypted-session index:"
                    << query.lastError();
     }
+    if (!query.exec("CREATE INDEX IF NOT EXISTS idx_timeline_events_room_encrypted_time "
+                   "ON timeline_events(room_id, event_type, origin_ts, event_id)")) {
+        qWarning() << "Failed to create timeline_events room/encrypted-time index:"
+                   << query.lastError();
+    }
     if (!query.exec(
         "CREATE TABLE IF NOT EXISTS timeline_relations ("
         "source_event_id TEXT PRIMARY KEY,"
@@ -837,8 +842,11 @@ QList<MatrixTimelineEvent> MatrixDatabase::pendingEncryptedEvents(
 
     QString sql = QStringLiteral(
         "SELECT room_id, event_id, event_type, sender, origin_ts, message_type, content, metadata "
-        "FROM timeline_events WHERE room_id = :room_id "
-        "AND event_type = 'm.room.encrypted' ");
+        "FROM timeline_events ");
+    if (sessionId.isEmpty())
+        sql += QStringLiteral("INDEXED BY idx_timeline_events_room_encrypted_time ");
+    sql += QStringLiteral("WHERE room_id = :room_id "
+                          "AND event_type = 'm.room.encrypted' ");
     if (!sessionId.isEmpty())
         sql += QStringLiteral("AND json_extract(metadata, '$.session_id') = :session_id ");
     sql += QStringLiteral("ORDER BY origin_ts ASC, event_id ASC");
