@@ -165,10 +165,10 @@ bool MessageWidgets::initSettings()
 	Options::setDefaultValue(OPV_MESSAGES_EDITORAUTORESIZE,true);
 	Options::setDefaultValue(OPV_MESSAGES_SHOWINFOWIDGET,true);
 	Options::setDefaultValue(OPV_MESSAGES_INFOWIDGETMAXSTATUSCHARS,140);
-	Options::setDefaultValue(OPV_MESSAGES_EDITORMINIMUMLINES,1);
+	Options::setDefaultValue(OPV_MESSAGES_EDITORMINIMUMLINES,4);
 	Options::setDefaultValue(OPV_MESSAGES_CLEANCHATTIMEOUT,30);
 	Options::setDefaultValue(OPV_MESSAGES_COMBINEWITHROSTER,true);
-	Options::setDefaultValue(OPV_MESSAGES_SHOWTABSINCOMBINEDMODE,false);
+	Options::setDefaultValue(OPV_MESSAGES_SHOWTABSINCOMBINEDMODE,true);
 	Options::setDefaultValue(OPV_MESSAGES_TABWINDOWS_ENABLE,true);
 	Options::setDefaultValue(OPV_MESSAGES_TABWINDOW_NAME,tr("Tab Window"));
 	Options::setDefaultValue(OPV_MESSAGES_TABWINDOW_TABSCLOSABLE,true);

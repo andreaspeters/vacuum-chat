@@ -279,6 +279,7 @@ AccountOptions::AccountOptions(IAccountManager *AManager, IPluginManager *APlugi
 		ui.lneName->setText(tr("New Account"));
 		ui.lneName->selectAll();
 		QTimer::singleShot(0,ui.lneName,SLOT(setFocus()));
+		FMatrixInstance->setText(QStringLiteral("https://matrix.org"));
 	}
 
 	connect(ui.lneName,SIGNAL(textChanged(const QString &)),SIGNAL(modified()));

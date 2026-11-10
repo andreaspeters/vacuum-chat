@@ -109,7 +109,7 @@ IMessageStyleOptions SimpleMessageStylePlugin::styleOptions(const OptionsNode &A
 			styleId = "Message Style";
 			break;
 		default:
-			styleId = "Chat Style";
+			styleId = "Modern Chat";
 		}
 
 		if (!FStylePaths.contains(styleId.toString()))
