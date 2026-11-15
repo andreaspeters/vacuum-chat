@@ -34,6 +34,7 @@
 #include <QThread>
 
 class IMessageWidgets;
+class QTimer;
 
 class Matrix : public QObject, public IPlugin, public IProtocolPresence, public IProtocolRoster,
 	public IProtocolMessaging, public IProtocolNotifications, public IProtocolCapabilities,
@@ -235,6 +236,7 @@ private:
 	void appendVerificationNotification(const QString &transactionId, const QString &userId);
 	void queueSendMessageEvent(const QString &roomId, const QJsonObject &content,
 		const QString &transactionId);
+	void queueAutomaticReadMarker(const QString &roomId, const QString &eventId);
 
 	QUuid FUuid;
 	MatrixNetwork *FMatrixNetwork;
@@ -329,6 +331,8 @@ private:
 	QStringList FDeferredVerificationSasEmoji;
 	QString FDeferredVerificationSasDecimal;
 	QMap<QString, QString> FLatestConversationEventIds;
+	QTimer *FAutomaticReadMarkerTimer = nullptr;
+	QMap<QString, QString> FPendingAutomaticReadMarkers;
 	struct PendingProtocolEventBatch
 	{
 		QList<MatrixTextEvent> events;

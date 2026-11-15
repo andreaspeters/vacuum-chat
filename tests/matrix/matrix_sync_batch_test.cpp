@@ -16,8 +16,51 @@
 
 #include <algorithm>
 #include <iostream>
+#include <memory>
 
 namespace {
+
+void writeEmptyJsonResponse(QTcpSocket *socket);
+
+class HttpRequestCaptureServer : public QTcpServer
+{
+public:
+	QStringList requests;
+
+	HttpRequestCaptureServer()
+	{
+		connect(this, &QTcpServer::newConnection, this, [this]() {
+			while (hasPendingConnections()) {
+				QTcpSocket *socket = nextPendingConnection();
+				auto bytes = std::make_shared<QByteArray>();
+				auto consume = [this, socket, bytes]() {
+					if (socket->property("test.responseSent").toBool())
+						return;
+					bytes->append(socket->readAll());
+					const QByteArray lower = bytes->toLower();
+					const int headerEnd = lower.indexOf("\r\n\r\n");
+					const int lengthStart = lower.indexOf("content-length:");
+					if (headerEnd < 0 || lengthStart < 0)
+						return;
+					const int valueStart = lengthStart + int(sizeof("content-length:") - 1);
+					const int valueEnd = lower.indexOf("\r\n", valueStart);
+					bool ok = false;
+					const int contentLength = lower.mid(valueStart, valueEnd - valueStart)
+						.trimmed().toInt(&ok);
+					if (!ok || bytes->size() < headerEnd + 4 + contentLength)
+						return;
+					socket->setProperty("test.responseSent", true);
+					requests.append(QString::fromUtf8(*bytes));
+					writeEmptyJsonResponse(socket);
+				};
+				connect(socket, &QTcpSocket::readyRead, socket, consume);
+				connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
+				if (socket->bytesAvailable() > 0)
+					consume();
+			}
+		});
+	}
+};
 
 void writeEmptyJsonResponse(QTcpSocket *socket)
 {
@@ -591,6 +634,50 @@ int main(int argc, char **argv)
                 "POST /_matrix/client/v3/rooms/!active-read:example.org/read_markers HTTP/1.1") &&
             openedRoomRequest.contains("\"m.read\":\"$latest-before-open\""),
             "opening a conversation sends a read marker for its latest known event"))
+        return 1;
+
+    HttpRequestCaptureServer burstReceiptServer;
+    if (!burstReceiptServer.listen(QHostAddress::LocalHost, 0)) {
+        std::cerr << "FAIL: local burst read-marker test server starts\n";
+        return 1;
+    }
+    MatrixNetworkTestAccess::configureReadMarkerRequest(network,
+        burstReceiptServer.serverPort());
+    const QString burstRoomId = QStringLiteral("!burst-read:example.org");
+    MatrixSyncBatchTestAccess::setActiveConversation(matrix, burstRoomId);
+    constexpr int burstSize = 50;
+    for (int index = 0; index < burstSize; ++index) {
+        BasicMessage message(QStringLiteral("$burst-%1").arg(index), burstRoomId,
+            QStringLiteral("@other:example.org"), QString(), QStringLiteral("synthetic"),
+            QDateTime::currentDateTimeUtc(), QStringLiteral("matrix"), BasicMessage::Incoming);
+        QVariantMap metadata;
+        metadata.insert(QStringLiteral("event_type"), QStringLiteral("m.room.message"));
+        message.setMetadata(metadata);
+        MatrixSyncBatchTestAccess::deliverPendingMessage(matrix, message);
+    }
+    QEventLoop burstReceiptLoop;
+    QTimer::singleShot(350, &burstReceiptLoop, &QEventLoop::quit);
+    burstReceiptLoop.exec();
+    if (!check(burstReceiptServer.requests.size() == 1 &&
+            burstReceiptServer.requests.constFirst().contains("\"m.read\":\"$burst-49\""),
+            "a burst of active-room messages coalesces to one read marker for the newest event"))
+        return 1;
+
+    for (int index = 0; index < 10; ++index) {
+        BasicMessage message(QStringLiteral("$burst-next-%1").arg(index), burstRoomId,
+            QStringLiteral("@other:example.org"), QString(), QStringLiteral("synthetic"),
+            QDateTime::currentDateTimeUtc(), QStringLiteral("matrix"), BasicMessage::Incoming);
+        QVariantMap metadata;
+        metadata.insert(QStringLiteral("event_type"), QStringLiteral("m.room.message"));
+        message.setMetadata(metadata);
+        MatrixSyncBatchTestAccess::deliverPendingMessage(matrix, message);
+    }
+    QEventLoop nextBurstReceiptLoop;
+    QTimer::singleShot(350, &nextBurstReceiptLoop, &QEventLoop::quit);
+    nextBurstReceiptLoop.exec();
+    if (!check(burstReceiptServer.requests.size() == 2 &&
+            burstReceiptServer.requests.constLast().contains("\"m.read\":\"$burst-next-9\""),
+            "a later active-room burst sends one updated read marker"))
         return 1;
 
     const QString historyLoadedRoom = QStringLiteral("!open-before-history:example.org");

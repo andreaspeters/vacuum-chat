@@ -77,6 +77,15 @@ Matrix::Matrix()
 	  FInitialSyncWindow(nullptr)
 {
 	FMetadataRefreshClock.start();
+	FAutomaticReadMarkerTimer = new QTimer(this);
+	FAutomaticReadMarkerTimer->setSingleShot(true);
+	FAutomaticReadMarkerTimer->setInterval(100);
+	connect(FAutomaticReadMarkerTimer, &QTimer::timeout, this, [this]() {
+		const QMap<QString, QString> pendingMarkers = FPendingAutomaticReadMarkers;
+		FPendingAutomaticReadMarkers.clear();
+		for (auto it = pendingMarkers.constBegin(); it != pendingMarkers.constEnd(); ++it)
+			markConversationRead(it.key(), it.value());
+	});
 }
 
 QString Matrix::streamId() const
@@ -1961,6 +1970,9 @@ bool Matrix::markConversationRead(const QString &conversationId, const QString &
 {
 	if (!FMatrixNetwork || !FNetworkLoggedIn)
 		return false;
+	FPendingAutomaticReadMarkers.remove(conversationId);
+	if (FPendingAutomaticReadMarkers.isEmpty() && FAutomaticReadMarkerTimer->isActive())
+		FAutomaticReadMarkerTimer->stop();
 	QMetaObject::invokeMethod(FMatrixNetwork, "markRoomRead", Qt::QueuedConnection,
 		Q_ARG(QString, conversationId), Q_ARG(QString, eventId));
 	for (int i = FNotifications.size() - 1; i >= 0; --i) {
@@ -1971,6 +1983,14 @@ bool Matrix::markConversationRead(const QString &conversationId, const QString &
 	}
 	emit protocolNotificationsChanged();
 	return true;
+}
+
+void Matrix::queueAutomaticReadMarker(const QString &roomId, const QString &eventId)
+{
+	if (roomId.isEmpty() || eventId.isEmpty())
+		return;
+	FPendingAutomaticReadMarkers.insert(roomId, eventId);
+	FAutomaticReadMarkerTimer->start();
 }
 
 QString Matrix::latestConversationEventId(const QString &conversationId) const
@@ -2083,7 +2103,7 @@ void Matrix::onNetworkMessageReceived(const BasicMessage &message)
 		!normalizedMessage.messageId().isEmpty() &&
 		normalizedMessage.sender() != FNetworkUserId &&
 		!normalizedMessage.metadata().value(QStringLiteral("historical")).toBool())
-		markConversationRead(normalizedMessage.conversationId(), normalizedMessage.messageId());
+		queueAutomaticReadMarker(normalizedMessage.conversationId(), normalizedMessage.messageId());
 
 	if (FNotificationsReady && FMatrixNetwork &&
 		normalizedMessage.metadata().value(QStringLiteral("room_type")).toString() != QStringLiteral("m.space") &&
