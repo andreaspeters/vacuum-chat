@@ -200,6 +200,11 @@ void MatrixDatabase::createTables()
         qWarning() << "Failed to create timeline_events room/encrypted-time index:"
                    << query.lastError();
     }
+    if (!query.exec("CREATE INDEX IF NOT EXISTS idx_timeline_events_room_sender_time "
+                   "ON timeline_events(room_id, sender, origin_ts, event_id, event_type)")) {
+        qWarning() << "Failed to create timeline_events room/sender/time index:"
+                   << query.lastError();
+    }
     if (!query.exec(
         "CREATE TABLE IF NOT EXISTS timeline_relations ("
         "source_event_id TEXT PRIMARY KEY,"
@@ -830,6 +835,30 @@ QList<MatrixTimelineEvent> MatrixDatabase::getEvents(const QString &roomId, int 
     while (query.next())
         events.append(timelineEventFromRecord(query.record()));
     
+    return events;
+}
+
+QList<MatrixTimelineEvent> MatrixDatabase::eventsForSender(const QString &roomId,
+                                                            const QString &sender) const
+{
+    QList<MatrixTimelineEvent> events;
+    if (!FisOpen || !FDatabase.isOpen() || roomId.isEmpty() || sender.isEmpty())
+        return events;
+
+    QSqlQuery query(FDatabase);
+    query.prepare(QStringLiteral(
+        "SELECT room_id, event_id, event_type, sender, origin_ts, message_type, content, metadata "
+        "FROM timeline_events WHERE room_id = :room_id AND sender = :sender "
+        "AND event_type IN ('m.room.message', 'm.room.encrypted', 'm.sticker', 'm.reaction') "
+        "ORDER BY origin_ts ASC, event_id ASC"));
+    query.bindValue(QStringLiteral(":room_id"), roomId);
+    query.bindValue(QStringLiteral(":sender"), sender);
+    if (!query.exec()) {
+        qWarning() << "Failed to query sender timeline events:" << query.lastError();
+        return events;
+    }
+    while (query.next())
+        events.append(timelineEventFromRecord(query.record()));
     return events;
 }
 

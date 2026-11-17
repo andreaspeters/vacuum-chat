@@ -102,6 +102,8 @@ public:
     // Event deduplication and ordering
     bool hasEvent(const QString &roomId, const QString &eventId) const;
     QList<MatrixTimelineEvent> getEvents(const QString &roomId, int limit = 0) const;
+    QList<MatrixTimelineEvent> eventsForSender(const QString &roomId,
+                                                const QString &sender) const;
     QList<MatrixTimelineEvent> pendingEncryptedEvents(const QString &roomId,
                                                        const QString &sessionId = QString()) const;
     QStringList roomIds() const;

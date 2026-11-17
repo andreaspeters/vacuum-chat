@@ -70,6 +70,19 @@ int runHistoryPaginationTest()
     if (!database.appendTimelineEvents(roomId, events))
         return fail("could not seed synthetic timeline events");
 
+    const QString senderQueryRoomId = QStringLiteral("!sender-query:example.org");
+    MatrixTimelineEvent targetSenderEvent = makeEvent(senderQueryRoomId,
+        QStringLiteral("event-target-sender"), 1700000000100LL, QStringLiteral("target sender message"));
+    MatrixTimelineEvent otherSenderEvent = makeEvent(senderQueryRoomId, QStringLiteral("event-other"),
+        1700000000101LL, QStringLiteral("other sender message"));
+    otherSenderEvent.sender = QStringLiteral("@other:example.org");
+    if (!database.appendTimelineEvents(senderQueryRoomId, {targetSenderEvent, otherSenderEvent}))
+        return fail("could not seed a second sender in a separate query room");
+    const QList<MatrixTimelineEvent> senderEvents = database.eventsForSender(
+        senderQueryRoomId, QStringLiteral("@sender:example.org"));
+    if (senderEvents.size() != 1 || senderEvents.first().eventId != targetSenderEvent.eventId)
+        return fail("sender-scoped history query must omit events from other room members");
+
     const MatrixHistoryPageResult latest = database.loadHistoryPage(roomId, 30);
     if (!latest.success || !latest.hasMore || !hasExpectedRange(latest.events, 35, 64))
         return fail("latest page must contain events 35..64 in chronological order");
@@ -318,6 +331,38 @@ int runPendingEncryptedEventQueryTest()
     }
     if (!usesOrderedRoomTypeIndex || sortsWithTemporaryBtree)
         return fail("room-wide encrypted-event retry must use the ordered room/type index without a temporary sort");
+
+    QStringList senderQueryPlan;
+    {
+        QSqlDatabase planDatabase = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"),
+            QStringLiteral("sender-event-plan-test"));
+        planDatabase.setDatabaseName(profileDirectory.filePath(QStringLiteral("matrix.db")));
+        if (!planDatabase.open())
+            return fail("could not open Matrix database for the sender query-plan test");
+        {
+            QSqlQuery planQuery(planDatabase);
+            if (!planQuery.exec(QStringLiteral(
+                    "EXPLAIN QUERY PLAN SELECT room_id, event_id, event_type, sender, "
+                    "origin_ts, message_type, content, metadata FROM timeline_events "
+                    "WHERE room_id = '%1' AND sender = '@sender:example.org' "
+                    "ORDER BY origin_ts ASC, event_id ASC").arg(roomId)))
+                return fail("could not inspect sender-scoped history query plan");
+            while (planQuery.next())
+                senderQueryPlan.append(planQuery.value(3).toString());
+        }
+        planDatabase.close();
+    }
+    QSqlDatabase::removeDatabase(QStringLiteral("sender-event-plan-test"));
+    bool usesSenderIndex = false;
+    bool senderQuerySorts = false;
+    for (const QString &detail : senderQueryPlan) {
+        usesSenderIndex = usesSenderIndex ||
+            detail.contains(QStringLiteral("idx_timeline_events_room_sender_time"));
+        senderQuerySorts = senderQuerySorts ||
+            detail.contains(QStringLiteral("USE TEMP B-TREE FOR ORDER BY"));
+    }
+    if (!usesSenderIndex || senderQuerySorts)
+        return fail("sender-scoped history must use the ordered room/sender index without a temporary sort");
 
     database.close();
     return 0;

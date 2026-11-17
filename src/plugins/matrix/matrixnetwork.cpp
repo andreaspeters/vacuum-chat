@@ -1348,7 +1348,8 @@ void MatrixNetwork::redactMemberMessages(const QString &roomId, const QString &m
 		[network, databaseWorker, batchId, roomId, memberId]() {
 			if (!network || !databaseWorker)
 				return;
-			const QList<MatrixTimelineEvent> cached = databaseWorker->events(roomId);
+			const QList<MatrixTimelineEvent> cached = databaseWorker->eventsForSender(
+			    roomId, memberId);
 			QList<MatrixRoomMemberRedactionPolicy::CachedEvent> candidates;
 			candidates.reserve(cached.size());
 			for (const MatrixTimelineEvent &event : cached)

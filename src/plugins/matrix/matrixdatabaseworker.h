@@ -32,6 +32,8 @@ public slots:
     QList<MatrixCachedRoom> loadPersistedRooms();
     QSet<QString> directRooms() const;
     QList<MatrixTimelineEvent> events(const QString &roomId) const;
+    QList<MatrixTimelineEvent> eventsForSender(const QString &roomId,
+                                                const QString &sender) const;
     QString nextBatch() const;
     QString syncFilter() const;
     bool removeSyncFilter();

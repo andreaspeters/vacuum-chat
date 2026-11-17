@@ -59,6 +59,12 @@ QList<MatrixTimelineEvent> MatrixDatabaseWorker::events(const QString &roomId) c
     return FDatabase.getEvents(roomId);
 }
 
+QList<MatrixTimelineEvent> MatrixDatabaseWorker::eventsForSender(const QString &roomId,
+                                                                 const QString &sender) const
+{
+    return FDatabase.eventsForSender(roomId, sender);
+}
+
 QString MatrixDatabaseWorker::nextBatch() const
 {
     return FDatabase.nextBatch();
