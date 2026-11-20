@@ -89,6 +89,11 @@ public:
         network.setServerUrl(serverUrl);
     }
 
+    static void markInitialSyncComplete(MatrixNetwork &network)
+    {
+        network.FInitialSyncComplete = true;
+    }
+
     static void clearMessageHistory(MatrixNetwork &network)
     {
         network.FMessageHistory.clear();
@@ -535,11 +540,41 @@ bool persistentHistoryBackupIsMergeOnRestart()
         {QStringLiteral("rooms"), QJsonObject{{QStringLiteral("join"),
             QJsonObject{{roomId, incrementalRoom}}}}}}).toJson(QJsonDocument::Compact);
 
+    const QString directRoomId = QStringLiteral("!direct-ongoing:example.org");
+    const QJsonObject directMessage{
+        {QStringLiteral("event_id"), QStringLiteral("$direct-new:example.org")},
+        {QStringLiteral("type"), QStringLiteral("m.room.message")},
+        {QStringLiteral("sender"), userId},
+        {QStringLiteral("origin_server_ts"), 1700000004000LL},
+        {QStringLiteral("content"), QJsonObject{
+            {QStringLiteral("msgtype"), QStringLiteral("m.text")},
+            {QStringLiteral("body"), QStringLiteral("sent from another device")}}}};
+    const QJsonObject directTyping{
+        {QStringLiteral("type"), QStringLiteral("m.typing")},
+        {QStringLiteral("content"), QJsonObject{
+            {QStringLiteral("user_ids"), QJsonArray{QStringLiteral("@remote:example.org")}}}}};
+    const QJsonObject directRoom{
+        {QStringLiteral("ephemeral"), QJsonObject{{QStringLiteral("events"),
+            QJsonArray{directTyping}}}},
+        {QStringLiteral("timeline"), QJsonObject{
+            {QStringLiteral("events"), QJsonArray{directMessage}},
+            {QStringLiteral("prev_batch"), QStringLiteral("t_direct")}}}};
+    const QByteArray directBody = QJsonDocument(QJsonObject{
+        {QStringLiteral("next_batch"), QStringLiteral("s_direct")},
+        {QStringLiteral("rooms"), QJsonObject{{QStringLiteral("join"),
+            QJsonObject{{directRoomId, directRoom}}}}}}).toJson(QJsonDocument::Compact);
+
     int syncRequests = 0;
+    bool directRoomSyncRequest = false;
     startJsonHttpServer(server, [&](const QByteArray &request) {
         const bool isSync = request.startsWith("GET /_matrix/client/v3/sync");
-        if (isSync)
+        if (isSync) {
             ++syncRequests;
+            if (request.contains("since=s_incremental")) {
+                directRoomSyncRequest = true;
+                return directBody;
+            }
+        }
         return isSync ? (syncRequests == 1 ? initialBody : incrementalBody)
                       : QByteArray("{\"chunk\":[]}");
     });
@@ -555,7 +590,22 @@ bool persistentHistoryBackupIsMergeOnRestart()
     network.setDatabaseWorker(dbFixture.databaseWorker);
     MatrixNetworkTestAccess::configureInitialSync(network, serverUrl, userId,
         QStringLiteral("synthetic-token"));
+    MatrixNetworkTestAccess::markInitialSyncComplete(network);
     network.setHistoryBackupDirectory(archiveDirectory.path());
+
+    QList<MatrixTextEvent> receivedDirectMessages;
+    QObject::connect(&network, &MatrixNetwork::syncReceived, &network,
+        [&receivedDirectMessages](const QList<MatrixTextEvent> &events) {
+            for (const MatrixTextEvent &event : events)
+                if (event.roomId == QStringLiteral("!direct-ongoing:example.org"))
+                    receivedDirectMessages.append(event);
+        });
+    QStringList typingUsers;
+    QObject::connect(&network, &MatrixNetwork::typingChanged, &network,
+        [&typingUsers](const ProtocolTypingUpdate &update) {
+            if (update.conversationId == QStringLiteral("!direct-ongoing:example.org"))
+                typingUsers = update.userIds;
+        });
 
     // Simulate initial sync
     bool initialSyncCompleted = false;

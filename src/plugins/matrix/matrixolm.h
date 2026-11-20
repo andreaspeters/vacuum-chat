@@ -14,9 +14,11 @@ class MatrixDatabase;
 struct MatrixMegolmDecryptResult
 {
     QByteArray plaintext;
+    QByteArray updatedSessionPickle;
     uint32_t messageIndex = 0;
     QString status;
     QString error;
+    bool sessionPickleAdvanced = false;
 
     bool succeeded() const { return status == QStringLiteral("decrypted"); }
 };

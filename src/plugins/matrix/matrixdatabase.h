@@ -98,7 +98,11 @@ public:
     bool replaceTimelineEventId(const QString &roomId, const QString &oldEventId,
                                 const QString &newEventId);
     bool updateTimelineEvent(const MatrixTimelineEvent &event);
-    
+    bool updateTimelineEvents(const QList<MatrixTimelineEvent> &events);
+    bool loadMegolmSessions(const QStringList &sessionIds,
+                            QMap<QString, QString> &roomIds,
+                            QMap<QString, QString> &senderKeys,
+                            QMap<QString, QByteArray> &pickles);
     // Event deduplication and ordering
     bool hasEvent(const QString &roomId, const QString &eventId) const;
     QList<MatrixTimelineEvent> getEvents(const QString &roomId, int limit = 0) const;

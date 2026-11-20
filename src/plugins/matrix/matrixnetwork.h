@@ -185,6 +185,7 @@ public:
 	Q_INVOKABLE bool markRoomRead(const QString &roomId, const QString &eventId);
 	QList<MatrixTextEvent> messageHistory(const QString &roomId);
 	QList<MatrixTextEvent> historyBackfill(const QString &roomId, int limit);
+	Q_INVOKABLE bool requestUndecryptableEventKey(const QString &roomId, const QString &eventId);
 	Q_INVOKABLE void setOwnAvatar(const QByteArray &imageData);
 	Q_INVOKABLE void setOwnDisplayName(const QString &displayName);
 
@@ -291,6 +292,7 @@ private:
 	void emitRosterSnapshot();
 	void emitRoomMetadataUpdate(const QString &roomId);
 	bool mergeMessageEvent(const MatrixTextEvent &event, bool fromHistoryBackfill = false);
+	void dispatchRetriedEncryptedEvents(const QList<MatrixTextEvent> &events);
 	bool replacePendingEvent(const QString &roomId, const QString &transactionId,
 		const MatrixTextEvent &serverEvent);
 	void retryPendingEncryptedEvents(const QString &roomId, const QString &sessionId);
@@ -305,6 +307,7 @@ private:
 		bool forceNewSession = false);
 	void cancelMissingRoomKeyRequest(const QString &roomId, const QString &senderKey,
 		const QString &sessionId);
+	void schedulePendingEncryptedEventRetry(const QString &roomId, const QString &sessionId);
 	bool distributeOutboundRoomKey(const QString &roomId, const QString &sessionId,
 		const QByteArray &sessionKey);
 	bool sendVerificationEvent(const QString &eventType, const QString &transactionId,
@@ -369,6 +372,7 @@ private:
 	QSet<QString> FAvatarRequestsInFlight;
 	QSet<QString> FAvatarUnavailable;
 	QSet<QString> FImageRequestsInFlight;
+	QSet<QString> FForcedRoomKeyRequests;
 	bool FHasDirectRoomData = false;
 	bool FSyncInFlight = false;
 	bool FSendInFlight = false;

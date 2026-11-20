@@ -680,6 +680,80 @@ bool MatrixDatabase::updateTimelineEvent(const MatrixTimelineEvent &event)
     return query.exec();
 }
 
+bool MatrixDatabase::updateTimelineEvents(const QList<MatrixTimelineEvent> &events)
+{
+    if (events.isEmpty())
+        return true;
+    if (!FisOpen || !FDatabase.isOpen() ||
+        !std::all_of(events.cbegin(), events.cend(), [](const MatrixTimelineEvent &event) {
+            return event.isValid();
+        }) || !FDatabase.transaction())
+        return false;
+
+    bool success = true;
+    for (const MatrixTimelineEvent &event : events) {
+        if (!updateTimelineEvent(event)) {
+            success = false;
+            break;
+        }
+    }
+    if (success)
+        success = FDatabase.commit();
+    if (!success)
+        FDatabase.rollback();
+    return success;
+}
+
+bool MatrixDatabase::loadMegolmSessions(const QStringList &sessionIds,
+                                       QMap<QString, QString> &roomIds,
+                                       QMap<QString, QString> &senderKeys,
+                                       QMap<QString, QByteArray> &pickles)
+{
+    roomIds.clear();
+    senderKeys.clear();
+    pickles.clear();
+    if (!FisOpen || !FDatabase.isOpen())
+        return false;
+    QStringList uniqueIds;
+    QSet<QString> seen;
+    for (const QString &sessionId : sessionIds)
+        if (!sessionId.isEmpty() && !seen.contains(sessionId)) {
+            seen.insert(sessionId);
+            uniqueIds.append(sessionId);
+        }
+    if (uniqueIds.isEmpty())
+        return true;
+
+    QSqlQuery query(FDatabase);
+    constexpr int sessionIdsPerQuery = 500;
+    for (qsizetype offset = 0; offset < uniqueIds.size(); offset += sessionIdsPerQuery) {
+        const qsizetype count = qMin<qsizetype>(sessionIdsPerQuery, uniqueIds.size() - offset);
+        QStringList placeholders;
+        placeholders.reserve(count);
+        for (qsizetype index = 0; index < count; ++index)
+            placeholders.append(QStringLiteral("?"));
+        query.prepare(QStringLiteral(
+            "SELECT session_id, room_id, sender_key, pickle FROM olm_megolm_sessions "
+            "WHERE session_id IN (%1)").arg(placeholders.join(QLatin1Char(','))));
+        for (qsizetype index = 0; index < count; ++index)
+            query.bindValue(index, uniqueIds.at(offset + index));
+        if (!query.exec()) {
+            roomIds.clear();
+            senderKeys.clear();
+            pickles.clear();
+            return false;
+        }
+        while (query.next()) {
+            const QString storedId = query.value(0).toString();
+            roomIds.insert(storedId, query.value(1).toString());
+            senderKeys.insert(storedId, query.value(2).toString());
+            pickles.insert(storedId, query.value(3).toByteArray());
+        }
+        query.finish();
+    }
+    return true;
+}
+
 bool MatrixDatabase::insertEvent(const MatrixTimelineEvent &event)
 {
     QSqlQuery query(FDatabase);
@@ -810,32 +884,8 @@ bool MatrixDatabase::hasEvent(const QString &roomId, const QString &eventId) con
 
 QList<MatrixTimelineEvent> MatrixDatabase::getEvents(const QString &roomId, int limit) const
 {
-    QList<MatrixTimelineEvent> events;
-    
-    QSqlQuery query(FDatabase);
-    QString sql = "SELECT room_id, event_id, event_type, sender, origin_ts, "
-                  "message_type, content, metadata FROM timeline_events "
-                  "WHERE room_id = :room_id ORDER BY origin_ts ASC";
-    
-    if (limit > 0) {
-        sql += " LIMIT :limit";
-    }
-    
-    query.prepare(sql);
-    query.bindValue(":room_id", roomId);
-    if (limit > 0) {
-        query.bindValue(":limit", limit);
-    }
-    
-    if (!query.exec()) {
-        qWarning() << "Failed to query events:" << query.lastError();
-        return events;
-    }
-    
-    while (query.next())
-        events.append(timelineEventFromRecord(query.record()));
-    
-    return events;
+    const MatrixHistoryPageResult page = loadHistoryPage(roomId, limit > 0 ? limit : 30);
+    return page.events;
 }
 
 QList<MatrixTimelineEvent> MatrixDatabase::eventsForSender(const QString &roomId,

@@ -755,8 +755,12 @@ void ChatMessageHandler::onProtocolMessageReceived(const BasicMessage &AMessage)
 	if (!messaging || !ProtocolMessageRouting::matchesProtocol(
 		AMessage.protocol(), messaging->protocol()) || messaging->streamId().isEmpty())
 		return;
+	if (!FMessageWidgets)
+		return;
+	IChatWindow *existingWindow = FMessageWidgets->findConversationWindow(
+		messaging->streamId(), AMessage.conversationId());
 	{
-		IChatWindow *window = FMessageWidgets->findConversationWindow(messaging->streamId(), AMessage.conversationId());
+		IChatWindow *window = existingWindow;
 		const QString messageType = AMessage.metadata().value(QStringLiteral("msgtype")).toString();
 		const bool pendingMedia = (messageType == QStringLiteral("m.image") ||
 			messageType == QStringLiteral("m.file")) &&
@@ -775,14 +779,23 @@ void ChatMessageHandler::onProtocolMessageReceived(const BasicMessage &AMessage)
 		if (!window) window = FMessageWidgets->getConversationWindow(messaging->streamId(), AMessage.conversationId());
 		if (!window) return;
 		setupProtocolWindow(window, messaging);
-		if (firstMessage)
-			renderProtocolHistory(window, messaging);
 		const QString historyKey = messaging->streamId() + QChar('\n') + AMessage.conversationId();
-		if (FProtocolHistoryLoading.contains(historyKey)) {
+		const BasicMessage displayMessage =
+			ProtocolMessageHistory::withUndecryptableMessagePlaceholder(AMessage);
+		if (firstMessage && !historical)
+			renderProtocolHistory(window, messaging);
+		if (FProtocolHistoryLoading.contains(historyKey) &&
+			!ProtocolMessageHistory::shouldRenderMessageDuringHistoryLoad(AMessage)) {
 			QList<BasicMessage> &pending = FPendingProtocolHistoryMessages[historyKey];
 			if (ProtocolMessageHistory::mergeTransactionEcho(pending, AMessage) ==
 				ProtocolMessageHistory::TransactionEchoMergeResult::NoMatch)
 				pending.append(AMessage);
+			if (ProtocolMessageHistory::isPendingEncryptedEvent(AMessage)) {
+				QList<BasicMessage> &history = FProtocolConversationMessages[historyKey];
+				if (ProtocolMessageHistory::findMessageIndex(history, AMessage.messageId()) < 0)
+					history.append(AMessage);
+				renderProtocolMessage(window, messaging, displayMessage);
+			}
 			return;
 		}
 		QList<BasicMessage> &history = FProtocolConversationMessages[historyKey];
@@ -792,8 +805,32 @@ void ChatMessageHandler::onProtocolMessageReceived(const BasicMessage &AMessage)
 			ProtocolMessageHistory::isMediaHydrationUpdate(history.at(existingIndex), AMessage);
 		const bool imageCachePathUpdate = existingIndex >= 0 &&
 			ProtocolMessageHistory::isImageCachePathUpdate(history.at(existingIndex), AMessage);
+		const bool wasUndecryptableEvent = existingIndex >= 0 &&
+			ProtocolMessageHistory::isPendingEncryptedEvent(history.at(existingIndex));
 		const bool deliveryStatusUpdate = existingIndex >= 0 &&
 			AMessage.metadata().contains(QStringLiteral("delivery_status_text"));
+		if (FProtocolHistoryLoading.contains(historyKey)) {
+			// Update the canonical copy while keeping the visible live bubble; history
+			// completion merges it with cached events without rendering it twice.
+			const int pendingIndex = ProtocolMessageHistory::findMessageIndex(
+				FPendingProtocolHistoryMessages[historyKey], AMessage.messageId());
+			if (pendingIndex >= 0)
+				FPendingProtocolHistoryMessages[historyKey][pendingIndex] = AMessage;
+			if (existingIndex < 0)
+				history.append(AMessage);
+			else
+				history[existingIndex] = AMessage;
+			sortProtocolMessagesChronologically(history);
+			if (ProtocolMessageHistory::isPendingEncryptedEvent(AMessage))
+				renderProtocolMessage(window, messaging, displayMessage, existingIndex >= 0);
+			else if (mediaHydration || imageCachePathUpdate)
+				renderProtocolMessage(window, messaging, AMessage, true);
+			else if (deliveryStatusUpdate)
+				updateProtocolMessageStatusDecoration(window, messaging, AMessage);
+			else
+				renderProtocolMessage(window, messaging, AMessage);
+			return;
+		}
 		const int duplicateIndex = ProtocolMessageHistory::replaceExistingMessage(history, AMessage);
 		if (duplicateIndex >= 0) {
 			const QString prefix = messaging->streamId() + QChar('\n') +
@@ -802,7 +839,12 @@ void ChatMessageHandler::onProtocolMessageReceived(const BasicMessage &AMessage)
 			const bool alreadyRendered = FProtocolRenderedMessages.contains(messageKey) ||
 				FProtocolRenderedMessages.contains(messageKey + QStringLiteral("|image"));
 			sortProtocolMessagesChronologically(history);
-			if (mediaHydration || imageCachePathUpdate) {
+			if (ProtocolMessageHistory::isPendingEncryptedEvent(AMessage)) {
+				if (ProtocolMessageHistory::isPendingEncryptedEvent(history.at(duplicateIndex)))
+					renderProtocolMessage(window, messaging, displayMessage, true);
+			} else if (wasUndecryptableEvent) {
+				renderProtocolMessage(window, messaging, AMessage, true);
+			} else if (mediaHydration || imageCachePathUpdate) {
 				// Hydrate the existing event in place; appending is only a fallback when it
 				// has not reached this window yet.
 				renderProtocolMessage(window, messaging, AMessage, true);
@@ -858,6 +900,10 @@ void ChatMessageHandler::onProtocolMessageReceived(const BasicMessage &AMessage)
 		}
 		history.append(AMessage);
 		sortProtocolMessagesChronologically(history);
+		if (ProtocolMessageHistory::isPendingEncryptedEvent(AMessage)) {
+			renderProtocolMessage(window, messaging, displayMessage);
+			return;
+		}
 		const int currentIndex = ProtocolMessageHistory::findMessageIndex(history,
 			AMessage.messageId());
 		if (ProtocolMessageHistory::requiresTimelineRebuild(currentIndex, history.size(), false))
@@ -1129,6 +1175,13 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 {
 	if (!AWindow || !AMessaging)
 		return;
+	if (ProtocolMessageHistory::isPendingEncryptedEvent(AMessage) &&
+		!AMessage.metadata().value(QStringLiteral("undecryptable_placeholder")).toBool()) {
+		const BasicMessage placeholder =
+			ProtocolMessageHistory::withUndecryptableMessagePlaceholder(AMessage);
+		renderProtocolMessage(AWindow, AMessaging, placeholder, AReplaceExisting);
+		return;
+	}
 	const QString prefix = AMessaging->streamId() + QChar('\n') + AMessage.conversationId() + QChar('\n');
 	const QString redactedEventId = AMessage.metadata().value(QStringLiteral("redacts")).toString();
 	if (!redactedEventId.isEmpty()) {
@@ -1192,11 +1245,10 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 		}
 		return;
 	}
-	if (AMessage.metadata().value(QStringLiteral("outer_event_type")).toString() ==
-		QStringLiteral("m.room.encrypted") &&
-		AMessage.metadata().value(QStringLiteral("decryption_status")).toString() !=
-			QStringLiteral("decrypted") &&
-		!AMessage.metadata().value(QStringLiteral("redacted")).toBool())
+	const bool undecryptablePlaceholder = AMessage.metadata().value(
+		QStringLiteral("undecryptable_placeholder")).toBool();
+	if (ProtocolMessageHistory::isPendingEncryptedEvent(AMessage) &&
+		!undecryptablePlaceholder)
 		return;
 	if (AMessage.metadata().value(QStringLiteral("event_type")).toString() ==
 		QStringLiteral("m.reaction")) {
@@ -1360,7 +1412,16 @@ void ChatMessageHandler::renderProtocolMessage(IChatWindow *AWindow, IProtocolMe
 			viewWidget->appendHtml(html, options);
 	};
 
-	if (messageType == QStringLiteral("m.text") &&
+	if (undecryptablePlaceholder) {
+		const QUrl keyRequestUrl =
+			ProtocolMessageHistory::undecryptableMessageKeyRequestUrl(AMessage);
+		if (keyRequestUrl.isEmpty())
+			return;
+		appendOrReplace(QStringLiteral("<a href=\"%1\">%2</a>")
+			.arg(keyRequestUrl.toString(QUrl::FullyEncoded).toHtmlEscaped(),
+				AMessage.body().toHtmlEscaped()));
+	}
+	else if (messageType == QStringLiteral("m.text") &&
 		messageFormat == QStringLiteral("org.matrix.custom.html") && !formattedBodyForDisplay.isEmpty())
 		appendOrReplace(replyHtml + AMessaging->highlightMentions(AMessaging->sanitizeHtml(
 			AMessaging->formatEmoticonsForDisplay(formattedBodyForDisplay))));
@@ -2822,6 +2883,37 @@ void ChatMessageHandler::onProtocolUrlClicked(const QUrl &AUrl)
 		if (!foundMessage)
 			return;
 		messaging->loadConversationMedia(message);
+		return;
+	}
+	if (AUrl.scheme() == QStringLiteral("vacuum-matrix") &&
+		AUrl.host() == QStringLiteral("request-room-key")) {
+		const QUrlQuery query(AUrl);
+		const QString roomId = query.queryItemValue(QStringLiteral("room"));
+		const QString eventId = query.queryItemValue(QStringLiteral("event"));
+		if (roomId != window->conversationId() || eventId.isEmpty())
+			return;
+		IProtocolMessaging *messaging = nullptr;
+		for (IProtocolMessaging *candidate : FProtocolMessaging)
+			if (candidate && candidate->streamId() == window->accountId()) {
+				messaging = candidate;
+				break;
+			}
+		if (!messaging)
+			return;
+		const QString historyKey = messaging->streamId() + QChar('\n') + roomId;
+		QList<BasicMessage> &conversationHistory = FProtocolConversationMessages[historyKey];
+		int messageIndex = ProtocolMessageHistory::findMessageIndex(conversationHistory, eventId);
+		if (messageIndex < 0) {
+			const QList<BasicMessage> loadedHistory = messaging->conversationHistory(roomId);
+			messageIndex = ProtocolMessageHistory::findMessageIndex(loadedHistory, eventId);
+			if (messageIndex < 0)
+				return;
+			conversationHistory = loadedHistory;
+			messageIndex = ProtocolMessageHistory::findMessageIndex(conversationHistory, eventId);
+		}
+		const BasicMessage message = conversationHistory.at(messageIndex);
+		if (ProtocolMessageHistory::isPendingEncryptedEvent(message))
+			messaging->requestUndecryptableMessageKey(message);
 		return;
 	}
 	if (AUrl.scheme() != QStringLiteral("file"))

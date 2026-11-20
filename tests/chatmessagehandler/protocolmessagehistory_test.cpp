@@ -5,6 +5,7 @@
 #include <QTimeZone>
 #include <QTimer>
 #include <QSet>
+#include <QUrlQuery>
 #include <iostream>
 
 namespace {
@@ -39,6 +40,19 @@ int main(int argc, char **argv)
 	pendingEncryptedEcho.setMetadata(encryptedMetadata);
 
 	bool passed = true;
+	const BasicMessage undecryptablePlaceholder =
+		ProtocolMessageHistory::withUndecryptableMessagePlaceholder(pendingEncryptedEcho);
+	const QUrl keyRequestUrl =
+		ProtocolMessageHistory::undecryptableMessageKeyRequestUrl(pendingEncryptedEcho);
+	const QUrlQuery keyRequestQuery(keyRequestUrl);
+	passed &= check(undecryptablePlaceholder.body() == QStringLiteral("konnte nicht entschlüsselt werden") &&
+		undecryptablePlaceholder.metadata().value(QStringLiteral("undecryptable_placeholder")).toBool(),
+		"pending encrypted events get the requested placeholder text and marker");
+	passed &= check(keyRequestUrl.scheme() == QStringLiteral("vacuum-matrix") &&
+		keyRequestUrl.host() == QStringLiteral("request-room-key") &&
+		keyRequestQuery.queryItemValue(QStringLiteral("room")) == pendingEncryptedEcho.conversationId() &&
+		keyRequestQuery.queryItemValue(QStringLiteral("event")) == pendingEncryptedEcho.messageId(),
+		"placeholder link identifies its conversation and encrypted event");
 	const QString emptyHistoryKey = QStringLiteral("account-stream\n!empty:example.org");
 	QSet<QString> loadingConversations{emptyHistoryKey};
 	QSet<QString> loadedConversations;
@@ -55,6 +69,19 @@ int main(int argc, char **argv)
 	passed &= check(!loadingConversations.contains(populatedHistoryKey) &&
 		loadedConversations.contains(populatedHistoryKey),
 		"non-empty history clears loading and records completion");
+
+	BasicMessage liveMessage(QStringLiteral("$live"), QStringLiteral("!room:test"),
+		QStringLiteral("@other:test"), QString(), QStringLiteral("live"),
+		QDateTime::fromMSecsSinceEpoch(3000, QTimeZone::utc()),
+		QStringLiteral("matrix"), BasicMessage::Incoming);
+	passed &= check(ProtocolMessageHistory::shouldRenderMessageDuringHistoryLoad(liveMessage),
+		"live messages render immediately while cached history is loading");
+	QVariantMap historicalMetadata;
+	historicalMetadata.insert(QStringLiteral("historical"), true);
+	BasicMessage cachedMessage = liveMessage;
+	cachedMessage.setMetadata(historicalMetadata);
+	passed &= check(!ProtocolMessageHistory::shouldRenderMessageDuringHistoryLoad(cachedMessage),
+		"cached history remains deferred until history loading completes");
 
 	QList<BasicMessage> encryptedHistory;
 	encryptedHistory.append(localEcho);

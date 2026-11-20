@@ -7,6 +7,8 @@
 #include <QHash>
 #include <QSet>
 #include <QString>
+#include <QUrl>
+#include <QUrlQuery>
 #include <QTimer>
 
 #include <algorithm>
@@ -30,6 +32,48 @@ inline void finishHistoryLoad(QSet<QString> &ALoading, QSet<QString> &ALoaded,
 	ALoading.remove(AConversationKey);
 	if (AHasHistory)
 		ALoaded.insert(AConversationKey);
+}
+
+inline bool shouldRenderMessageDuringHistoryLoad(const BasicMessage &AMessage)
+{
+	return !AMessage.metadata().value(QStringLiteral("historical")).toBool();
+}
+
+inline bool isPendingEncryptedEvent(const BasicMessage &AMessage)
+{
+	const QVariantMap metadata = AMessage.metadata();
+	return metadata.value(QStringLiteral("outer_event_type")).toString() ==
+		QStringLiteral("m.room.encrypted") &&
+		metadata.value(QStringLiteral("decryption_status")).toString() != QStringLiteral("decrypted") &&
+		!metadata.value(QStringLiteral("redacted")).toBool();
+}
+
+inline BasicMessage withUndecryptableMessagePlaceholder(const BasicMessage &AMessage)
+{
+	if (!isPendingEncryptedEvent(AMessage))
+		return AMessage;
+	BasicMessage placeholder = AMessage;
+	placeholder.setBody(QStringLiteral("konnte nicht entschlüsselt werden"));
+	QVariantMap metadata = placeholder.metadata();
+	metadata.insert(QStringLiteral("undecryptable_placeholder"), true);
+	metadata.insert(QStringLiteral("msgtype"), QStringLiteral("m.text"));
+	placeholder.setMetadata(metadata);
+	return placeholder;
+}
+
+inline QUrl undecryptableMessageKeyRequestUrl(const BasicMessage &AMessage)
+{
+	if (!isPendingEncryptedEvent(AMessage) || AMessage.messageId().isEmpty() ||
+		AMessage.conversationId().isEmpty())
+		return QUrl();
+	QUrl url;
+	url.setScheme(QStringLiteral("vacuum-matrix"));
+	url.setHost(QStringLiteral("request-room-key"));
+	QUrlQuery query;
+	query.addQueryItem(QStringLiteral("room"), AMessage.conversationId());
+	query.addQueryItem(QStringLiteral("event"), AMessage.messageId());
+	url.setQuery(query);
+	return url;
 }
 
 class ConversationRebuildScheduler
@@ -62,15 +106,6 @@ private:
 	QHash<QString, std::function<void()>> FCallbacks;
 	int FIntervalMs;
 };
-
-inline bool isPendingEncryptedEvent(const BasicMessage &AMessage)
-{
-	const QVariantMap metadata = AMessage.metadata();
-	return metadata.value(QStringLiteral("outer_event_type")).toString() ==
-		QStringLiteral("m.room.encrypted") &&
-		metadata.value(QStringLiteral("decryption_status")).toString() != QStringLiteral("decrypted") &&
-		!metadata.value(QStringLiteral("redacted")).toBool();
-}
 
 inline int findMessageIndex(const QList<BasicMessage> &AHistory, const QString &AMessageId)
 {

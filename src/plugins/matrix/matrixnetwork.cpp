@@ -28,6 +28,7 @@
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QPointer>
+#include <QThread>
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -290,6 +291,7 @@ QString MatrixNetwork::databaseProfileDirectory()
 	QString profileDirectory;
 	runDatabase([&](MatrixDatabase &database) {
 		profileDirectory = database.profileDirectory();
+		return true;
 	});
 	return profileDirectory;
 }
@@ -5785,51 +5787,161 @@ QList<MatrixTextEvent> MatrixNetwork::messageHistory(const QString &roomId)
 	return FMessageHistory.value(roomId);
 }
 
+bool MatrixNetwork::requestUndecryptableEventKey(const QString &roomId, const QString &eventId)
+{
+	if (QThread::currentThread() != thread() || FAccesToken.isEmpty() ||
+		roomId.isEmpty() || eventId.isEmpty())
+		return false;
+	MatrixTextEvent encryptedEvent;
+	for (const MatrixTextEvent &event : FMessageHistory.value(roomId))
+		if (event.eventId == eventId) {
+			encryptedEvent = event;
+			break;
+		}
+	if (encryptedEvent.eventId.isEmpty()) {
+		MatrixTimelineEvent storedEvent;
+		bool found = false;
+		runDatabase([&](MatrixDatabase &database) {
+			const QList<MatrixTimelineEvent> events = database.getEvents(roomId, 0);
+			for (const MatrixTimelineEvent &event : events)
+				if (event.eventId == eventId) {
+					storedEvent = event;
+					found = true;
+					break;
+				}
+		});
+		if (!found)
+			return false;
+		encryptedEvent.eventId = storedEvent.eventId;
+		encryptedEvent.roomId = storedEvent.roomId;
+		encryptedEvent.userId = storedEvent.sender;
+		encryptedEvent.timestamp = QString::number(storedEvent.originTs);
+		encryptedEvent.eventType = storedEvent.eventType;
+		encryptedEvent.messageType = storedEvent.messageType;
+		encryptedEvent.content = storedEvent.content;
+		for (auto it = storedEvent.metadata.constBegin(); it != storedEvent.metadata.constEnd(); ++it)
+			encryptedEvent.metadata.insert(it.key(), it.value());
+	}
+	if (encryptedEvent.eventType != QStringLiteral("m.room.encrypted") ||
+		encryptedEvent.metadata.value(QStringLiteral("decryption_status")).toString() ==
+			QStringLiteral("decrypted"))
+		return false;
+	const QString sessionId = encryptedEvent.metadata.value(QStringLiteral("session_id")).toString();
+	const QString senderKey = encryptedEvent.metadata.value(QStringLiteral("sender_key")).toString();
+	if (sessionId.isEmpty() || senderKey.isEmpty())
+		return false;
+	const QString requestKey = roomId + QLatin1Char('\n') + senderKey + QLatin1Char('\n') + sessionId;
+	FForcedRoomKeyRequests.insert(requestKey);
+	requestMissingRoomKey(encryptedEvent.userId, senderKey, roomId, sessionId);
+	schedulePendingEncryptedEventRetry(roomId, sessionId);
+	return true;
+}
+
+void MatrixNetwork::schedulePendingEncryptedEventRetry(const QString &roomId,
+	const QString &sessionId)
+{
+	if (roomId.isEmpty() || sessionId.isEmpty())
+		return;
+	QPointer<MatrixNetwork> network(this);
+	QTimer::singleShot(0, this, [network, roomId, sessionId]() {
+		if (network)
+			network->retryPendingEncryptedEvents(roomId, sessionId);
+	});
+}
+
 void MatrixNetwork::retryPendingEncryptedEvents(const QString &roomId, const QString &sessionId)
 {
-    QList<MatrixTextEvent> retryEvents;
-    QList<MatrixTextEvent> &history = FMessageHistory[roomId];
-    QList<MatrixTextEvent> *eventsToRetry = &history;
-    if (history.isEmpty()) {
-        QList<MatrixTimelineEvent> storedEvents;
-        runDatabase([&](MatrixDatabase &database) {
-            storedEvents = database.pendingEncryptedEvents(roomId, sessionId);
-        });
-		for (const MatrixTimelineEvent &stored : storedEvents) {
-			MatrixTextEvent event;
-			event.eventId = stored.eventId;
-			event.roomId = stored.roomId;
-			event.userId = stored.sender;
-			event.timestamp = QString::number(stored.originTs);
-			event.eventType = stored.eventType;
-			event.messageType = stored.messageType;
-			event.content = stored.content;
-			event.attachments = stored.attachments;
-			for (auto metadataIt = stored.metadata.constBegin();
-			    metadataIt != stored.metadata.constEnd(); ++metadataIt)
-			    event.metadata.insert(metadataIt.key(), metadataIt.value());
-			retryEvents.append(event);
-			}
-			eventsToRetry = &retryEvents;
-			}
-			QList<MatrixTextEvent> updated;
-			for (MatrixTextEvent &event : *eventsToRetry) {
+	QList<MatrixTextEvent> eventsToRetry;
+	QList<MatrixTextEvent> &history = FMessageHistory[roomId];
+	const bool useCachedHistory = !history.isEmpty();
+	if (useCachedHistory) {
+		eventsToRetry = history;
+	}
+	QSet<QString> knownEventIds;
+	for (const MatrixTextEvent &event : std::as_const(eventsToRetry))
+		if (!event.eventId.isEmpty())
+			knownEventIds.insert(event.eventId);
+
+	QMap<QString, QByteArray> sessionPickles;
+	QHash<QString, QPair<QString, QString>> sessionContexts;
+	const auto loadSessionPickles = [&eventsToRetry, &sessionId,
+		&sessionPickles, &sessionContexts](MatrixDatabase &database) {
+		QSet<QString> requestedSessions;
+		QStringList requestedSessionIds;
+		for (const MatrixTextEvent &event : std::as_const(eventsToRetry)) {
+			if (event.eventType != QStringLiteral("m.room.encrypted") ||
+				event.metadata.value(QStringLiteral("decryption_status")).toString() ==
+					QStringLiteral("decrypted"))
+				continue;
+			const QString eventSessionId =
+				event.metadata.value(QStringLiteral("session_id")).toString();
+			if (eventSessionId.isEmpty() || (!sessionId.isEmpty() && eventSessionId != sessionId) ||
+				requestedSessions.contains(eventSessionId))
+				continue;
+			requestedSessions.insert(eventSessionId);
+			requestedSessionIds.append(eventSessionId);
+		}
+		QMap<QString, QString> storedRoomIds;
+		QMap<QString, QString> storedSenderKeys;
+		if (!database.loadMegolmSessions(requestedSessionIds, storedRoomIds,
+				storedSenderKeys, sessionPickles))
+			return;
+		for (auto it = sessionPickles.constBegin(); it != sessionPickles.constEnd(); ++it)
+			sessionContexts.insert(it.key(), qMakePair(storedRoomIds.value(it.key()),
+				storedSenderKeys.value(it.key())));
+	};
+	QList<MatrixTimelineEvent> pendingEvents;
+	runDatabase([&](MatrixDatabase &database) {
+		pendingEvents = database.pendingEncryptedEvents(roomId, sessionId);
+	});
+	for (const MatrixTimelineEvent &stored : pendingEvents) {
+		if (knownEventIds.contains(stored.eventId))
+			continue;
+		MatrixTextEvent event;
+		event.eventId = stored.eventId;
+		event.roomId = stored.roomId;
+		event.userId = stored.sender;
+		event.timestamp = QString::number(stored.originTs);
+		event.eventType = stored.eventType;
+		event.messageType = stored.messageType;
+		event.content = stored.content;
+		event.attachments = stored.attachments;
+		for (auto metadataIt = stored.metadata.constBegin();
+			metadataIt != stored.metadata.constEnd(); ++metadataIt)
+			event.metadata.insert(metadataIt.key(), metadataIt.value());
+		eventsToRetry.append(event);
+		knownEventIds.insert(stored.eventId);
+	}
+	runDatabase([&](MatrixDatabase &database) {
+		loadSessionPickles(database);
+	});
+
+	QList<MatrixTextEvent> updated;
+	QList<MatrixTimelineEvent> databaseUpdates;
+	QSet<QString> initializedSessions;
+	QSet<QString> invalidSessions;
+	QSet<QString> successfulSessions;
+	QSet<QString> failedSessionSaves;
+	constexpr qsizetype maxEventsPerTurn = 20;
+	qsizetype processed = 0;
+	qsizetype index = 0;
+	while (index < eventsToRetry.size() && processed < maxEventsPerTurn) {
+		MatrixTextEvent &event = eventsToRetry[index++];
 		if (event.eventType != QStringLiteral("m.room.encrypted") ||
-			 event.metadata.value(QStringLiteral("decryption_status")).toString() ==
+			event.metadata.value(QStringLiteral("decryption_status")).toString() ==
 				QStringLiteral("decrypted"))
 			continue;
+		++processed;
 		const QString eventSessionId = event.metadata.value(QStringLiteral("session_id")).toString();
 		if (eventSessionId.isEmpty() || (!sessionId.isEmpty() && eventSessionId != sessionId))
 			continue;
+		QByteArray pickle;
+		if (!sessionPickles.contains(eventSessionId) || invalidSessions.contains(eventSessionId))
+			continue;
+		pickle = sessionPickles.value(eventSessionId);
 		const QByteArray ciphertext = event.metadata.value(QStringLiteral("ciphertext")).toString().toUtf8();
-		QByteArray sessionPickle;
-		QString storedRoomId;
-		QString storedSenderKey;
-		runDatabase([&](MatrixDatabase &database) {
-			database.loadMegolmSession(eventSessionId, storedRoomId, storedSenderKey, sessionPickle);
-		});
 		const MatrixMegolmDecryptResult result = FOlmCrypto.decryptMegolmDetailedWithPickle(
-			eventSessionId, ciphertext, sessionPickle);
+			eventSessionId, ciphertext, pickle);
 		if (!result.succeeded()) {
 			qWarning() << "[Matrix-E2EE] pending event decrypt failed:" << roomId
 				<< "session:" << eventSessionId << "status:" << result.status
@@ -5841,6 +5953,9 @@ void MatrixNetwork::retryPendingEncryptedEvents(const QString &roomId, const QSt
 					runDatabase([&](MatrixDatabase &database) {
 						database.removeMegolmSession(eventSessionId);
 					});
+					sessionPickles.remove(eventSessionId);
+					sessionContexts.remove(eventSessionId);
+					invalidSessions.insert(eventSessionId);
 				}
 				requestMissingRoomKey(event.userId,
 					event.metadata.value(QStringLiteral("sender_key")).toString(),
@@ -5848,15 +5963,9 @@ void MatrixNetwork::retryPendingEncryptedEvents(const QString &roomId, const QSt
 			}
 			continue;
 		}
-		bool sessionSaved = false;
-		runDatabase([&](MatrixDatabase &database) {
-			sessionSaved = FOlmCrypto.persistMegolmSession(database, eventSessionId,
-				storedRoomId, storedSenderKey);
-		});
-		if (!sessionSaved) {
-			qWarning() << "[Matrix-E2EE] pending Megolm session persistence failed:" << eventSessionId;
-			continue;
-		}
+		initializedSessions.insert(eventSessionId);
+		if (result.sessionPickleAdvanced)
+			sessionPickles.insert(eventSessionId, result.updatedSessionPickle);
 		QJsonParseError parseError;
 		const QJsonDocument document = QJsonDocument::fromJson(result.plaintext, &parseError);
 		if (parseError.error != QJsonParseError::NoError || !document.isObject())
@@ -5897,19 +6006,56 @@ void MatrixNetwork::retryPendingEncryptedEvents(const QString &roomId, const QSt
 		stored.content = event.content;
 		for (auto metadataIt = event.metadata.constBegin(); metadataIt != event.metadata.constEnd(); ++metadataIt)
 			stored.metadata.insert(metadataIt.key(), metadataIt.value());
-		runDatabase([&](MatrixDatabase &database) {
-			database.updateTimelineEvent(stored);
-		});
+		databaseUpdates.append(stored);
 		updated.append(event);
 	}
-	// Updated events are emitted individually below. Re-emitting the full room
-	// history on every retry turns a no-op key retry into a burst of queued UI
-	// messages proportional to the room history size.
-	for (const MatrixTextEvent &event : updated) {
-		if (event.roomId == FActiveRoomId && event.messageType == QStringLiteral("m.image"))
-			requestImage(event);
-		emit messageReceived(event.toBasicMessage());
+
+	if (!databaseUpdates.isEmpty() || !successfulSessions.isEmpty()) {
+		bool updatesSaved = false;
+		runDatabase([&](MatrixDatabase &database) {
+			updatesSaved = database.updateTimelineEvents(databaseUpdates);
+			if (!updatesSaved)
+				return;
+			for (const QString &eventSessionId : successfulSessions) {
+				const QPair<QString, QString> context = sessionContexts.value(eventSessionId);
+				if (!FOlmCrypto.persistMegolmSession(database, eventSessionId,
+						context.first, context.second))
+					failedSessionSaves.insert(eventSessionId);
+			}
+		});
+		if (!updatesSaved) {
+			for (const QString &eventSessionId : successfulSessions)
+				FOlmCrypto.clearMegolmSession(eventSessionId);
+			return;
+		}
 	}
+	for (MatrixTextEvent &event : updated)
+		if (useCachedHistory) {
+			const auto existing = std::find_if(history.begin(), history.end(),
+				[&event](const MatrixTextEvent &cached) { return cached.eventId == event.eventId; });
+			if (existing != history.end())
+				*existing = event;
+			else
+				history.append(event);
+		} else {
+			event.metadata.insert(QStringLiteral("historical"), true);
+			history.append(event);
+		}
+	if (useCachedHistory)
+		std::sort(history.begin(), history.end(), matrixNetworkTextEventLess);
+	if (index < eventsToRetry.size()) {
+		QPointer<MatrixNetwork> network(this);
+		QTimer::singleShot(0, this, [network, roomId, sessionId]() {
+			if (network)
+				network->retryPendingEncryptedEvents(roomId, sessionId);
+		});
+	}
+	dispatchRetriedEncryptedEvents(updated);
+}
+
+void MatrixNetwork::dispatchRetriedEncryptedEvents(const QList<MatrixTextEvent> &events)
+{
+	dispatchSyncEventBatch(events);
 }
 
 QList<MatrixTextEvent> MatrixNetwork::historyBackfill(const QString &roomId, int limit)
@@ -6568,10 +6714,11 @@ void MatrixNetwork::requestMissingRoomKey(const QString &sender, const QString &
 		return;
 	}
 	const QString requestKey = roomId + QLatin1Char('\n') + senderKey + QLatin1Char('\n') + sessionId;
+	const bool forceRequest = FForcedRoomKeyRequests.contains(requestKey);
 	const qint64 now = QDateTime::currentSecsSinceEpoch();
-	if ((FRequestedRoomKeys.contains(requestKey) &&
-		FRequestedRoomKeyTimes.value(requestKey) + 120 > now) ||
-		FPendingRoomKeyRequests.contains(requestKey))
+	if (FPendingRoomKeyRequests.contains(requestKey) ||
+		(!forceRequest && FRequestedRoomKeys.contains(requestKey) &&
+		FRequestedRoomKeyTimes.value(requestKey) + 120 > now))
 		return;
 	QString requestId = FRoomKeyRequestIds.value(requestKey);
 	if (requestId.isEmpty()) {
@@ -6607,6 +6754,7 @@ void MatrixNetwork::requestMissingRoomKey(const QString &sender, const QString &
 	FRequestedRoomKeys.insert(requestKey);
 	FRequestedRoomKeyTimes.insert(requestKey, now);
 	FPendingRoomKeyRequests.remove(requestKey);
+	FForcedRoomKeyRequests.remove(requestKey);
 	qWarning() << "[Matrix-E2EE] sent plaintext room-key request:" << roomId
 		<< "session:" << sessionId << "users:" << sender << FUserId
 		<< "target_device:" << requestedDevice;
@@ -6619,7 +6767,7 @@ void MatrixNetwork::cancelMissingRoomKeyRequest(const QString &roomId, const QSt
 		return;
 	const QString requestKey = roomId + QLatin1Char('\n') + senderKey + QLatin1Char('\n') + sessionId;
 	const QString requestId = FRoomKeyRequestIds.value(requestKey);
-	if (requestId.isEmpty())
+	if (requestId.isEmpty() || FRoomKeyRequestUsers.value(requestKey).isEmpty())
 		return;
 	const QJsonObject cancellation{
 		{QStringLiteral("action"), QStringLiteral("request_cancellation")},
@@ -6645,6 +6793,7 @@ void MatrixNetwork::cancelMissingRoomKeyRequest(const QString &roomId, const QSt
 	FRequestedRoomKeyTimes.remove(requestKey);
 	FRoomKeyRequestIds.remove(requestKey);
 	FRoomKeyRequestUsers.remove(requestKey);
+	FForcedRoomKeyRequests.remove(requestKey);
 	qWarning() << "[Matrix-E2EE] cancelled room-key request:" << roomId
 		<< "session:" << sessionId;
 }

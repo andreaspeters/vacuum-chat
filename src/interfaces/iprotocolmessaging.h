@@ -86,6 +86,8 @@ public:
     { (void)conversationId; return QList<BasicMessage>(); }
     virtual bool supportsOlderHistory(const ConversationId &conversationId) const
     { (void)conversationId; return false; }
+    virtual bool requestUndecryptableMessageKey(const BasicMessage &message) const
+    { (void)message; return false; }
     // beforeMessage is an exclusive cursor boundary. Accepted requests return one
     // chronologically ordered page through callbackContext, unless it is destroyed.
     virtual bool requestOlderHistoryPage(const ConversationId &conversationId,

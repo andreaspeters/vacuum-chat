@@ -119,6 +119,7 @@ public:
 	virtual bool supportsTyping(const ConversationId &conversationId) const;
 	virtual void setTyping(const ConversationId &conversationId, ProtocolTypingStatus status);
 	virtual QList<BasicMessage> conversationHistory(const QString &conversationId) const;
+	virtual bool requestUndecryptableMessageKey(const BasicMessage &message) const override;
 	bool supportsOlderHistory(const ConversationId &conversationId) const override;
 	bool requestConversationHistorySync(const ConversationId &conversationId) const override;
 	bool requestLocalHistoryBackup(const ConversationId &conversationId,
@@ -340,6 +341,7 @@ private:
 	};
 	QList<PendingProtocolEventBatch> FPendingProtocolEventBatches;
 	qsizetype FPendingProtocolEventIndex = 0;
+	QList<MatrixTextEvent> FPendingUrgentProtocolEvents;
 	bool FProtocolEventBatchScheduled = false;
 	QList<BasicMessage> FCachedHistoryQueue;
 	QMap<QString, qsizetype> FCachedHistoryRemainingByRoom;

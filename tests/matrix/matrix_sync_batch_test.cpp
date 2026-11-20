@@ -141,6 +141,11 @@ public:
 	{
 		matrix.queueOrEmitHistoryMessage(message);
 	}
+	static void setHistoryLoadingRoomActive(Matrix &matrix, const QString &roomId)
+	{
+		matrix.FHistoryLoadingRooms.insert(roomId);
+		matrix.FActiveConversationId = roomId;
+	}
 	static void loadCachedHistory(Matrix &matrix, const QString &roomId,
 		const QList<MatrixTimelineEvent> &events)
 	{
@@ -832,6 +837,42 @@ int main(int argc, char **argv)
             "batched history preserves filtering, ordering and exactly-once delivery"))
         return 1;
 
+    const QString activeRoom = QStringLiteral("!urgent-room:example.invalid");
+    MatrixSyncBatchTestAccess::setActiveConversation(matrix, activeRoom);
+    QList<MatrixTextEvent> backgroundEvents;
+    for (int index = 0; index < 60; ++index) {
+        MatrixTextEvent event;
+        event.roomId = QStringLiteral("!background-room:example.invalid");
+        event.eventId = QStringLiteral("$background-%1").arg(index);
+        event.userId = QStringLiteral("@sender:example.invalid");
+        event.content = QStringLiteral("background event %1").arg(index);
+        event.timestamp = QString::number(3000 + index);
+        event.eventType = QStringLiteral("m.room.message");
+        event.messageType = QStringLiteral("m.text");
+        backgroundEvents.append(event);
+    }
+    MatrixSyncBatchTestAccess::dispatchLiveSyncEvents(matrix, backgroundEvents);
+    MatrixTextEvent activeEvent;
+    activeEvent.roomId = activeRoom;
+    activeEvent.eventId = QStringLiteral("$active-immediate");
+    activeEvent.userId = QStringLiteral("@sender:example.invalid");
+    activeEvent.content = QStringLiteral("active conversation update");
+    activeEvent.timestamp = QStringLiteral("4000");
+    activeEvent.eventType = QStringLiteral("m.room.message");
+    activeEvent.messageType = QStringLiteral("m.text");
+    MatrixSyncBatchTestAccess::dispatchLiveSyncEvents(matrix, {activeEvent});
+    const int priorityStart = receivedIds.size();
+    if (!check(QMetaObject::invokeMethod(&matrix, "processNextProtocolEventBatch",
+            Qt::DirectConnection), "active-room backlog can be processed"))
+        return 1;
+    if (!check(receivedIds.size() > priorityStart &&
+            receivedIds.at(priorityStart) == activeEvent.eventId,
+            "live active-room messages bypass queued background-room backlog"))
+        return 1;
+    if (!check(receivedIds.mid(priorityStart + 1).isEmpty(),
+            "active-room priority does not synchronously drain the background backlog"))
+        return 1;
+
 
     const QString pendingRoom = QStringLiteral("!pending-batch:example.invalid");
     MatrixSyncBatchTestAccess::setHistoryLoading(matrix, pendingRoom);
@@ -890,6 +931,19 @@ int main(int argc, char **argv)
         return 1;
     if (!check(cachedSenderIsSelf,
             "cached own-message identity survives history loading before login"))
+        return 1;
+
+    const QString activeLoadingRoom = QStringLiteral("!active-history-loading:example.invalid");
+    MatrixSyncBatchTestAccess::setHistoryLoadingRoomActive(matrix, activeLoadingRoom);
+    BasicMessage liveDuringHistory(QStringLiteral("$live-during-history"), activeLoadingRoom,
+        QStringLiteral("@sender:example.invalid"), QString(),
+        QStringLiteral("live while cached history is loading"),
+        QDateTime::fromMSecsSinceEpoch(5000), QStringLiteral("matrix"), BasicMessage::Incoming);
+    const int liveDuringHistoryStart = receivedIds.size();
+    MatrixSyncBatchTestAccess::queuePendingMessage(matrix, liveDuringHistory);
+    if (!check(receivedIds.mid(liveDuringHistoryStart) ==
+            QStringList{liveDuringHistory.messageId()},
+            "live event in the active room is emitted immediately during cached-history loading"))
         return 1;
 
 

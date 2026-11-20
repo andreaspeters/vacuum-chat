@@ -29,6 +29,11 @@ public slots:
                         const QString &userId);
     bool persistSyncBatch(const QList<MatrixTimelineEvent> &events,
                           const QString &nextBatch);
+    bool updateTimelineEvents(const QList<MatrixTimelineEvent> &events);
+    bool loadMegolmSessions(const QStringList &sessionIds,
+                            QMap<QString, QString> &roomIds,
+                            QMap<QString, QString> &senderKeys,
+                            QMap<QString, QByteArray> &pickles);
     QList<MatrixCachedRoom> loadPersistedRooms();
     QSet<QString> directRooms() const;
     QList<MatrixTimelineEvent> events(const QString &roomId) const;

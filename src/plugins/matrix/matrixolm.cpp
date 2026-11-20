@@ -842,6 +842,19 @@ MatrixMegolmDecryptResult MatrixOlmCrypto::decryptMegolmDetailedWithPickle(
     }
     plaintext.resize(static_cast<int>(length));
     result.plaintext = plaintext;
+    const size_t updatedPickleLength = olm_pickle_inbound_group_session_length(session);
+    result.updatedSessionPickle.resize(static_cast<int>(updatedPickleLength));
+    static const QByteArray pickleKeyLiteral("matrix-megolm-session");
+    if (olm_pickle_inbound_group_session(session, pickleKeyLiteral.constData(),
+            static_cast<size_t>(pickleKeyLiteral.size()), result.updatedSessionPickle.data(),
+            updatedPickleLength) == olm_error()) {
+        result.status = QStringLiteral("failed");
+        result.error = QStringLiteral("session_pickle_failed");
+        result.plaintext.clear();
+        result.updatedSessionPickle.clear();
+        return result;
+    }
+    result.sessionPickleAdvanced = true;
     result.status = QStringLiteral("decrypted");
     return result;
 #else

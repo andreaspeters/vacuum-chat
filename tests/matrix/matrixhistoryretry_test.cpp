@@ -62,6 +62,12 @@ public:
         network.retryPendingEncryptedEvents(roomId, sessionId);
     }
 
+    static void dispatchRetriedEncryptedEvents(MatrixNetwork &network,
+                                              const QList<MatrixTextEvent> &events)
+    {
+        network.dispatchRetriedEncryptedEvents(events);
+    }
+
     static void setDatabaseWorker(MatrixNetwork &network, QObject *worker)
     {
         network.setDatabaseWorker(worker);
@@ -505,7 +511,7 @@ int testDelayedMegolmImageRetry()
     };
 
     const QString roomId = QStringLiteral("!late-image:example.org");
-    const QString eventId = QStringLiteral("$late-image-%1").arg(QCoreApplication::applicationPid());
+    const QString imageEventId = QStringLiteral("$late-image-%1").arg(QCoreApplication::applicationPid());
     const QString mediaId = QStringLiteral("late-image-media-%1").arg(QCoreApplication::applicationPid());
     SyntheticMediaServer server(syntheticPng(), QByteArrayLiteral("M_UNRECOGNIZED"));
     if (!server.listen(QHostAddress::LocalHost, 0)) {
@@ -526,43 +532,59 @@ int testDelayedMegolmImageRetry()
         stopWorker();
         return fail("could not create synthetic Megolm session");
     }
-    const QJsonObject imageContent{
-        {QStringLiteral("msgtype"), QStringLiteral("m.image")},
-        {QStringLiteral("body"), QStringLiteral("late-image.png")},
-        {QStringLiteral("url"), QStringLiteral("mxc://media.example.org/%1").arg(mediaId)}};
-    const QJsonObject plaintextEvent{
-        {QStringLiteral("type"), QStringLiteral("m.room.message")},
-        {QStringLiteral("room_id"), roomId},
-        {QStringLiteral("sender"), QStringLiteral("@image-peer:example.org")},
-        {QStringLiteral("content"), imageContent}};
-    const QByteArray ciphertext = senderCrypto.encryptMegolmData(roomId,
-        QJsonDocument(plaintextEvent).toJson(QJsonDocument::Compact),
-        sessionId, outboundPickle);
+    QList<MatrixTimelineEvent> encryptedEvents;
+    QStringList expectedDecryptedIds;
+    constexpr int retryEventCount = 61;
+    for (int index = 0; index < retryEventCount; ++index) {
+        const QString eventId = index == 17 ? imageEventId
+            : QStringLiteral("$late-text-%1-%2").arg(QCoreApplication::applicationPid()).arg(index);
+        QJsonObject eventContent{
+            {QStringLiteral("msgtype"), index == 17 ? QStringLiteral("m.image") : QStringLiteral("m.text")},
+            {QStringLiteral("body"), index == 17 ? QStringLiteral("late-image.png")
+                : QStringLiteral("retry text %1").arg(index)}};
+        if (index == 17)
+            eventContent.insert(QStringLiteral("url"),
+                QStringLiteral("mxc://media.example.org/%1").arg(mediaId));
+        const QJsonObject plaintextEvent{
+            {QStringLiteral("type"), QStringLiteral("m.room.message")},
+            {QStringLiteral("room_id"), roomId},
+            {QStringLiteral("sender"), QStringLiteral("@image-peer:example.org")},
+            {QStringLiteral("content"), eventContent}};
+        const QByteArray ciphertext = senderCrypto.encryptMegolmData(roomId,
+            QJsonDocument(plaintextEvent).toJson(QJsonDocument::Compact),
+            sessionId, outboundPickle);
+        if (ciphertext.isEmpty()) {
+            stopWorker();
+            return fail("could not encrypt synthetic Megolm retry batch");
+        }
+        MatrixTimelineEvent encryptedEvent;
+        encryptedEvent.roomId = roomId;
+        encryptedEvent.eventId = eventId;
+        encryptedEvent.eventType = QStringLiteral("m.room.encrypted");
+        encryptedEvent.sender = QStringLiteral("@image-peer:example.org");
+        encryptedEvent.originTs = 3000 + index;
+        encryptedEvent.messageType = QStringLiteral("m.encrypted");
+        encryptedEvent.content = QStringLiteral("[encrypted Matrix event]");
+        encryptedEvent.metadata.insert(QStringLiteral("session_id"), sessionId);
+        encryptedEvent.metadata.insert(QStringLiteral("ciphertext"), QString::fromUtf8(ciphertext));
+        encryptedEvent.metadata.insert(QStringLiteral("sender_key"), QStringLiteral("synthetic-sender-key"));
+        encryptedEvent.metadata.insert(QStringLiteral("decryption_status"), QStringLiteral("pending"));
+        encryptedEvents.append(encryptedEvent);
+        expectedDecryptedIds.append(eventId);
+    }
     QByteArray inboundPickle;
-    if (ciphertext.isEmpty() || !MatrixNetworkTestAccess::crypto(network)
+    if (!MatrixNetworkTestAccess::crypto(network)
             .prepareMegolmSession(sessionId, roomKey, inboundPickle)) {
         stopWorker();
         return fail("could not prepare synthetic inbound Megolm session");
     }
 
-    MatrixTimelineEvent encryptedEvent;
-    encryptedEvent.roomId = roomId;
-    encryptedEvent.eventId = eventId;
-    encryptedEvent.eventType = QStringLiteral("m.room.encrypted");
-    encryptedEvent.sender = QStringLiteral("@image-peer:example.org");
-    encryptedEvent.originTs = 3000;
-    encryptedEvent.messageType = QStringLiteral("m.encrypted");
-    encryptedEvent.content = QStringLiteral("[encrypted Matrix event]");
-    encryptedEvent.metadata.insert(QStringLiteral("session_id"), sessionId);
-    encryptedEvent.metadata.insert(QStringLiteral("ciphertext"), QString::fromUtf8(ciphertext));
-    encryptedEvent.metadata.insert(QStringLiteral("sender_key"), QStringLiteral("synthetic-sender-key"));
-    encryptedEvent.metadata.insert(QStringLiteral("decryption_status"), QStringLiteral("pending"));
     bool fixtureSaved = false;
     QMetaObject::invokeMethod(databaseWorker, [&]() {
         databaseWorker->execute([&](MatrixDatabase &database) {
             fixtureSaved = database.saveMegolmSession(sessionId, roomId,
                     QStringLiteral("synthetic-sender-key"), inboundPickle) &&
-                database.appendTimelineEvents(roomId, QList<MatrixTimelineEvent>{encryptedEvent});
+                database.appendTimelineEvents(roomId, encryptedEvents);
         });
     }, Qt::BlockingQueuedConnection);
     if (!fixtureSaved) {
@@ -570,11 +592,36 @@ int testDelayedMegolmImageRetry()
         return fail("could not persist synthetic encrypted image event");
     }
 
+    bool sessionBatchLoaded = false;
+    QMetaObject::invokeMethod(databaseWorker, [&]() {
+        databaseWorker->execute([&](MatrixDatabase &database) {
+            QMap<QString, QString> roomIds;
+            QMap<QString, QString> senderKeys;
+            QMap<QString, QByteArray> pickles;
+            sessionBatchLoaded = database.loadMegolmSessions({sessionId}, roomIds,
+                senderKeys, pickles) && roomIds.value(sessionId) == roomId &&
+                senderKeys.value(sessionId) == QStringLiteral("synthetic-sender-key") &&
+                pickles.value(sessionId) == inboundPickle;
+        });
+    }, Qt::BlockingQueuedConnection);
+    if (!sessionBatchLoaded) {
+        stopWorker();
+        return fail("batched session lookup did not return the seeded inbound Megolm session");
+    }
+
     bool imageDecoded = false;
     QEventLoop imageLoop;
+    int retryBatchCount = 0;
+    QStringList receivedDecryptedIds;
+    QObject::connect(&network, &MatrixNetwork::syncReceived, &imageLoop,
+        [&](const QList<MatrixTextEvent> &batch) {
+            ++retryBatchCount;
+            for (const MatrixTextEvent &event : batch)
+                receivedDecryptedIds.append(event.eventId);
+        });
     const QMetaObject::Connection connection = QObject::connect(&network,
         &MatrixNetwork::messageReceived, &imageLoop, [&](const BasicMessage &message) {
-            if (message.messageId() != eventId)
+            if (message.messageId() != imageEventId)
                 return;
             const QImage image = message.metadata().value(QStringLiteral("decoded_image")).value<QImage>();
             if (!image.isNull()) {
@@ -584,12 +631,25 @@ int testDelayedMegolmImageRetry()
             }
         });
     MatrixNetworkTestAccess::retryPendingEncryptedEvents(network, roomId, sessionId);
-    const bool completed = waitForEventLoop(imageLoop, 5000, [&]() { return imageDecoded; });
+    const bool completed = waitForEventLoop(imageLoop, 5000, [&]() {
+        return imageDecoded && receivedDecryptedIds.size() == expectedDecryptedIds.size();
+    });
     QObject::disconnect(connection);
     const QStringList paths = server.requestPaths();
     stopWorker();
-    if (!completed || !imageDecoded)
+    if (!completed || !imageDecoded) {
+        std::cerr << "late image diagnostic: imageDecoded=" << imageDecoded
+                  << ", retryBatchCount=" << retryBatchCount
+                  << ", retriedEventCount=" << receivedDecryptedIds.size()
+                  << ", expectedEventCount=" << expectedDecryptedIds.size()
+                  << ", mediaRequestCount=" << paths.size() << '\n';
+        for (const QString &path : paths)
+            std::cerr << "media request: " << path.toStdString() << '\n';
         return fail("late Megolm decryption did not request and decode the room image");
+    }
+    const int expectedRetryBatches = (retryEventCount + 19) / 20;
+    if (retryBatchCount != expectedRetryBatches || receivedDecryptedIds != expectedDecryptedIds)
+        return fail("61 pending events must be decrypted in order over bounded UI turns");
     if (paths.size() != 2 || !paths.first().contains(QStringLiteral("/_matrix/client/v1/media/download/")) ||
         !paths.last().contains(QStringLiteral("/_matrix/media/v3/download/")))
         return fail("late Megolm image retry used unexpected Matrix media request paths");
@@ -891,6 +951,42 @@ int main(int argc, char **argv)
                   << ", messages=" << messageCounter.count << '\n';
         return 1;
     }
+
+    QList<MatrixTextEvent> retriedEvents;
+    QStringList expectedRetriedIds;
+    for (int index = 0; index < 61; ++index) {
+        MatrixTextEvent event;
+        event.roomId = roomId;
+        event.eventId = QStringLiteral("$retried-%1").arg(index);
+        event.userId = QStringLiteral("@sender:example.org");
+        event.timestamp = QString::number(2000 + index);
+        event.eventType = QStringLiteral("m.room.message");
+        event.messageType = QStringLiteral("m.text");
+        event.content = QStringLiteral("decrypted event %1").arg(index);
+        if (index == 17) {
+            event.messageType = QStringLiteral("m.image");
+            event.metadata.insert(QStringLiteral("url"), QStringLiteral("not-an-mxc-url"));
+        }
+        retriedEvents.append(event);
+        expectedRetriedIds.append(event.eventId);
+    }
+    int retriedBatchCount = 0;
+    bool activeImageWasDeferred = false;
+    QStringList receivedRetriedIds;
+    QObject::connect(&network, &MatrixNetwork::syncReceived, &app,
+        [&](const QList<MatrixTextEvent> &batch) {
+            ++retriedBatchCount;
+            for (const MatrixTextEvent &event : batch) {
+                receivedRetriedIds.append(event.eventId);
+                if (event.eventId == QStringLiteral("$retried-17"))
+                    activeImageWasDeferred = event.activeImageFetchPending;
+            }
+        });
+    MatrixNetworkTestAccess::setActiveRoom(network, roomId);
+    MatrixNetworkTestAccess::dispatchRetriedEncryptedEvents(network, retriedEvents);
+    if (retriedBatchCount != 1 || receivedRetriedIds != expectedRetriedIds ||
+        messageCounter.count != 0 || !activeImageWasDeferred)
+        return fail("decrypted retries must batch ordered UI updates and defer active-room images");
 
     MatrixTextEvent event;
     event.roomId = roomId;

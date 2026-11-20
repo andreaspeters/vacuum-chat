@@ -70,6 +70,45 @@ int runHistoryPaginationTest()
     if (!database.appendTimelineEvents(roomId, events))
         return fail("could not seed synthetic timeline events");
 
+    QList<MatrixTimelineEvent> updatedEvents;
+    for (int index = 0; index < 10; ++index) {
+        MatrixTimelineEvent updated = events.at(index);
+        updated.content = QStringLiteral("updated %1").arg(index);
+        updated.metadata.insert(QStringLiteral("decryption_status"), QStringLiteral("decrypted"));
+        updatedEvents.append(updated);
+    }
+    if (!database.updateTimelineEvents(updatedEvents))
+        return fail("could not update a batch of decrypted timeline events");
+    const MatrixHistoryPageResult updatedPage = database.loadHistoryPage(roomId, 30,
+        events.at(10).originTs, events.at(10).eventId);
+    if (!updatedPage.success || updatedPage.events.size() != 10)
+        return fail("batched timeline updates must preserve the existing event rows");
+    for (int index = 0; index < updatedPage.events.size(); ++index)
+        if (updatedPage.events.at(index).content != QStringLiteral("updated %1").arg(index) ||
+            updatedPage.events.at(index).metadata.value(QStringLiteral("decryption_status")).toString() !=
+                QStringLiteral("decrypted"))
+            return fail("batched timeline updates must persist message content and metadata");
+
+    const QByteArray pickleOne = QByteArrayLiteral("test-pickle-one");
+    const QByteArray pickleTwo = QByteArrayLiteral("test-pickle-two");
+    if (!database.saveMegolmSession(QStringLiteral("session-one"), roomId,
+            QStringLiteral("sender-key-one"), pickleOne) ||
+        !database.saveMegolmSession(QStringLiteral("session-two"), roomId,
+            QStringLiteral("sender-key-two"), pickleTwo))
+        return fail("could not seed Megolm session batch fixture");
+    QMap<QString, QString> sessionRooms;
+    QMap<QString, QString> sessionSenderKeys;
+    QMap<QString, QByteArray> sessionPickles;
+    if (!database.loadMegolmSessions({QStringLiteral("session-one"),
+            QStringLiteral("session-two"), QStringLiteral("session-one"),
+            QStringLiteral("missing-session")}, sessionRooms, sessionSenderKeys, sessionPickles) ||
+        sessionPickles.size() != 2 ||
+        sessionPickles.value(QStringLiteral("session-one")) != pickleOne ||
+        sessionPickles.value(QStringLiteral("session-two")) != pickleTwo ||
+        sessionRooms.value(QStringLiteral("session-one")) != roomId ||
+        sessionSenderKeys.value(QStringLiteral("session-two")) != QStringLiteral("sender-key-two"))
+        return fail("Megolm session batch load must deduplicate IDs and return stored session contexts");
+
     const QString senderQueryRoomId = QStringLiteral("!sender-query:example.org");
     MatrixTimelineEvent targetSenderEvent = makeEvent(senderQueryRoomId,
         QStringLiteral("event-target-sender"), 1700000000100LL, QStringLiteral("target sender message"));
@@ -86,6 +125,10 @@ int runHistoryPaginationTest()
     const MatrixHistoryPageResult latest = database.loadHistoryPage(roomId, 30);
     if (!latest.success || !latest.hasMore || !hasExpectedRange(latest.events, 35, 64))
         return fail("latest page must contain events 35..64 in chronological order");
+
+    const QList<MatrixTimelineEvent> latestViaGetEvents = database.getEvents(roomId, 30);
+    if (!hasExpectedRange(latestViaGetEvents, 35, 64))
+        return fail("getEvents must use the bounded latest-history page");
 
     const MatrixHistoryPageResult oversized = database.loadHistoryPage(roomId, 1000);
     if (!oversized.success || !oversized.hasMore ||

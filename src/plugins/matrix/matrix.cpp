@@ -1697,6 +1697,23 @@ QList<BasicMessage> Matrix::conversationHistory(const QString &conversationId) c
 	return result;
 }
 
+bool Matrix::requestUndecryptableMessageKey(const BasicMessage &message) const
+{
+	if (!FMatrixNetwork || !FNetworkLoggedIn || message.protocol() != protocol() ||
+		message.conversationId().isEmpty() || message.messageId().isEmpty() ||
+		message.metadata().value(QStringLiteral("outer_event_type")).toString() !=
+			QStringLiteral("m.room.encrypted") ||
+		message.metadata().value(QStringLiteral("decryption_status")).toString() ==
+			QStringLiteral("decrypted"))
+		return false;
+	MatrixNetwork *network = FMatrixNetwork;
+	const QString roomId = message.conversationId();
+	const QString eventId = message.messageId();
+	return QMetaObject::invokeMethod(network, [network, roomId, eventId]() {
+		network->requestUndecryptableEventKey(roomId, eventId);
+	}, Qt::QueuedConnection);
+}
+
 bool Matrix::supportsOlderHistory(const ConversationId &conversationId) const
 {
 	return !conversationId.isEmpty() && FDatabaseWorker &&
@@ -2345,7 +2362,28 @@ void Matrix::enqueueProtocolEventBatch(const QList<MatrixTextEvent> &events,
 {
 	if (events.isEmpty())
 		return;
-	FPendingProtocolEventBatches.append({events, historyRoomId});
+	if (historyRoomId.isEmpty() && !FActiveConversationId.isEmpty()) {
+		qsizetype liveActiveCount = 0;
+		for (const MatrixTextEvent &event : events)
+			if (event.roomId == FActiveConversationId && !event.activeImageFetchPending)
+				++liveActiveCount;
+		if (liveActiveCount > 0 && FPendingUrgentProtocolEvents.size() + liveActiveCount <= 25) {
+			QList<MatrixTextEvent> deferredEvents;
+			for (const MatrixTextEvent &event : events)
+				if (event.roomId == FActiveConversationId && !event.activeImageFetchPending)
+					FPendingUrgentProtocolEvents.append(event);
+				else
+					deferredEvents.append(event);
+			if (!deferredEvents.isEmpty())
+				FPendingProtocolEventBatches.append({deferredEvents, QString()});
+		} else {
+			FPendingProtocolEventBatches.append({events, QString()});
+		}
+	} else {
+		FPendingProtocolEventBatches.append({events, historyRoomId});
+	}
+	if (FPendingUrgentProtocolEvents.isEmpty() && FPendingProtocolEventBatches.isEmpty())
+		return;
 	if (FProtocolEventBatchScheduled)
 		return;
 	FProtocolEventBatchScheduled = true;
@@ -2359,23 +2397,35 @@ void Matrix::processNextProtocolEventBatch()
 	QElapsedTimer timer;
 	timer.start();
 	qsizetype processed = 0;
+	bool activeRoomTurn = false;
 
-	while (!FPendingProtocolEventBatches.isEmpty() && processed < maxEventsPerTurn &&
+	while ((!FPendingUrgentProtocolEvents.isEmpty() || !FPendingProtocolEventBatches.isEmpty()) &&
+		processed < maxEventsPerTurn &&
 		timer.elapsed() < maxTurnDurationMs) {
-		PendingProtocolEventBatch &pending = FPendingProtocolEventBatches.first();
-		if (FPendingProtocolEventIndex >= pending.events.size()) {
-			FPendingProtocolEventBatches.removeFirst();
-			FPendingProtocolEventIndex = 0;
-			continue;
+		if (activeRoomTurn && FPendingUrgentProtocolEvents.isEmpty())
+			break;
+		MatrixTextEvent event;
+		bool fromHistorySnapshot = false;
+		QString historyRoomId;
+		if (!FPendingUrgentProtocolEvents.isEmpty()) {
+			activeRoomTurn = true;
+			event = FPendingUrgentProtocolEvents.takeFirst();
+		} else {
+			PendingProtocolEventBatch &pending = FPendingProtocolEventBatches.first();
+			if (FPendingProtocolEventIndex >= pending.events.size()) {
+				FPendingProtocolEventBatches.removeFirst();
+				FPendingProtocolEventIndex = 0;
+				continue;
+			}
+			event = pending.events.at(FPendingProtocolEventIndex++);
+			fromHistorySnapshot = !pending.historyRoomId.isEmpty();
+			historyRoomId = pending.historyRoomId;
 		}
-
-		const MatrixTextEvent event = pending.events.at(FPendingProtocolEventIndex++);
-		const bool fromHistorySnapshot = !pending.historyRoomId.isEmpty();
 		++processed;
 		if (fromHistorySnapshot) {
 			const bool encrypted = event.metadata.value(QStringLiteral("outer_event_type")).toString() ==
 				QStringLiteral("m.room.encrypted");
-			if (event.roomId != pending.historyRoomId || (encrypted &&
+			if (event.roomId != historyRoomId || (encrypted &&
 				event.metadata.value(QStringLiteral("decryption_status")).toString() !=
 					QStringLiteral("decrypted")))
 				continue;
@@ -2397,7 +2447,7 @@ void Matrix::processNextProtocolEventBatch()
 		FPendingProtocolEventIndex = 0;
 	}
 
-	if (FPendingProtocolEventBatches.isEmpty()) {
+	if (FPendingUrgentProtocolEvents.isEmpty() && FPendingProtocolEventBatches.isEmpty()) {
 		FProtocolEventBatchScheduled = false;
 		return;
 	}
@@ -2417,6 +2467,11 @@ void Matrix::queueOrEmitHistoryMessage(const BasicMessage &message)
 		return;
 	const QString roomId = message.conversationId();
 	if (!roomId.isEmpty() && FHistoryLoadingRooms.contains(roomId)) {
+		if (!message.metadata().value(QStringLiteral("historical")).toBool() &&
+			roomId == FActiveConversationId) {
+			emit protocolMessageReceived(message);
+			return;
+		}
 		FPendingHistoryMessages[roomId].append(message);
 		return;
 	}

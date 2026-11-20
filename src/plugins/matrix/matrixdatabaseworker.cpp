@@ -44,6 +44,19 @@ bool MatrixDatabaseWorker::persistSyncBatch(const QList<MatrixTimelineEvent> &ev
     return FDatabase.persistSyncBatch(events, nextBatch);
 }
 
+bool MatrixDatabaseWorker::updateTimelineEvents(const QList<MatrixTimelineEvent> &events)
+{
+    return FDatabase.updateTimelineEvents(events);
+}
+
+bool MatrixDatabaseWorker::loadMegolmSessions(const QStringList &sessionIds,
+                                              QMap<QString, QString> &roomIds,
+                                              QMap<QString, QString> &senderKeys,
+                                              QMap<QString, QByteArray> &pickles)
+{
+    return FDatabase.loadMegolmSessions(sessionIds, roomIds, senderKeys, pickles);
+}
+
 QList<MatrixCachedRoom> MatrixDatabaseWorker::loadPersistedRooms()
 {
     return loadCachedRooms(FDatabase, true);
