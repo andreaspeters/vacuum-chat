@@ -1831,6 +1831,14 @@ void Matrix::setActiveConversation(const QString &conversationId) const
 			Qt::QueuedConnection, Q_ARG(QString, conversationId));
 }
 
+void Matrix::loadConversationMembers(const QString &conversationId) const
+{
+	if (!FMatrixNetwork || !FNetworkLoggedIn || conversationId.isEmpty())
+		return;
+	QMetaObject::invokeMethod(FMatrixNetwork, "requestJoinedMembers", Qt::QueuedConnection,
+			Q_ARG(QString, conversationId), Q_ARG(bool, false));
+}
+
 void Matrix::loadConversationAvatars(const QString &conversationId) const
 {
 	const ProtocolRoom currentRoom = room(conversationId);

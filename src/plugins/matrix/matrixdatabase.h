@@ -137,6 +137,7 @@ public:
     bool saveRoomMember(const QString &roomId, const QString &userId, const QString &membership,
                         const QString &displayName, const QString &avatarUrl,
                         const QString &eventId);
+    bool saveRoomMembers(const QString &roomId, const QList<MatrixStoredMember> &members);
     bool saveRoomMemberHistory(const QString &roomId, const QString &userId,
                                const QString &membership, const QString &displayName,
                                const QString &avatarUrl, qint64 validFrom,

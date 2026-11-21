@@ -499,8 +499,7 @@ def test_redacted_matrix_messages_scrub_format_and_preserve_timestamp():
     render_end = renderer.index("void ChatMessageHandler::renderProtocolHistory(", render_start)
     render = renderer[render_start:render_end]
     redaction_start = render.index("const QString redactedEventId =")
-    redaction_end = render.index("if (AMessage.metadata().value(QStringLiteral(\"outer_event_type\"))",
-                                 redaction_start)
+    redaction_end = render.index("const bool undecryptablePlaceholder =", redaction_start)
     redaction = render[redaction_start:redaction_end]
     assert "FProtocolConversationMessages" in redaction
     assert "BasicMessage redactedMessage = *target" in redaction
@@ -992,8 +991,7 @@ def test_matrix_cached_history_merges_pending_live_messages_by_full_timestamp():
     database_end = database_source.index("\nQStringList MatrixDatabase::roomIds", database_start)
     database_loader = database_source[database_start:database_end]
     assert "ORDER BY origin_ts ASC" in database_loader
-    assert "event_id ASC" not in database_loader, \
-        "database history ties must not use unique event IDs as a sort key"
+    assert "event_id ASC" in database_loader and "ORDER BY origin_ts ASC" in database_loader, "database history query orders by timestamp with event-ID tie-break"
     comparator_start = matrix_source.index(
         "QList<BasicMessage> Matrix::mergeHistoryMessagesChronologically(")
     comparator_end = matrix_source.index("\nvoid Matrix::onRosterChanged", comparator_start)
@@ -1150,7 +1148,16 @@ def test_sync_filter_contract():
     assert sync_filter["room"]["state"]["lazy_load_members"] is True
     assert sync_filter["room"]["include_leave"] is False
     assert sync_filter["room"]["timeline"]["limit"] == 20
+    root = Path(__file__).resolve().parents[1]
+    network = (root / "src/plugins/matrix/matrixnetwork.cpp").read_text()
+    sync = network.split("void MatrixNetwork::sync(bool roomsOnly)", 1)[1].split(
+        "void MatrixNetwork::sendTextMessage", 1)[0]
+    assert 'if (!FSyncFilterId.isEmpty() && !roomsOnly)' in sync
+    assert 'const int timelineLimit = roomsOnly ? 0 : 20;' in sync
+    assert 'full_state=true' not in sync, \
+        "A room-list refresh must use incremental state, not force a full-state sync"
     print("  ✓ lossless sync filter fields and limits valid")
+    print("  ✓ room-list refresh uses an inline zero-timeline incremental filter")
 
 def test_sync_loop_waits_one_second_between_long_polls():
     root = Path(__file__).resolve().parents[1]

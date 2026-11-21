@@ -3,10 +3,13 @@
 
 #include <QCoreApplication>
 #include <QEventLoop>
+#include <QElapsedTimer>
 #include <QHostAddress>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QList>
+#include <QSemaphore>
 #include <QMetaObject>
 #include <QTemporaryDir>
 #include <QTcpServer>
@@ -14,10 +17,13 @@
 #include <QThread>
 #include <QTimer>
 #include <QUrl>
+#include <QUrlQuery>
 
 #include <algorithm>
+#include <atomic>
 #include <functional>
 #include <iostream>
+#include <thread>
 
 class MatrixNetworkTestAccess
 {
@@ -32,15 +38,80 @@ public:
         return network.FInitialSyncComplete;
     }
 
+    static bool syncInFlight(const MatrixNetwork &network)
+    {
+        return network.FSyncInFlight;
+    }
+
+    static QList<ProtocolRoom> rooms(const MatrixNetwork &network)
+    {
+        QList<ProtocolRoom> result;
+        for (const ProtocolRoom &room : network.FRooms)
+            result.append(room);
+        return result;
+    }
+
     static void setAccessToken(MatrixNetwork &network, const QString &accessToken)
     {
         network.FAccesToken = accessToken;
+    }
+
+    static void setRoom(MatrixNetwork &network, const QString &roomId)
+    {
+        ProtocolRoom room;
+        room.id = roomId;
+        room.membership = QStringLiteral("join");
+        room.isJoined = true;
+        room.isAvailable = true;
+        network.FRooms.insert(roomId, room);
+    }
+
+    static void configureRoomsOnlySync(MatrixNetwork &network)
+    {
+        network.FAccesToken = QStringLiteral("synthetic-rooms-refresh-token");
+        network.FSyncToken = QStringLiteral("test-next-batch");
+        network.FSyncFilterId = QStringLiteral("stored-filter-id");
+    }
+
+    static bool hasStoredEvent(MatrixDatabaseWorker *worker, const QString &roomId,
+                               const QString &eventId)
+    {
+        bool found = false;
+        QMetaObject::invokeMethod(worker, [worker, roomId, eventId, &found]() {
+            const QList<MatrixTimelineEvent> stored = worker->events(roomId);
+            found = std::any_of(stored.cbegin(), stored.cend(), [&eventId](const MatrixTimelineEvent &event) {
+                return event.eventId == eventId;
+            });
+        }, Qt::BlockingQueuedConnection);
+        return found;
+    }
+
+    static bool hasStoredMembers(MatrixDatabaseWorker *worker, const QString &roomId,
+                                 const QStringList &memberIds)
+    {
+        bool found = false;
+        QMetaObject::invokeMethod(worker, [worker, roomId, memberIds, &found]() {
+            QList<MatrixStoredMember> stored;
+            worker->execute([&](MatrixDatabase &database) {
+                stored = database.roomMembers(roomId);
+            });
+            QSet<QString> storedIds;
+            for (const MatrixStoredMember &member : stored)
+                storedIds.insert(member.userId);
+            found = std::all_of(memberIds.cbegin(), memberIds.cend(),
+                [&storedIds](const QString &id) { return storedIds.contains(id); });
+        }, Qt::BlockingQueuedConnection);
+        return found;
     }
 };
 
 class MatrixLocalApi final : public QTcpServer
 {
 public:
+    std::function<void(const QString &)> requestReceived;
+    bool holdSyncResponses = false;
+    bool holdRoomMembershipResponses = false;
+
     struct CapturedRequest
     {
         QString method;
@@ -72,6 +143,9 @@ public:
             paths.append(request.path);
         return paths;
     }
+
+    void setHoldSyncResponses(bool hold) { holdSyncResponses = hold; }
+    void setHoldRoomMembershipResponses(bool hold) { holdRoomMembershipResponses = hold; }
 
 private:
     bool readRequest(QTcpSocket *socket, CapturedRequest &captured)
@@ -119,6 +193,14 @@ private:
         if (!readRequest(socket, request))
             return;
         FRequests.append(request);
+        if (requestReceived)
+            requestReceived(request.path);
+        if (holdSyncResponses && request.path.startsWith(QStringLiteral("/_matrix/client/v3/sync")))
+            return;
+        if (holdRoomMembershipResponses &&
+            (request.path.contains(QStringLiteral("/joined_members")) ||
+             request.path.startsWith(QStringLiteral("/_matrix/client/v3/rooms/"))))
+            return;
         const QByteArray body = responseBodyForPath(request.path);
         QByteArray response = QByteArrayLiteral(
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ");
@@ -128,26 +210,71 @@ private:
         socket->disconnectFromHost();
     }
 
-    static QByteArray responseBodyForPath(const QString &path)
+    QByteArray responseBodyForPath(const QString &path)
     {
         if (path == QStringLiteral("/_matrix/client/v3/login"))
             return QByteArrayLiteral(
                 "{\"user_id\":\"@matrix-login-test:example.invalid\","
                 "\"access_token\":\"synthetic-password-access-token\","
                 "\"device_id\":\"SYNTHETICDEVICE\"}");
-        if (path.startsWith(QStringLiteral("/_matrix/client/v3/sync")))
-            return QByteArrayLiteral(
-                "{\"next_batch\":\"test-next-batch\",\"rooms\":{"
-                "\"join\":{\"!login-test:example.invalid\":{\"state\":{\"events\":[]},"
-                "\"timeline\":{\"events\":[]}}},"
-                "\"invite\":{\"!invite-test:example.invalid\":{\"invite_state\":{\"events\":["
-                "{\"type\":\"m.room.member\",\"sender\":\"@alice:example.invalid\","
-                "\"state_key\":\"@matrix-login-test:example.invalid\","
-                "\"content\":{\"membership\":\"invite\"}},"
-                "{\"type\":\"m.room.name\",\"state_key\":\"\","
-                "\"content\":{\"name\":\"Matrix invitation test\"}}]}}},\"leave\":{}},"
-                "\"to_device\":{\"events\":[]},\"presence\":{\"events\":[]},"
-                "\"device_lists\":{\"changed\":[],\"left\":[]}}");
+        if (path.startsWith(QStringLiteral("/_matrix/client/v3/sync"))) {
+            const int syncResponseNumber = ++FSyncResponseCount;
+            QJsonArray timelineEvents;
+            for (int index = 0; index < 128; ++index) {
+                timelineEvents.append(QJsonObject{
+                    {QStringLiteral("type"), QStringLiteral("m.room.message")},
+                    {QStringLiteral("event_id"), QStringLiteral("$ordinary-%1-%2")
+                        .arg(syncResponseNumber).arg(index)},
+                    {QStringLiteral("sender"), QStringLiteral("@alice:example.invalid")},
+                    {QStringLiteral("origin_server_ts"), 1700000000000LL + index},
+                    {QStringLiteral("content"), QJsonObject{
+                        {QStringLiteral("msgtype"), QStringLiteral("m.text")},
+                        {QStringLiteral("body"), QStringLiteral("ordinary test message %1").arg(index)}}}});
+            }
+            timelineEvents.append(QJsonObject{
+                {QStringLiteral("type"), QStringLiteral("m.reaction")},
+                {QStringLiteral("event_id"), QStringLiteral("$reaction-notification")},
+                {QStringLiteral("sender"), QStringLiteral("@alice:example.invalid")},
+                {QStringLiteral("origin_server_ts"), 1700000001000LL},
+                {QStringLiteral("content"), QJsonObject{
+                    {QStringLiteral("m.relates_to"), QJsonObject{
+                        {QStringLiteral("rel_type"), QStringLiteral("m.annotation")},
+                        {QStringLiteral("event_id"), QStringLiteral("$target-event")},
+                        {QStringLiteral("key"), QStringLiteral("👍")}}}}}});
+            const QJsonObject joinedRoom{
+                {QStringLiteral("state"), QJsonObject{{QStringLiteral("events"), QJsonArray{}}}},
+                {QStringLiteral("timeline"), QJsonObject{{QStringLiteral("events"), timelineEvents}}}};
+            const QJsonArray inviteEvents{
+                QJsonObject{{QStringLiteral("type"), QStringLiteral("m.room.member")},
+                    {QStringLiteral("sender"), QStringLiteral("@alice:example.invalid")},
+                    {QStringLiteral("state_key"), QStringLiteral("@matrix-login-test:example.invalid")},
+                    {QStringLiteral("content"), QJsonObject{{QStringLiteral("membership"), QStringLiteral("invite")}}}},
+                QJsonObject{{QStringLiteral("type"), QStringLiteral("m.room.name")},
+                    {QStringLiteral("state_key"), QString()},
+                    {QStringLiteral("content"), QJsonObject{{QStringLiteral("name"), QStringLiteral("Matrix invitation test")}}}}};
+            const QJsonObject invitedRoom{
+                {QStringLiteral("invite_state"), QJsonObject{{QStringLiteral("events"), inviteEvents}}}};
+            return QJsonDocument(QJsonObject{
+                {QStringLiteral("next_batch"), QStringLiteral("test-next-batch")},
+                {QStringLiteral("rooms"), QJsonObject{
+                    {QStringLiteral("join"), QJsonObject{
+                        {QStringLiteral("!login-test:example.invalid"), joinedRoom},
+                        {QStringLiteral("!unopened-room:example.invalid"), joinedRoom}}},
+                    {QStringLiteral("invite"), QJsonObject{{QStringLiteral("!invite-test:example.invalid"), invitedRoom}}},
+                    {QStringLiteral("leave"), QJsonObject{}}}},
+                {QStringLiteral("to_device"), QJsonObject{{QStringLiteral("events"), QJsonArray{}}}},
+                {QStringLiteral("presence"), QJsonObject{{QStringLiteral("events"), QJsonArray{}}}},
+                {QStringLiteral("device_lists"), QJsonObject{
+                    {QStringLiteral("changed"), QJsonArray{}},
+                    {QStringLiteral("left"), QJsonArray{}}}}}).toJson(QJsonDocument::Compact);
+        }
+        if (path.contains(QStringLiteral("/joined_members")))
+            return QJsonDocument(QJsonObject{{QStringLiteral("joined"), QJsonObject{
+                {QStringLiteral("@alice:example.invalid"), QJsonObject{
+                    {QStringLiteral("display_name"), QStringLiteral("Alice")}}},
+                {QStringLiteral("@bob:example.invalid"), QJsonObject{
+                    {QStringLiteral("display_name"), QStringLiteral("Bob")}}}}}})
+                .toJson(QJsonDocument::Compact);
         if (path.startsWith(QStringLiteral("/_matrix/client/v3/keys/query")))
             return QByteArrayLiteral("{\"device_keys\":{},\"failures\":{}}");
         if (path.startsWith(QStringLiteral("/_matrix/client/v3/join/")) ||
@@ -159,6 +286,7 @@ private:
     }
 
     QList<CapturedRequest> FRequests;
+    int FSyncResponseCount = 0;
 };
 
 namespace
@@ -222,6 +350,10 @@ int main(int argc, char **argv)
 
         int successCount = 0;
         int errorCount = 0;
+        int perEventMessageSignalCount = 0;
+        int syncBatchSignalCount = 0;
+        int ordinaryMessageNotificationEvents = 0;
+        int reactionNotificationEvents = 0;
         QString lastLoginError;
         QString loggedInUser;
         QString loggedInDevice;
@@ -236,6 +368,20 @@ int main(int argc, char **argv)
                 invitedRoomId = roomId;
                 inviterId = inviter;
                 invitedRoomName = roomName;
+            });
+        QObject::connect(&network, &MatrixNetwork::notificationEventReceived, &application,
+            [&](const MatrixNotificationEvent &event) {
+                if (event.type == QStringLiteral("m.room.message"))
+                    ++ordinaryMessageNotificationEvents;
+                else if (event.type == QStringLiteral("m.reaction"))
+                    ++reactionNotificationEvents;
+            });
+        QObject::connect(&network, &MatrixNetwork::messageReceived, &application,
+            [&](const BasicMessage &) { ++perEventMessageSignalCount; });
+        QObject::connect(&network, &MatrixNetwork::syncReceived, &application,
+            [&](const QList<MatrixTextEvent> &events) {
+                if (!events.isEmpty())
+                    ++syncBatchSignalCount;
             });
         QObject::connect(&network, &MatrixNetwork::loginSuccessForSession, &application,
             [&](const QString &userId, const QString &, const QString &deviceId, quint64 generation) {
@@ -268,7 +414,8 @@ int main(int argc, char **argv)
             std::cerr << "Observed login error: " << lastLoginError.toStdString() << '\n';
 
         const bool syncProcessed = waitUntil([&]() {
-            return MatrixNetworkTestAccess::initialSyncComplete(network);
+            return MatrixNetworkTestAccess::initialSyncComplete(network) &&
+                !MatrixNetworkTestAccess::syncInFlight(network);
         }, 3000);
         passed &= check(syncProcessed, "successful login processes the initial Matrix sync response");
         bool syncRequested = false;
@@ -276,10 +423,29 @@ int main(int argc, char **argv)
             syncRequested |= path.startsWith(QStringLiteral("/_matrix/client/v3/sync"));
         passed &= check(syncRequested,
             "successful login starts the normal Matrix sync request");
+        const auto joinedMembersRequestCount = [&server]() {
+            const QStringList paths = server.requestPaths();
+            return std::count_if(paths.cbegin(), paths.cend(), [](const QString &path) {
+                return path.contains(QStringLiteral("/joined_members"));
+            });
+        };
+        passed &= check(joinedMembersRequestCount() == 0,
+            "initial sync does not fetch full member lists for unopened rooms");
+        passed &= check(perEventMessageSignalCount == 0 && syncBatchSignalCount == 0,
+            "initial sync persists timeline events without UI per-message or batch signals");
+        passed &= check(MatrixNetworkTestAccess::hasStoredEvent(databaseWorker,
+                QStringLiteral("!login-test:example.invalid"), QStringLiteral("$ordinary-1-127")) &&
+            MatrixNetworkTestAccess::hasStoredEvent(databaseWorker,
+                QStringLiteral("!unopened-room:example.invalid"), QStringLiteral("$ordinary-1-127")),
+            "initial sync stores timeline events for opened and unopened rooms");
 
         const bool inviteDelivered = waitUntil([&]() { return inviteCount > 0; }, 1500);
         passed &= check(inviteDelivered && inviteCount == 1,
             "incoming /sync room invitation emits one user-facing invite signal");
+        passed &= check(ordinaryMessageNotificationEvents == 0,
+            "ordinary timeline messages do not enqueue unused notification callbacks");
+        passed &= check(reactionNotificationEvents > 0,
+            "reaction events retain their user-facing notification callback");
         passed &= check(invitedRoomId == QStringLiteral("!invite-test:example.invalid") &&
             inviterId == QStringLiteral("@alice:example.invalid") &&
             invitedRoomName == QStringLiteral("Matrix invitation test"),
@@ -290,15 +456,131 @@ int main(int argc, char **argv)
                 return request.path.startsWith(QStringLiteral("/_matrix/client/v3/sync"));
             });
         network.sync();
-        const bool duplicateSyncProcessed = waitUntil([&]() {
+        const bool incrementalSyncProcessed = waitUntil([&]() {
             const QList<MatrixLocalApi::CapturedRequest> requests = server.requests();
             return std::count_if(requests.cbegin(), requests.cend(),
                 [](const MatrixLocalApi::CapturedRequest &request) {
                     return request.path.startsWith(QStringLiteral("/_matrix/client/v3/sync"));
-                }) > syncCountBeforeDuplicate;
+                }) > syncCountBeforeDuplicate && !MatrixNetworkTestAccess::syncInFlight(network);
         }, 1500);
-        passed &= check(duplicateSyncProcessed && inviteCount == 1,
-            "repeated sync delivery of the same invite does not prompt again");
+        passed &= check(incrementalSyncProcessed && inviteCount == 1,
+            "incremental sync processes repeated room invitation only once");
+        passed &= check(perEventMessageSignalCount == 0 && syncBatchSignalCount > 0,
+            "incremental sync delivers aggregated UI batches without per-message signals");
+        MatrixLocalApi roomsOnlySyncServer;
+        passed &= check(roomsOnlySyncServer.listen(QHostAddress::LocalHost, 0),
+            "rooms-only sync test server is available");
+        roomsOnlySyncServer.setHoldSyncResponses(true);
+        roomsOnlySyncServer.setHoldRoomMembershipResponses(true);
+        MatrixNetwork roomsOnlySyncProbe;
+        roomsOnlySyncProbe.setServerUrl(QStringLiteral("http://127.0.0.1:%1")
+            .arg(roomsOnlySyncServer.serverPort()));
+        MatrixNetworkTestAccess::configureRoomsOnlySync(roomsOnlySyncProbe);
+        roomsOnlySyncProbe.sync(true);
+        const bool roomsOnlySyncRequestCaptured = waitUntil([&]() {
+            return std::any_of(roomsOnlySyncServer.requests().cbegin(),
+                roomsOnlySyncServer.requests().cend(), [](const MatrixLocalApi::CapturedRequest &request) {
+                    if (!request.path.startsWith(QStringLiteral("/_matrix/client/v3/sync")))
+                        return false;
+                    const QUrlQuery query(QUrl(QStringLiteral("https://example.invalid") + request.path));
+                    const QJsonObject filter = QJsonDocument::fromJson(
+                        query.queryItemValue(QStringLiteral("filter")).toUtf8()).object();
+                    return query.queryItemValue(QStringLiteral("since")) == QStringLiteral("test-next-batch") &&
+                        filter.value(QStringLiteral("room")).toObject()
+                            .value(QStringLiteral("timeline")).toObject()
+                            .value(QStringLiteral("limit")).toInt(-1) == 0 &&
+                        query.queryItemValue(QStringLiteral("full_state")) != QStringLiteral("true");
+                });
+        }, 1500);
+        passed &= check(roomsOnlySyncRequestCaptured,
+            "room-list refresh uses inline zero-timeline incremental state, not full_state");
+        roomsOnlySyncProbe.shutdown();
+
+        const QString activeRoomId = QStringLiteral("!login-test:example.invalid");
+
+        QTemporaryDir memberProfileDirectory;
+        QThread memberDatabaseThread;
+        auto *memberDatabaseWorker = new MatrixDatabaseWorker;
+        memberDatabaseWorker->moveToThread(&memberDatabaseThread);
+        QObject::connect(&memberDatabaseThread, &QThread::finished,
+            memberDatabaseWorker, &QObject::deleteLater);
+        memberDatabaseThread.start();
+        bool memberDatabaseOpened = false;
+        QMetaObject::invokeMethod(memberDatabaseWorker, "openForAccount",
+            Qt::BlockingQueuedConnection, Q_RETURN_ARG(bool, memberDatabaseOpened),
+            Q_ARG(QString, memberProfileDirectory.path()),
+            Q_ARG(QString, QStringLiteral("https://example.invalid")),
+            Q_ARG(QString, QStringLiteral("@member-test:example.invalid")));
+        passed &= check(memberProfileDirectory.isValid() && memberDatabaseOpened,
+            "isolated joined-members database opens");
+
+        MatrixLocalApi memberServer;
+        passed &= check(memberServer.listen(QHostAddress::LocalHost, 0),
+            "isolated joined-members server is available");
+        MatrixNetwork memberProbe;
+        memberProbe.setServerUrl(QStringLiteral("http://127.0.0.1:%1")
+            .arg(memberServer.serverPort()));
+        memberProbe.setDatabaseWorker(memberDatabaseWorker);
+        memberServer.setHoldRoomMembershipResponses(true);
+        MatrixNetworkTestAccess::setAccessToken(memberProbe,
+            QStringLiteral("synthetic-members-token"));
+        MatrixNetworkTestAccess::setRoom(memberProbe, activeRoomId);
+        memberProbe.setActiveRoom(activeRoomId);
+
+        QSemaphore databaseWorkerStarted;
+        QSemaphore releaseDatabaseWorker;
+        std::atomic<bool> databaseWorkerReleased{false};
+        QMetaObject::invokeMethod(memberDatabaseWorker, [&]() {
+            databaseWorkerStarted.release();
+            releaseDatabaseWorker.acquire();
+            databaseWorkerReleased.store(true);
+        }, Qt::QueuedConnection);
+        const bool databaseWorkerBlocked = databaseWorkerStarted.tryAcquire(1, 1000);
+        passed &= check(databaseWorkerBlocked,
+            "isolated database worker can be held for joined-members responsiveness test");
+        int joinedMembersRosterUpdates = 0;
+        bool rosterUpdatedBeforeDatabaseRelease = false;
+        QObject::connect(&memberProbe, &MatrixNetwork::roomMetadataChanged, &application,
+            [&](const ProtocolRoom &room) {
+                if (room.id == activeRoomId && room.members.size() == 2) {
+                    ++joinedMembersRosterUpdates;
+                    rosterUpdatedBeforeDatabaseRelease = !databaseWorkerReleased.load();
+                }
+            });
+        bool joinedMembersResponseServed = false;
+        memberServer.requestReceived = [&joinedMembersResponseServed](const QString &path) {
+            if (path.contains(QStringLiteral("/joined_members")))
+                joinedMembersResponseServed = true;
+        };
+        std::thread databaseWorkerReleaser([&]() {
+            std::this_thread::sleep_for(std::chrono::seconds(2));
+            releaseDatabaseWorker.release();
+        });
+        memberProbe.requestJoinedMembers(activeRoomId);
+        const bool membersCompletedWhileWorkerBlocked = waitUntil([&]() {
+            return joinedMembersResponseServed && joinedMembersRosterUpdates > 0 &&
+                !databaseWorkerReleased.load();
+        }, 1200);
+        databaseWorkerReleaser.join();
+        passed &= check(membersCompletedWhileWorkerBlocked && rosterUpdatedBeforeDatabaseRelease,
+            "joined-members roster update completes before its blocked database worker is released");
+        const QStringList memberRequestPaths = memberServer.requestPaths();
+        const bool memberProbeStartedSync = std::any_of(memberRequestPaths.cbegin(),
+            memberRequestPaths.cend(), [](const QString &path) {
+                return path.startsWith(QStringLiteral("/_matrix/client/v3/sync"));
+            });
+        passed &= check(!memberProbeStartedSync,
+            "isolated joined-members request does not start a sync");
+        passed &= check(MatrixNetworkTestAccess::hasStoredMembers(memberDatabaseWorker,
+                activeRoomId,
+                {QStringLiteral("@alice:example.invalid"), QStringLiteral("@bob:example.invalid")}),
+            "joined members persist after asynchronous database work completes");
+        memberProbe.shutdown();
+        QMetaObject::invokeMethod(memberDatabaseWorker, [memberDatabaseWorker]() {
+            memberDatabaseWorker->close();
+        }, Qt::BlockingQueuedConnection);
+        memberDatabaseThread.quit();
+        memberDatabaseThread.wait();
 
         const QString roomId = QStringLiteral("!login-test:example.invalid");
         const QString transactionId = QStringLiteral("m_local_send_01");

@@ -100,6 +100,8 @@ public:
     }
     virtual void setActiveConversation(const ConversationId &conversationId) const
     { (void)conversationId; }
+    virtual void loadConversationMembers(const ConversationId &conversationId) const
+    { (void)conversationId; }
     virtual void loadConversationAvatars(const ConversationId &conversationId) const
     { (void)conversationId; }
     virtual void loadUserAvatar(const ConversationId &conversationId, const UserId &userId) const

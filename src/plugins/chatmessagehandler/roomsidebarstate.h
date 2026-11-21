@@ -13,6 +13,11 @@
 
 namespace RoomSidebarState {
 
+inline bool shouldLoadMembers(int memberCount, int loadedMemberCount)
+{
+	return loadedMemberCount == 0 && memberCount != 0;
+}
+
 inline QByteArray snapshot(const ProtocolRoom &ARoom, const QString &AAccountId)
 {
 	QList<ProtocolRosterEntry> members = ARoom.members;

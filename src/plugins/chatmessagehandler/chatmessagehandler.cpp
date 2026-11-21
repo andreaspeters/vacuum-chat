@@ -2188,6 +2188,12 @@ void ChatMessageHandler::setupRoomSidebar(IChatWindow *AWindow, IProtocolMessagi
 	const ProtocolRoom currentRoom = roster->room(AWindow->conversationId());
 	if (currentRoom.id.isEmpty())
 		return;
+	if (RoomSidebarState::shouldLoadMembers(currentRoom.memberCount,
+		currentRoom.members.size())) {
+		AMessaging->loadConversationMembers(AWindow->conversationId());
+		AWindow->setSidebarWidget(nullptr);
+		return;
+	}
 	const QString accountId = AMessaging->streamId();
 	const QByteArray memberSnapshot = RoomSidebarState::snapshot(currentRoom, accountId);
 	QWidget *existingSidebar = nullptr;

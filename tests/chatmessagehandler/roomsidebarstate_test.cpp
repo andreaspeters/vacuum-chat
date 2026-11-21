@@ -12,6 +12,15 @@ static bool check(bool condition, const char *description)
 
 int main()
 {
+	bool passed = check(RoomSidebarState::shouldLoadMembers(17, 0),
+		"known nonempty room defers its full member list until the sidebar needs it");
+	passed &= check(RoomSidebarState::shouldLoadMembers(-1, 0),
+		"unknown member count still loads members on explicit sidebar demand");
+	passed &= check(!RoomSidebarState::shouldLoadMembers(0, 0),
+		"known empty room does not request a joined-member list");
+	passed &= check(!RoomSidebarState::shouldLoadMembers(17, 2),
+		"already loaded members do not trigger a redundant request");
+
 	ProtocolRoom room;
 	room.id = QStringLiteral("!room:test");
 	room.name = QStringLiteral("Room");
@@ -29,7 +38,8 @@ int main()
 	room.lastMessage = QStringLiteral("new chat message");
 	room.notificationCount = 3;
 	room.members[0].presence = QStringLiteral("online");
-	bool passed = check(initialSnapshot == RoomSidebarState::snapshot(room, QStringLiteral("account")),
+	room.memberCount = 17;
+	passed &= check(initialSnapshot == RoomSidebarState::snapshot(room, QStringLiteral("account")),
 		"non-sidebar sync changes do not invalidate the member sidebar");
 
 	ProtocolRosterEntry bob;

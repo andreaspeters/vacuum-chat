@@ -49,6 +49,12 @@ bool MatrixDatabaseWorker::updateTimelineEvents(const QList<MatrixTimelineEvent>
     return FDatabase.updateTimelineEvents(events);
 }
 
+bool MatrixDatabaseWorker::saveRoomMembers(const QString &roomId,
+                                           const QList<MatrixStoredMember> &members)
+{
+    return FDatabase.saveRoomMembers(roomId, members);
+}
+
 bool MatrixDatabaseWorker::loadMegolmSessions(const QStringList &sessionIds,
                                               QMap<QString, QString> &roomIds,
                                               QMap<QString, QString> &senderKeys,

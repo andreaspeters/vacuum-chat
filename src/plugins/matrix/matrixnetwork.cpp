@@ -1153,8 +1153,8 @@ void MatrixNetwork::sync(bool roomsOnly)
 		emit syncError("Access token missing for sync");
 		return;
 	}
-	if (FSyncFilterId.isEmpty() && !FFilterCreationAttempted) {
-		createSyncFilter(roomsOnly);
+	if (FSyncFilterId.isEmpty() && !FFilterCreationAttempted && !roomsOnly) {
+		createSyncFilter(false);
 		return;
 	}
 	
@@ -1182,13 +1182,10 @@ void MatrixNetwork::sync(bool roomsOnly)
 			{QStringLiteral("account_data"), QJsonObject{{QStringLiteral("limit"), 0}}},
 			{QStringLiteral("include_leave"), false}}}};
 	syncPath += QStringLiteral("&set_presence=online&use_state_after=true&filter=");
-	if (!FSyncFilterId.isEmpty())
+	if (!FSyncFilterId.isEmpty() && !roomsOnly)
 		syncPath += QUrl::toPercentEncoding(FSyncFilterId);
 	else
 		syncPath += QUrl::toPercentEncoding(QJsonDocument(syncFilter).toJson(QJsonDocument::Compact));
-	if (roomsOnly) {
-		syncPath += QStringLiteral("&full_state=true");
-	}
 	if (!FSyncToken.isEmpty()) {
 		syncPath += QString("&since=%1").arg(QUrl::toPercentEncoding(FSyncToken));
 	}
@@ -2152,7 +2149,7 @@ void MatrixNetwork::requestJoinedMembers(const QString &roomId, bool forceRefres
 	reply->setProperty("roomMetadataRefresh", forceRefresh);
 }
 
-void MatrixNetwork::emitRoomMetadataUpdate(const QString &roomId)
+void MatrixNetwork::emitRoomMetadataUpdate(const QString &roomId, bool refreshVerificationStates)
 {
 	if (!FRooms.contains(roomId))
 		return;
@@ -2173,19 +2170,21 @@ void MatrixNetwork::emitRoomMetadataUpdate(const QString &roomId)
 		if (!member.id.isEmpty())
 			memberIds.append(member.id);
 	memberIds.removeDuplicates();
-	QMap<QString, bool> verificationStates;
-	bool verificationStatesLoaded = false;
-	runDatabase([&](MatrixDatabase &database) {
-		verificationStatesLoaded = database.userVerificationStates(memberIds, verificationStates);
-	});
-	for (ProtocolRosterEntry &member : updated.members) {
-		member.hasVerificationState = verificationStatesLoaded;
-		member.isVerified = verificationStates.value(member.id, false);
+	if (refreshVerificationStates) {
+		QMap<QString, bool> verificationStates;
+		bool verificationStatesLoaded = false;
+		runDatabase([&](MatrixDatabase &database) {
+			verificationStatesLoaded = database.userVerificationStates(memberIds, verificationStates);
+		});
+		for (ProtocolRosterEntry &member : updated.members) {
+			member.hasVerificationState = verificationStatesLoaded;
+			member.isVerified = verificationStates.value(member.id, false);
+		}
 	}
 	emit roomMetadataChanged(updated);
 }
 
-void MatrixNetwork::emitRosterSnapshot()
+void MatrixNetwork::emitRosterSnapshot(bool refreshVerificationStates)
 {
 	QList<ProtocolRoom> currentRooms;
 	QStringList memberIds;
@@ -2204,13 +2203,17 @@ void MatrixNetwork::emitRosterSnapshot()
 	memberIds.removeDuplicates();
 	QMap<QString, bool> verificationStates;
 	bool verificationStatesLoaded = false;
-	runDatabase([&](MatrixDatabase &database) {
-		verificationStatesLoaded = database.userVerificationStates(memberIds, verificationStates);
-	});
+	if (refreshVerificationStates) {
+		runDatabase([&](MatrixDatabase &database) {
+			verificationStatesLoaded = database.userVerificationStates(memberIds, verificationStates);
+		});
+	}
 	for (auto roomIt = FRooms.begin(); roomIt != FRooms.end(); ++roomIt) {
-		for (ProtocolRosterEntry &member : roomIt->members) {
-			member.hasVerificationState = verificationStatesLoaded;
-			member.isVerified = verificationStates.value(member.id, false);
+		if (refreshVerificationStates) {
+			for (ProtocolRosterEntry &member : roomIt->members) {
+				member.hasVerificationState = verificationStatesLoaded;
+				member.isVerified = verificationStates.value(member.id, false);
+			}
 		}
 		currentRooms.append(roomIt.value());
 	}
@@ -2968,7 +2971,12 @@ void MatrixNetwork::onReplyFinished(QNetworkReply *reply)
 				.value(QStringLiteral("joined")).toObject();
 			if (FRooms.contains(roomId)) {
 				ProtocolRoom &room = FRooms[roomId];
+				QHash<QString, QPair<bool, bool>> verificationStateByUser;
+				for (const ProtocolRosterEntry &member : room.members)
+					verificationStateByUser.insert(member.id,
+						qMakePair(member.hasVerificationState, member.isVerified));
 				room.members.clear();
+				QList<MatrixStoredMember> membersToPersist;
 				for (auto memberIt = joined.constBegin(); memberIt != joined.constEnd(); ++memberIt) {
 					const QJsonObject memberObject = memberIt.value().toObject();
 					ProtocolRosterEntry member;
@@ -2977,22 +2985,35 @@ void MatrixNetwork::onReplyFinished(QNetworkReply *reply)
 					member.avatarUrl = memberObject.value(QStringLiteral("avatar_url")).toString();
 					member.presence = QStringLiteral("unknown");
 					member.isValid = true;
+					const auto verification = verificationStateByUser.constFind(member.id);
+					if (verification != verificationStateByUser.constEnd()) {
+						member.hasVerificationState = verification->first;
+						member.isVerified = verification->second;
+					}
 					room.members.append(member);
-					bool memberSaved = false;
-					runDatabase([&](MatrixDatabase &database) {
-						memberSaved = database.saveRoomMember(roomId, member.id, QStringLiteral("join"),
-							member.name, member.avatarUrl, QString());
-					});
-					if (!memberSaved)
-						qWarning() << "Failed to persist joined Matrix member" << roomId << member.id;
+					MatrixStoredMember storedMember;
+					storedMember.userId = member.id;
+					storedMember.membership = QStringLiteral("join");
+					storedMember.displayName = member.name;
+					storedMember.avatarUrl = member.avatarUrl;
+					membersToPersist.append(storedMember);
+				}
+				if (auto *worker = qobject_cast<MatrixDatabaseWorker *>(FDatabaseWorker)) {
+					const bool queued = QMetaObject::invokeMethod(worker,
+						[worker, roomId, membersToPersist]() {
+							if (!worker->saveRoomMembers(roomId, membersToPersist))
+								qWarning() << "Failed to persist joined Matrix members" << roomId
+									<< membersToPersist.size();
+						}, Qt::QueuedConnection);
+					if (!queued)
+						qWarning() << "Failed to queue joined Matrix member persistence" << roomId;
 				}
 				if (room.memberCount < 0 || room.memberCount != room.members.size())
 					room.memberCount = room.members.size();
 				FJoinedMembersLoaded.insert(roomId);
-				if (reply->property("roomMetadataRefresh").toBool())
-					emitRoomMetadataUpdate(roomId);
-				else
-					emitRosterSnapshot();
+				if (reply->property("roomMetadataRefresh").toBool() ||
+					roomId == FActiveRoomId)
+					emitRoomMetadataUpdate(roomId, false);
 			}
 		} else {
 			qWarning() << "Matrix joined-members request failed:" << reply->errorString()
@@ -5357,13 +5378,24 @@ void MatrixNetwork::onSyncFinished(QNetworkReply *reply)
 			qWarning() << "Failed to persist Matrix room state" << roomId;
 		if (room.name.isEmpty())
 			requestRoomName(roomId);
-		requestJoinedMembers(roomId);
+		if (roomId == FActiveRoomId)
+			requestJoinedMembers(roomId);
 		const QJsonArray eventsArray = timeline.value("events").toArray();
 
 		for (const QJsonValue &eventVal : eventsArray) {
 			const QJsonObject event = eventVal.toObject();
 
 			QString eventType = event.value("type").toString();
+			const bool canCreateUserNotification =
+				eventType == QStringLiteral("m.reaction") ||
+			eventType == QStringLiteral("m.call.invite") ||
+			eventType == QStringLiteral("m.call.member") ||
+			eventType == QStringLiteral("m.room.member") ||
+			eventType == QStringLiteral("m.key.verification.request") ||
+			eventType == QStringLiteral("m.key.verification.done") ||
+			eventType == QStringLiteral("m.key.verification.mac") ||
+			eventType == QStringLiteral("m.room.redaction");
+		if (canCreateUserNotification) {
 			MatrixNotificationEvent notificationEvent;
 			notificationEvent.eventId = event.value(QStringLiteral("event_id")).toString();
 			notificationEvent.roomId = roomId;
@@ -5373,8 +5405,9 @@ void MatrixNetwork::onSyncFinished(QNetworkReply *reply)
 			notificationEvent.content = event.value(QStringLiteral("content")).toObject();
 			notificationEvent.timestamp = event.value(QStringLiteral("origin_server_ts")).toVariant().toLongLong();
 			notificationEvent.historical = !FInitialSyncComplete;
-		if (!notificationEvent.eventId.isEmpty())
-			emit notificationEventReceived(notificationEvent);
+			if (!notificationEvent.eventId.isEmpty())
+				emit notificationEventReceived(notificationEvent);
+		}
 			const bool wasEncrypted = eventType == QStringLiteral("m.room.encrypted");
 			const QString outerEventType = eventType;
 			const QJsonObject eventContent = event.value("content").toObject();
@@ -5689,7 +5722,7 @@ void MatrixNetwork::onSyncFinished(QNetworkReply *reply)
 			}
 
 			if ((!transactionId.isEmpty() && replacePendingEvent(roomId, transactionId, matrixEvent)) ||
-				mergeMessageEvent(matrixEvent))
+				mergeMessageEvent(matrixEvent, false, true))
 				events.append(matrixEvent);
 		}
 	}
@@ -6190,7 +6223,8 @@ QList<MatrixTextEvent> MatrixNetwork::historyBackfill(const QString &roomId, int
 	return result;
 }
 
-bool MatrixNetwork::mergeMessageEvent(const MatrixTextEvent &event, bool fromHistoryBackfill)
+bool MatrixNetwork::mergeMessageEvent(const MatrixTextEvent &event, bool fromHistoryBackfill,
+	bool deferUiDelivery)
 {
 	if (event.eventId.isEmpty())
 		return false;
@@ -6202,7 +6236,7 @@ bool MatrixNetwork::mergeMessageEvent(const MatrixTextEvent &event, bool fromHis
 	std::sort(history.begin(), history.end(), matrixNetworkTextEventLess);
 
 	// A history snapshot replays every event to the UI; new events should be incremental.
-	if (!fromHistoryBackfill)
+	if (!fromHistoryBackfill && !deferUiDelivery)
 		emit messageReceived(event.toBasicMessage());
 	return true;
 }

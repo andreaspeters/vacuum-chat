@@ -1233,6 +1233,36 @@ bool MatrixDatabase::saveRoomMember(const QString &roomId, const QString &userId
     return query.exec();
 }
 
+bool MatrixDatabase::saveRoomMembers(const QString &roomId,
+                                     const QList<MatrixStoredMember> &members)
+{
+    if (!FisOpen || !FDatabase.isOpen() || roomId.isEmpty())
+        return false;
+    if (members.isEmpty())
+        return true;
+
+    const bool ownsTransaction = !FSyncMetadataTransactionActive;
+    if (ownsTransaction && !FDatabase.transaction())
+        return false;
+
+    bool success = true;
+    for (const MatrixStoredMember &member : members) {
+        if (member.userId.isEmpty() ||
+            !saveRoomMember(roomId, member.userId, member.membership,
+                member.displayName, member.avatarUrl, QString())) {
+            success = false;
+            break;
+        }
+    }
+    if (ownsTransaction) {
+        if (success)
+            success = FDatabase.commit();
+        if (!success)
+            FDatabase.rollback();
+    }
+    return success;
+}
+
 bool MatrixDatabase::saveDirectRooms(const QSet<QString> &roomIds)
 {
     if (!FDatabase.transaction())

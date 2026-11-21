@@ -289,9 +289,10 @@ private:
 	void saveMessageHistory(const QString &roomId) const;
 	void saveSyncHistoryBackup(const QList<MatrixTextEvent> &events) const;
 	void restorePersistedRooms();
-	void emitRosterSnapshot();
-	void emitRoomMetadataUpdate(const QString &roomId);
-	bool mergeMessageEvent(const MatrixTextEvent &event, bool fromHistoryBackfill = false);
+	void emitRosterSnapshot(bool refreshVerificationStates = true);
+	void emitRoomMetadataUpdate(const QString &roomId, bool refreshVerificationStates = true);
+	bool mergeMessageEvent(const MatrixTextEvent &event, bool fromHistoryBackfill = false,
+		bool deferUiDelivery = false);
 	void dispatchRetriedEncryptedEvents(const QList<MatrixTextEvent> &events);
 	bool replacePendingEvent(const QString &roomId, const QString &transactionId,
 		const MatrixTextEvent &serverEvent);

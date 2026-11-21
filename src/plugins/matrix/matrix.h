@@ -129,6 +129,7 @@ public:
 		const BasicMessage &beforeMessage, int limit, QObject *callbackContext,
 		ProtocolHistoryPageCallback callback) override;
 	virtual void setActiveConversation(const QString &conversationId) const override;
+	virtual void loadConversationMembers(const QString &conversationId) const override;
 	virtual void loadConversationAvatars(const QString &conversationId) const override;
 	virtual void loadUserAvatar(const QString &conversationId, const QString &userId) const override;
 	virtual void loadConversationMedia(const BasicMessage &message) const override;
